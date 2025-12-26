@@ -120,7 +120,13 @@
       "Bash(git reset:*)",
       "Bash(git add:*)",
       "Bash(git commit -m \"$(cat <<''EOF''\nAdd complete App Plane microservices platform\n\n- App Plane services: CNS Service, Customer Portal, Backstage Portal, Dashboard\n- CNS Dashboard with sidebar menu schema and React Admin components\n- Docker Compose configuration for all services\n- Database migrations and init scripts\n- Temporal workflow configuration\n- Shared monitoring setup\n- Claude AI agent configurations\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n\nCo-Authored-By: Claude <noreply@anthropic.com>\nEOF\n)\")",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(git rm:*)",
+      "Bash(cmd /c \"rename arc-saas\\.git git.bak 2>&1\")",
+      "Bash(cmd /c \"ren E:\\Work\\Ananta-Platform-Saas\\arc-saas\\.git git.bak\")",
+      "Bash(cmd /c \"attrib -h E:\\Work\\Ananta-Platform-Saas\\arc-saas\\.git && ren E:\\Work\\Ananta-Platform-Saas\\arc-saas\\.git git.bak\")",
+      "Bash(cmd /c \"move /Y E:\\Work\\Ananta-Platform-Saas\\arc-saas\\.git E:\\Work\\Ananta-Platform-Saas\\arc-saas\\git.bak 2>&1\")",
+      "Bash(git commit:*)"
     ],
     "deny": [],
     "ask": []
