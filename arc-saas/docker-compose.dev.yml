@@ -1,0 +1,218 @@
+version: "3.8"
+
+# =============================================================================
+# ARC SaaS Development Environment with Hot Reload (Bun)
+# =============================================================================
+#
+# Start:  docker-compose -f docker-compose.dev.yml up -d
+# Logs:   docker-compose -f docker-compose.dev.yml logs -f
+# Stop:   docker-compose -f docker-compose.dev.yml down
+#
+# =============================================================================
+
+services:
+  # ===========================================================================
+  # Core Infrastructure
+  # ===========================================================================
+
+  postgres:
+    image: postgres:15-alpine
+    container_name: arc-saas-postgres-dev
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: arc_saas
+    volumes:
+      - postgres-dev-data:/var/lib/postgresql/data
+      - ./docker/init-db:/docker-entrypoint-initdb.d
+    ports:
+      - "14001:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - arc-saas-dev-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: arc-saas-redis-dev
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-dev-data:/data
+    ports:
+      - "14002:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - arc-saas-dev-network
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:23.0
+    container_name: arc-saas-keycloak-dev
+    command: start-dev
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: postgres
+      KC_DB_PASSWORD: postgres
+      KC_HEALTH_ENABLED: true
+    ports:
+      - "8180:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - arc-saas-dev-network
+
+  # ===========================================================================
+  # Development Services with Hot Reload (Bun)
+  # ===========================================================================
+
+  # Tenant Management Service - Bun with --watch for hot reload
+  tenant-management-service:
+    image: oven/bun:1-alpine
+    container_name: arc-saas-tenant-mgmt-dev
+    working_dir: /app
+    command: sh -c "bun install && bun run build && bun --watch run start"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 14100
+      HOST: 0.0.0.0
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_DATABASE: arc_saas
+      DB_SCHEMA: main
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      TEMPORAL_ADDRESS: shared-temporal:7233
+      TEMPORAL_NAMESPACE: arc-saas
+      JWT_SECRET: arc-saas-jwt-secret-dev
+      KEYCLOAK_ENABLED: "true"
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: ananta-saas
+      NOVU_ENABLED: "true"
+      NOVU_BACKEND_URL: http://arc-saas-novu-api:3000
+      # Lead token generation settings (required for POST /leads)
+      LEAD_KEY_LENGTH: "36"
+      LEAD_TOKEN_EXPIRY: "86400"
+      VALIDATION_TOKEN_EXPIRY: "300000"
+      JWT_ISSUER: http://localhost:8180/realms/ananta-saas
+      JWT_AUDIENCE: cbp-frontend
+    volumes:
+      - ./services/tenant-management-service:/app
+      - tenant-mgmt-node-modules:/app/node_modules
+    ports:
+      - "14100:14100"
+    networks:
+      - arc-saas-dev-network
+      - shared-temporal-network
+      - arc-saas-network
+
+  # Temporal Worker Service - Bun with --watch for hot reload
+  temporal-worker-service:
+    image: oven/bun:1-alpine
+    container_name: arc-saas-temporal-worker-dev
+    working_dir: /app
+    command: sh -c "bun install && bun run build && bun --watch run start"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      TEMPORAL_ADDRESS: shared-temporal:7233
+      TEMPORAL_NAMESPACE: arc-saas
+      TEMPORAL_TASK_QUEUE: tenant-provisioning
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_DATABASE: arc_saas
+      DB_SCHEMA: main
+      KEYCLOAK_ENABLED: "true"
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: ananta-saas
+      # Use shared cbp-users realm for Customer Portal users (enables SSO across tenants)
+      USE_CBP_USERS_REALM: "true"
+    volumes:
+      - ./services/temporal-worker-service:/app
+      - temporal-worker-node-modules:/app/node_modules
+    networks:
+      - arc-saas-dev-network
+      - shared-temporal-network
+
+  # Admin App - Bun with Vite dev server (hot reload built-in)
+  admin-app:
+    image: oven/bun:1-alpine
+    container_name: arc-saas-admin-app-dev
+    working_dir: /app
+    command: sh -c "bun install && bun run dev -- --host 0.0.0.0 --port 14200"
+    depends_on:
+      - tenant-management-service
+    environment:
+      NODE_ENV: development
+      VITE_API_URL: http://localhost:14100
+      VITE_KEYCLOAK_URL: http://localhost:8180
+      VITE_KEYCLOAK_REALM: ananta-saas
+      VITE_KEYCLOAK_CLIENT_ID: admin-portal
+    volumes:
+      - ./apps/admin-app:/app
+      - admin-app-node-modules:/app/node_modules
+    ports:
+      - "14200:14200"
+    networks:
+      - arc-saas-dev-network
+
+  # Customer App - Bun with Vite dev server (hot reload built-in)
+  customer-app:
+    image: oven/bun:1-alpine
+    container_name: arc-saas-customer-app-dev
+    working_dir: /app
+    command: sh -c "bun install && bun run dev -- --host 0.0.0.0 --port 14201"
+    depends_on:
+      - tenant-management-service
+    environment:
+      NODE_ENV: development
+      VITE_API_URL: http://localhost:14100
+      VITE_KEYCLOAK_URL: http://localhost:8180
+      VITE_KEYCLOAK_REALM: ananta-saas
+      VITE_KEYCLOAK_CLIENT_ID: customer-portal
+    volumes:
+      - ./apps/customer-app:/app
+      - customer-app-node-modules:/app/node_modules
+    ports:
+      - "14201:14201"
+    networks:
+      - arc-saas-dev-network
+
+volumes:
+  postgres-dev-data:
+  redis-dev-data:
+  tenant-mgmt-node-modules:
+  temporal-worker-node-modules:
+  admin-app-node-modules:
+  customer-app-node-modules:
+
+networks:
+  arc-saas-dev-network:
+    driver: bridge
+    name: arc-saas-dev
+  shared-temporal-network:
+    external: true
+    name: shared-temporal-network
+  arc-saas-network:
+    external: true
+    name: arc-saas

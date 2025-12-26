@@ -1,0 +1,578 @@
+version: "3.8"
+
+# =============================================================================
+# ARC SaaS Development Environment
+# =============================================================================
+#
+# Start everything:     docker-compose up -d
+# Start specific:       docker-compose up -d postgres redis keycloak
+# View logs:            docker-compose logs -f [service]
+# Stop all:             docker-compose down
+# Reset (with data):    docker-compose down -v
+#
+# =============================================================================
+
+services:
+  # ===========================================================================
+  # Core Infrastructure
+  # ===========================================================================
+
+  # PostgreSQL - Main database for all services
+  postgres:
+    image: postgres:15-alpine
+    container_name: arc-saas-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: arc_saas
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/init-db:/docker-entrypoint-initdb.d
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - arc-saas-network
+
+  # Redis - Caching and message broker
+  redis:
+    image: redis:7-alpine
+    container_name: arc-saas-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - arc-saas-network
+
+  # ===========================================================================
+  # Identity Providers
+  # ===========================================================================
+
+  # Keycloak - Self-hosted IdP
+  keycloak:
+    image: quay.io/keycloak/keycloak:23.0
+    container_name: arc-saas-keycloak
+    command: start-dev
+    environment:
+      KEYCLOAK_ADMIN: admin
+      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: postgres
+      KC_DB_PASSWORD: postgres
+      KC_HEALTH_ENABLED: true
+    ports:
+      - "8180:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080;echo -e 'GET /health/ready HTTP/1.1\r\nhost: localhost\r\nConnection: close\r\n\r\n' >&3;if [ $? -eq 0 ]; then echo 'Healthcheck Successful';exit 0;else echo 'Healthcheck Failed';exit 1;fi;"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - arc-saas-network
+
+  # ===========================================================================
+  # Temporal Workflow Engine
+  # ===========================================================================
+  # NOTE: Temporal is now provided by Components Platform V2 (App Plane)
+  # - Temporal Server: localhost:27020 (components-v2-temporal)
+  # - Temporal UI: localhost:27021
+  # - Temporal DB: localhost:27030 (components-v2-temporal-postgres)
+  #
+  # The arc-saas namespace is created by app-plane/temporal/init-namespaces.sh
+  #
+  # To use standalone Temporal for Control Plane only, uncomment the services below.
+  # ===========================================================================
+
+  # # PostgreSQL for Temporal (separate from app DB)
+  # temporal-postgresql:
+  #   image: postgres:15-alpine
+  #   container_name: arc-saas-temporal-postgres
+  #   environment:
+  #     POSTGRES_USER: temporal
+  #     POSTGRES_PASSWORD: temporal
+  #     POSTGRES_DB: temporal
+  #   volumes:
+  #     - temporal-postgres-data:/var/lib/postgresql/data
+  #   ports:
+  #     - "5433:5432"
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U temporal"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 5
+  #   networks:
+  #     - arc-saas-network
+
+  # # Temporal Server
+  # temporal:
+  #   image: temporalio/auto-setup:1.24.2
+  #   container_name: arc-saas-temporal
+  #   depends_on:
+  #     temporal-postgresql:
+  #       condition: service_healthy
+  #   environment:
+  #     - DB=postgres12
+  #     - DB_PORT=5432
+  #     - POSTGRES_USER=temporal
+  #     - POSTGRES_PWD=temporal
+  #     - POSTGRES_SEEDS=temporal-postgresql
+  #     - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+  #     - ENABLE_ES=false
+  #   ports:
+  #     - "7233:7233"
+  #   volumes:
+  #     - ./temporal-config:/etc/temporal/config/dynamicconfig
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "tctl cluster health || exit 1"]
+  #     interval: 10s
+  #     timeout: 10s
+  #     retries: 15
+  #     start_period: 90s
+  #   networks:
+  #     - arc-saas-network
+
+  # # Temporal Web UI
+  # temporal-ui:
+  #   image: temporalio/ui:2.26.2
+  #   container_name: arc-saas-temporal-ui
+  #   depends_on:
+  #     - temporal
+  #   environment:
+  #     - TEMPORAL_ADDRESS=temporal:7233
+  #     - TEMPORAL_CORS_ORIGINS=http://localhost:3000,http://localhost:8080
+  #     - TEMPORAL_UI_PORT=8080
+  #   ports:
+  #     - "8088:8080"
+  #   networks:
+  #     - arc-saas-network
+
+  # ===========================================================================
+  # Notifications (Novu - Self-hosted)
+  # ===========================================================================
+
+  # MongoDB for Novu
+  novu-mongodb:
+    image: mongo:6
+    container_name: arc-saas-novu-mongo
+    volumes:
+      - novu-mongo-data:/data/db
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - arc-saas-network
+
+  # Redis for Novu
+  novu-redis:
+    image: redis:7-alpine
+    container_name: arc-saas-novu-redis
+    volumes:
+      - novu-redis-data:/data
+    ports:
+      - "6380:6379"
+    networks:
+      - arc-saas-network
+
+  # Novu API (latest)
+  novu-api:
+    image: ghcr.io/novuhq/novu/api:latest
+    container_name: arc-saas-novu-api
+    depends_on:
+      - novu-mongodb
+      - novu-redis
+      - minio
+    environment:
+      NODE_ENV: production
+      API_ROOT_URL: http://localhost:13100
+      DISABLE_USER_REGISTRATION: "false"
+      PORT: 3000
+      FRONT_BASE_URL: http://localhost:14200
+      WIDGET_BASE_URL: http://localhost:14200
+      GLOBAL_CONTEXT_PATH: ""
+      MONGO_URL: mongodb://novu-mongodb:27017/novu-db
+      REDIS_HOST: novu-redis
+      REDIS_PORT: 6379
+      REDIS_CACHE_SERVICE_HOST: novu-redis
+      REDIS_CACHE_SERVICE_PORT: 6379
+      S3_LOCAL_STACK: http://minio:9000
+      S3_BUCKET_NAME: novu-storage
+      S3_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin123
+      JWT_SECRET: your-jwt-secret-change-in-production
+      STORE_ENCRYPTION_KEY: novuencryptionkey32charslong1234
+      NOVU_SECRET_KEY: novu_secret_key_for_arc_saas
+    ports:
+      - "13100:3000"
+    networks:
+      - arc-saas-network
+
+  # Novu WebSocket (latest)
+  novu-ws:
+    image: ghcr.io/novuhq/novu/ws:latest
+    container_name: arc-saas-novu-ws
+    depends_on:
+      - novu-mongodb
+      - novu-redis
+    environment:
+      NODE_ENV: production
+      PORT: 3002
+      MONGO_URL: mongodb://novu-mongodb:27017/novu-db
+      REDIS_HOST: novu-redis
+      REDIS_PORT: 6379
+      JWT_SECRET: your-jwt-secret-change-in-production
+    ports:
+      - "13101:3002"
+    networks:
+      - arc-saas-network
+
+  # Novu Worker (latest)
+  novu-worker:
+    image: ghcr.io/novuhq/novu/worker:latest
+    container_name: arc-saas-novu-worker
+    depends_on:
+      - novu-mongodb
+      - novu-redis
+      - novu-api
+    environment:
+      NODE_ENV: production
+      MONGO_URL: mongodb://novu-mongodb:27017/novu-db
+      REDIS_HOST: novu-redis
+      REDIS_PORT: 6379
+      REDIS_CACHE_SERVICE_HOST: novu-redis
+      REDIS_CACHE_SERVICE_PORT: 6379
+      JWT_SECRET: your-jwt-secret-change-in-production
+      STORE_ENCRYPTION_KEY: novuencryptionkey32charslong1234
+      NOVU_SECRET_KEY: novu_secret_key_for_arc_saas
+      API_ROOT_URL: http://novu-api:3000
+    networks:
+      - arc-saas-network
+
+  # Novu Dashboard (latest)
+  novu-web:
+    image: ghcr.io/novuhq/novu/web:latest
+    container_name: arc-saas-novu-web
+    depends_on:
+      - novu-api
+      - novu-ws
+    environment:
+      # React app environment variables
+      REACT_APP_API_URL: http://localhost:13100
+      REACT_APP_WS_URL: http://localhost:13101
+      REACT_APP_WIDGET_EMBED_PATH: http://localhost:13100/embed.umd.min.js
+      REACT_APP_NOVU_APP_ID: arc-saas
+      # Self-hosted mode - disable external services
+      REACT_APP_LAUNCH_DARKLY_CLIENT_SIDE_ID: ""
+      REACT_APP_SEGMENT_KEY: ""
+      REACT_APP_HUBSPOT_EMBED: ""
+      REACT_APP_INTERCOM_APP_ID: ""
+      # API URL for server-side
+      API_ROOT_URL: http://novu-api:3000
+    ports:
+      - "14200:4200"
+    networks:
+      - arc-saas-network
+
+  # ===========================================================================
+  # Observability
+  # ===========================================================================
+
+  # ===========================================================================
+  # Object Storage (S3-compatible)
+  # ===========================================================================
+
+  # MinIO - S3-compatible object storage for tenant files
+  minio:
+    image: minio/minio:latest
+    container_name: arc-saas-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin123
+    volumes:
+      - minio-data:/data
+    ports:
+      - "14040:9000"   # S3 API (14040 externally to avoid conflicts)
+      - "14041:9001"   # Web Console (14041 externally to avoid conflicts)
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - arc-saas-network
+
+  # MinIO Client - Initialize default buckets
+  minio-init:
+    image: minio/mc:latest
+    container_name: arc-saas-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set myminio http://minio:9000 minioadmin minioadmin123;
+      mc mb myminio/arc-saas-tenants --ignore-existing;
+      mc mb myminio/arc-saas-assets --ignore-existing;
+      mc mb myminio/arc-saas-backups --ignore-existing;
+      mc mb myminio/novu-storage --ignore-existing;
+      mc anonymous set download myminio/arc-saas-assets;
+      echo 'MinIO buckets initialized successfully';
+      exit 0;
+      "
+    networks:
+      - arc-saas-network
+
+  # ===========================================================================
+  # Observability
+  # ===========================================================================
+
+  # Jaeger - Distributed Tracing
+  jaeger:
+    image: jaegertracing/all-in-one:1.53
+    container_name: arc-saas-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: true
+    ports:
+      - "5775:5775/udp"   # Agent zipkin thrift compact
+      - "6831:6831/udp"   # Agent jaeger thrift compact
+      - "6832:6832/udp"   # Agent jaeger thrift binary
+      - "5778:5778"       # Agent config HTTP
+      - "16686:16686"     # Query frontend (UI)
+      - "14268:14268"     # Collector HTTP
+      - "14250:14250"     # Collector gRPC
+      - "4317:4317"       # OTLP gRPC
+      - "4318:4318"       # OTLP HTTP
+    networks:
+      - arc-saas-network
+
+  # ===========================================================================
+  # ARC SaaS Services (for production-like testing)
+  # ===========================================================================
+
+  # Tenant Management Service (Control Plane API)
+  tenant-management-service:
+    build:
+      context: ./services/tenant-management-service
+      dockerfile: Dockerfile
+    container_name: arc-saas-tenant-mgmt
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 14000
+      HOST: 0.0.0.0
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_DATABASE: arc_saas
+      DB_SCHEMA: main
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      TEMPORAL_ADDRESS: ${TEMPORAL_ADDRESS:-shared-temporal:7233}
+      TEMPORAL_NAMESPACE: arc-saas
+      JWT_SECRET: arc-saas-jwt-secret-change-in-production
+      JWT_ISSUER: http://localhost:8180/realms/ananta-saas
+      JWT_AUDIENCE: cbp-frontend
+      LEAD_TOKEN_EXPIRY: "86400"
+      LEAD_KEY_LENGTH: "36"
+      VALIDATION_TOKEN_EXPIRY: "300000"
+      KEYCLOAK_ENABLED: "true"
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: ananta-saas
+      NOVU_ENABLED: "true"
+      NOVU_API_KEY: ${NOVU_API_KEY:-}
+      NOVU_BACKEND_URL: http://novu-api:3000
+    ports:
+      - "14000:14000"
+    networks:
+      - arc-saas-network
+      - shared-temporal-network
+
+  # Subscription Service
+  subscription-service:
+    build:
+      context: ./services/subscription-service
+      dockerfile: Dockerfile
+    container_name: arc-saas-subscription
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      PORT: 3002
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_DATABASE: arc_saas
+      DB_SCHEMA: subscription
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+    ports:
+      - "3002:3002"
+    volumes:
+      - ./services/subscription-service:/app
+      - /app/node_modules
+    networks:
+      - arc-saas-network
+    profiles:
+      - services
+
+  # Temporal Worker Service
+  # NOTE: Connects to Components V2 Temporal (components-v2-temporal:7233)
+  temporal-worker-service:
+    build:
+      context: ./services/temporal-worker-service
+      dockerfile: Dockerfile
+    container_name: arc-saas-temporal-worker
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      NODE_ENV: development
+      TEMPORAL_ADDRESS: ${TEMPORAL_ADDRESS:-shared-temporal:7233}
+      TEMPORAL_NAMESPACE: arc-saas
+      TEMPORAL_TASK_QUEUE: tenant-provisioning
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_DATABASE: arc_saas
+      DB_SCHEMA: main
+      S3_ENDPOINT: http://minio:9000
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: minioadmin
+      AWS_SECRET_ACCESS_KEY: minioadmin123
+      KEYCLOAK_ENABLED: "true"
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: ananta-saas
+      NOVU_ENABLED: "true"
+      NOVU_BACKEND_URL: http://novu-api:3000
+      OPENTELEMETRY_HOST: jaeger
+      OPENTELEMETRY_PORT: 6832
+      APP_PLANE_WEBHOOK_URL: ${APP_PLANE_WEBHOOK_URL:-http://webhook-bridge:27600}
+      APP_PLANE_WEBHOOK_SECRET: ${APP_PLANE_WEBHOOK_SECRET:-your-webhook-secret}
+    networks:
+      - arc-saas-network
+      - shared-temporal-network
+
+  # Admin Portal (Control Plane UI)
+  admin-app:
+    build:
+      context: ./apps/admin-app
+      dockerfile: Dockerfile
+    container_name: arc-saas-admin-app
+    depends_on:
+      - tenant-management-service
+    environment:
+      VITE_API_URL: http://localhost:14000
+      VITE_KEYCLOAK_URL: http://localhost:8180
+      VITE_KEYCLOAK_REALM: ananta-saas
+      VITE_KEYCLOAK_CLIENT_ID: admin-portal
+    ports:
+      - "27555:80"
+    networks:
+      - arc-saas-network
+
+  # Customer Portal (Tenant Self-Service UI) - Legacy
+  customer-app:
+    build:
+      context: ./apps/customer-app
+      dockerfile: Dockerfile
+    container_name: arc-saas-customer-app
+    depends_on:
+      - tenant-management-service
+    environment:
+      VITE_API_URL: http://localhost:14000
+      VITE_KEYCLOAK_URL: http://localhost:8180
+      VITE_KEYCLOAK_REALM: ananta-saas
+      VITE_KEYCLOAK_CLIENT_ID: customer-portal
+    ports:
+      - "3001:80"
+    networks:
+      - arc-saas-network
+    profiles:
+      - legacy
+
+  # Customer Business Portal (CBP) - New Refine + Shadcn UI
+  customer-portal:
+    build:
+      context: ./apps/customer-portal
+      dockerfile: Dockerfile
+    container_name: arc-saas-customer-portal
+    depends_on:
+      - tenant-management-service
+    environment:
+      VITE_API_URL: http://localhost:14000
+      VITE_KEYCLOAK_URL: http://localhost:8180
+      VITE_KEYCLOAK_REALM: ananta-saas
+      VITE_KEYCLOAK_CLIENT_ID: cbp-frontend
+      VITE_CNS_API_URL: http://localhost:27200
+    ports:
+      - "27100:80"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - arc-saas-network
+
+# =============================================================================
+# Volumes
+# =============================================================================
+
+volumes:
+  postgres-data:
+  redis-data:
+  temporal-postgres-data:
+  novu-mongo-data:
+  novu-redis-data:
+  minio-data:
+
+# =============================================================================
+# Networks
+# =============================================================================
+
+networks:
+  arc-saas-network:
+    driver: bridge
+    name: arc-saas
+  # External network from Components V2 (App Plane) for shared Temporal access
+  components-v2-network:
+    external: true
+    name: components-v2-network
+  # External network for shared Temporal server
+  shared-temporal-network:
+    external: true
+    name: shared-temporal-network

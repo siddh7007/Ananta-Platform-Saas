@@ -1,0 +1,449 @@
+/**
+ * Page Transitions CSS
+ *
+ * Provides smooth, 60fps animations for page transitions with:
+ * - Hardware-accelerated transforms
+ * - Proper reduced-motion support
+ * - Theme-aware animations
+ * - No layout shifts
+ */
+
+/* ========================================
+ * CSS CUSTOM PROPERTIES
+ * ======================================== */
+
+:root {
+  /* Duration presets (in ms) */
+  --transition-duration-fast: 150ms;
+  --transition-duration-normal: 200ms;
+  --transition-duration-slow: 300ms;
+
+  /* Easing curves */
+  --transition-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --transition-ease-out: cubic-bezier(0.0, 0, 0.2, 1);
+  --transition-ease-in: cubic-bezier(0.4, 0, 1, 1);
+
+  /* Transform offsets */
+  --transition-slide-distance: 24px;
+  --transition-scale-start: 0.95;
+}
+
+/* ========================================
+ * BASE TRANSITION STYLES
+ * ======================================== */
+
+.page-transition {
+  /* Enable hardware acceleration */
+  will-change: transform, opacity;
+
+  /* Prevent layout shifts */
+  backface-visibility: hidden;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  /* Ensure full width */
+  width: 100%;
+}
+
+/* ========================================
+ * DURATION MODIFIERS
+ * ======================================== */
+
+.page-transition-fast {
+  transition-duration: var(--transition-duration-fast);
+}
+
+.page-transition-normal {
+  transition-duration: var(--transition-duration-normal);
+}
+
+.page-transition-slow {
+  transition-duration: var(--transition-duration-slow);
+}
+
+/* ========================================
+ * FADE ANIMATION
+ * Simple opacity transition
+ * ======================================== */
+
+.page-transition-fade {
+  transition-property: opacity;
+  transition-timing-function: var(--transition-ease-in-out);
+}
+
+.page-transition-fade.page-transition-entering,
+.page-transition-fade.page-transition-exiting,
+.page-transition-fade.page-transition-exited {
+  opacity: 0;
+}
+
+.page-transition-fade.page-transition-entered {
+  opacity: 1;
+}
+
+/* ========================================
+ * SLIDE-UP ANIMATION
+ * Slides in from bottom
+ * ======================================== */
+
+.page-transition-slide-up {
+  transition-property: transform, opacity;
+  transition-timing-function: var(--transition-ease-out);
+}
+
+.page-transition-slide-up.page-transition-entering,
+.page-transition-slide-up.page-transition-exited {
+  opacity: 0;
+  transform: translateY(var(--transition-slide-distance));
+}
+
+.page-transition-slide-up.page-transition-exiting {
+  opacity: 0;
+  transform: translateY(calc(-1 * var(--transition-slide-distance)));
+}
+
+.page-transition-slide-up.page-transition-entered {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ========================================
+ * SLIDE-LEFT ANIMATION
+ * Slides in from right (forward navigation)
+ * ======================================== */
+
+.page-transition-slide-left {
+  transition-property: transform, opacity;
+  transition-timing-function: var(--transition-ease-out);
+}
+
+.page-transition-slide-left.page-transition-entering {
+  opacity: 0;
+  transform: translateX(var(--transition-slide-distance));
+}
+
+.page-transition-slide-left.page-transition-exiting,
+.page-transition-slide-left.page-transition-exited {
+  opacity: 0;
+  transform: translateX(calc(-1 * var(--transition-slide-distance)));
+}
+
+.page-transition-slide-left.page-transition-entered {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* ========================================
+ * SLIDE-RIGHT ANIMATION
+ * Slides in from left (back navigation)
+ * ======================================== */
+
+.page-transition-slide-right {
+  transition-property: transform, opacity;
+  transition-timing-function: var(--transition-ease-out);
+}
+
+.page-transition-slide-right.page-transition-entering {
+  opacity: 0;
+  transform: translateX(calc(-1 * var(--transition-slide-distance)));
+}
+
+.page-transition-slide-right.page-transition-exiting,
+.page-transition-slide-right.page-transition-exited {
+  opacity: 0;
+  transform: translateX(var(--transition-slide-distance));
+}
+
+.page-transition-slide-right.page-transition-entered {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+/* ========================================
+ * SCALE ANIMATION
+ * Scales up from center with fade
+ * ======================================== */
+
+.page-transition-scale {
+  transition-property: transform, opacity;
+  transition-timing-function: var(--transition-ease-out);
+  transform-origin: center center;
+}
+
+.page-transition-scale.page-transition-entering,
+.page-transition-scale.page-transition-exited {
+  opacity: 0;
+  transform: scale(var(--transition-scale-start));
+}
+
+.page-transition-scale.page-transition-exiting {
+  opacity: 0;
+  transform: scale(1.05);
+}
+
+.page-transition-scale.page-transition-entered {
+  opacity: 1;
+  transform: scale(1);
+}
+
+/* ========================================
+ * REDUCED MOTION SUPPORT
+ * Respect user's motion preferences
+ * ======================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  .page-transition,
+  .page-transition-fade,
+  .page-transition-slide-up,
+  .page-transition-slide-left,
+  .page-transition-slide-right,
+  .page-transition-scale {
+    /* Disable all transforms */
+    transition: none !important;
+    animation: none !important;
+    transform: none !important;
+  }
+
+  /* Keep opacity transitions for accessibility */
+  .page-transition-fade {
+    transition: opacity 100ms linear !important;
+  }
+
+  .page-transition-entering,
+  .page-transition-exited {
+    opacity: 0;
+  }
+
+  .page-transition-entered {
+    opacity: 1;
+  }
+
+  .page-transition-exiting {
+    opacity: 0;
+  }
+}
+
+/* ========================================
+ * PERFORMANCE OPTIMIZATIONS
+ * ======================================== */
+
+/**
+ * Contain paint and layout to prevent unnecessary reflows
+ * Only apply during transitions to avoid over-optimization
+ */
+.page-transition-entering,
+.page-transition-exiting {
+  contain: layout style paint;
+}
+
+/**
+ * Remove will-change after transition completes
+ * to free up GPU resources
+ */
+.page-transition-entered {
+  will-change: auto;
+}
+
+/* ========================================
+ * THEME-AWARE ANIMATIONS
+ * Subtle visual adjustments per theme
+ * ======================================== */
+
+/**
+ * Add subtle shadow during transitions in light themes
+ */
+[data-theme="light"] .page-transition-entering,
+[data-theme="mid-light"] .page-transition-entering {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+/**
+ * Stronger shadow for dark themes (more depth)
+ */
+[data-theme="dark"] .page-transition-entering,
+[data-theme="mid-dark"] .page-transition-entering {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+/* ========================================
+ * STACKING CONTEXT
+ * Ensure proper layering during transitions
+ * ======================================== */
+
+.page-transition-entering,
+.page-transition-entered {
+  z-index: 1;
+}
+
+.page-transition-exiting,
+.page-transition-exited {
+  z-index: 0;
+}
+
+/* ========================================
+ * UTILITY CLASSES
+ * Additional helpers for custom implementations
+ * ======================================== */
+
+/**
+ * Prevent scrolling during transitions
+ */
+.page-transition-no-scroll {
+  overflow: hidden;
+}
+
+/**
+ * Absolute positioning for overlapping transitions
+ */
+.page-transition-absolute {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+}
+
+/**
+ * Delay transition start (useful for staggered animations)
+ */
+.page-transition-delay-100 {
+  transition-delay: 100ms;
+}
+
+.page-transition-delay-200 {
+  transition-delay: 200ms;
+}
+
+.page-transition-delay-300 {
+  transition-delay: 300ms;
+}
+
+/* ========================================
+ * DEBUG MODE
+ * Visualize transition states (development only)
+ * ======================================== */
+
+/**
+ * Enable with data-debug-transitions attribute on root element
+ */
+[data-debug-transitions] .page-transition {
+  outline: 2px solid transparent;
+}
+
+[data-debug-transitions] .page-transition-entering {
+  outline-color: orange;
+}
+
+[data-debug-transitions] .page-transition-entered {
+  outline-color: green;
+}
+
+[data-debug-transitions] .page-transition-exiting {
+  outline-color: red;
+}
+
+[data-debug-transitions] .page-transition-exited {
+  outline-color: gray;
+}
+
+/* ========================================
+ * KEYFRAME ANIMATIONS
+ * Alternative animation approach using @keyframes
+ * ======================================== */
+
+/**
+ * Fade in animation
+ */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/**
+ * Fade out animation
+ */
+@keyframes fadeOut {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/**
+ * Slide up animation
+ */
+@keyframes slideUp {
+  from {
+    opacity: 0;
+    transform: translateY(var(--transition-slide-distance));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/**
+ * Slide down (exit) animation
+ */
+@keyframes slideDown {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(var(--transition-slide-distance));
+  }
+}
+
+/**
+ * Scale in animation
+ */
+@keyframes scaleIn {
+  from {
+    opacity: 0;
+    transform: scale(var(--transition-scale-start));
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/**
+ * Scale out animation
+ */
+@keyframes scaleOut {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(var(--transition-scale-start));
+  }
+}
+
+/**
+ * Respect reduced motion for keyframe animations
+ */
+@media (prefers-reduced-motion: reduce) {
+  @keyframes fadeIn,
+  @keyframes fadeOut,
+  @keyframes slideUp,
+  @keyframes slideDown,
+  @keyframes scaleIn,
+  @keyframes scaleOut {
+    from,
+    to {
+      transform: none;
+    }
+  }
+}

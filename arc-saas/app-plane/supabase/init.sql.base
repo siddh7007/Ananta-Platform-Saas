@@ -1,0 +1,695 @@
+-- Supabase PostgreSQL Initialization Script
+-- Creates required schemas and basic structures
+
+-- Create required schemas
+CREATE SCHEMA IF NOT EXISTS auth;
+CREATE SCHEMA IF NOT EXISTS storage;
+CREATE SCHEMA IF NOT EXISTS extensions;
+CREATE SCHEMA IF NOT EXISTS realtime;
+
+-- Create database roles with passwords
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'anon') THEN
+        CREATE ROLE anon NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticated') THEN
+        CREATE ROLE authenticated NOLOGIN NOINHERIT;
+    END IF;
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'service_role') THEN
+        CREATE ROLE service_role NOLOGIN NOINHERIT BYPASSRLS;
+    END IF;
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'supabase_admin') THEN
+        CREATE ROLE supabase_admin LOGIN NOINHERIT CREATEROLE CREATEDB PASSWORD 'supabase-postgres-secure-2024';
+    END IF;
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'supabase_auth_admin') THEN
+        CREATE ROLE supabase_auth_admin LOGIN NOINHERIT CREATEROLE PASSWORD 'supabase-postgres-secure-2024';
+    END IF;
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'supabase_storage_admin') THEN
+        CREATE ROLE supabase_storage_admin LOGIN NOINHERIT CREATEROLE PASSWORD 'supabase-postgres-secure-2024';
+    END IF;
+    IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'authenticator') THEN
+        CREATE ROLE authenticator NOINHERIT LOGIN PASSWORD 'supabase-postgres-secure-2024';
+    END IF;
+END
+$$;
+
+-- Grant permissions
+GRANT anon TO authenticator;
+GRANT authenticated TO authenticator;
+GRANT service_role TO authenticator;
+
+-- Grant schema permissions
+GRANT ALL ON SCHEMA public TO supabase_auth_admin, supabase_storage_admin;
+GRANT ALL ON SCHEMA auth TO supabase_auth_admin;
+GRANT ALL ON SCHEMA storage TO supabase_storage_admin;
+GRANT USAGE ON SCHEMA auth TO postgres, anon, authenticated, service_role;
+GRANT USAGE ON SCHEMA storage TO postgres, anon, authenticated, service_role;
+GRANT USAGE ON SCHEMA extensions TO postgres, anon, authenticated, service_role;
+GRANT USAGE ON SCHEMA realtime TO postgres, anon, authenticated, service_role;
+
+-- =====================================================================
+-- Supabase Storage: ensure extension, tables, and ownership
+-- Idempotent: safe to re-run
+-- =====================================================================
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+
+-- Core storage tables (minimal base - migrations will add additional columns)
+-- NOTE: Do NOT add columns here that migrations expect to add (e.g., path_tokens, public, etc.)
+CREATE TABLE IF NOT EXISTS storage.buckets (
+    id text PRIMARY KEY,
+    name text NOT NULL,
+    owner uuid,
+    created_at timestamptz DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS storage.objects (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    bucket_id text,
+    name text,
+    owner uuid,
+    created_at timestamptz DEFAULT now(),
+    updated_at timestamptz DEFAULT now(),
+    last_accessed_at timestamptz DEFAULT now(),
+    metadata jsonb
+);
+
+CREATE TABLE IF NOT EXISTS storage.migrations (
+    id integer PRIMARY KEY,
+    name varchar(100) NOT NULL UNIQUE,
+    hash varchar(40) NOT NULL,
+    executed_at timestamp DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Ensure correct ownership for storage-api connection user
+ALTER SCHEMA storage OWNER TO supabase_storage_admin;
+ALTER TABLE IF EXISTS storage.objects OWNER TO supabase_storage_admin;
+ALTER TABLE IF EXISTS storage.buckets OWNER TO supabase_storage_admin;
+ALTER TABLE IF EXISTS storage.migrations OWNER TO supabase_storage_admin;
+
+-- Ensure privileges
+GRANT ALL ON SCHEMA storage TO supabase_storage_admin;
+GRANT ALL ON ALL TABLES IN SCHEMA storage TO supabase_storage_admin;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA storage TO supabase_storage_admin;
+
+-- =====================================================================
+-- BOM Pipeline Tables for Customer Uploads (used by CNS with Supabase DB)
+-- Idempotent and aligned with CNS model types
+-- =====================================================================
+
+-- BOM Upload Jobs
+CREATE TABLE IF NOT EXISTS public.bom_jobs (
+    id SERIAL PRIMARY KEY,
+    job_id VARCHAR(100) UNIQUE NOT NULL,
+
+    -- Customer info
+    customer_id INTEGER,
+    customer_name VARCHAR(255),
+
+    -- File info
+    filename VARCHAR(255),
+    file_size INTEGER,
+    total_items INTEGER,
+
+    -- Processing status
+    status VARCHAR(50) DEFAULT 'pending',
+    progress INTEGER DEFAULT 0,
+
+    -- Results counters
+    items_processed INTEGER DEFAULT 0,
+    items_auto_approved INTEGER DEFAULT 0,
+    items_in_staging INTEGER DEFAULT 0,
+    items_rejected INTEGER DEFAULT 0,
+    items_failed INTEGER DEFAULT 0,
+
+    -- Timing
+    started_at TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    processing_time_ms INTEGER,
+
+    -- Error and results
+    error_message TEXT,
+    results_data JSONB,
+
+    -- Multi-tenancy (match CNS model: integers)
+    organization_id INTEGER,
+    project_id INTEGER,
+    source VARCHAR(50) DEFAULT 'customer',
+    source_metadata JSONB,
+    priority INTEGER DEFAULT 5,
+
+    -- Audit
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_bom_jobs_job_id ON public.bom_jobs(job_id);
+CREATE INDEX IF NOT EXISTS idx_bom_jobs_status ON public.bom_jobs(status);
+CREATE INDEX IF NOT EXISTS idx_bom_jobs_created_at ON public.bom_jobs(created_at);
+CREATE INDEX IF NOT EXISTS idx_bom_jobs_organization_id ON public.bom_jobs(organization_id);
+CREATE INDEX IF NOT EXISTS idx_bom_jobs_project_id ON public.bom_jobs(project_id);
+CREATE INDEX IF NOT EXISTS idx_bom_jobs_source ON public.bom_jobs(source);
+
+-- Trigger to keep updated_at current
+CREATE OR REPLACE FUNCTION public.update_bom_jobs_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END; $$ LANGUAGE plpgsql;
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger WHERE tgname = 'bom_jobs_updated_at'
+  ) THEN
+    CREATE TRIGGER bom_jobs_updated_at
+      BEFORE UPDATE ON public.bom_jobs
+      FOR EACH ROW
+      EXECUTE FUNCTION public.update_bom_jobs_updated_at();
+  END IF;
+END $$;
+
+-- BOM Line Items for each job
+CREATE TABLE IF NOT EXISTS public.bom_items (
+    id SERIAL PRIMARY KEY,
+    job_id VARCHAR(100) NOT NULL,
+    line_number INTEGER NOT NULL,
+
+    -- Input data
+    mpn VARCHAR(255),
+    manufacturer VARCHAR(255),
+    quantity INTEGER,
+    reference_designator TEXT,
+    description TEXT,
+
+    -- Enrichment results
+    component_id INTEGER,
+    enriched_mpn VARCHAR(255),
+    enriched_manufacturer VARCHAR(255),
+    specifications JSONB,
+    datasheet_url TEXT,
+    lifecycle_status VARCHAR(50),
+    estimated_lifetime DATE,
+    compliance_status JSONB,
+    pricing JSONB,
+
+    -- Quality & routing
+    match_confidence DECIMAL(5,2),
+    quality_score INTEGER,
+    routing_destination VARCHAR(50) DEFAULT 'staging',
+    enrichment_status VARCHAR(50) DEFAULT 'pending',
+
+    -- Error tracking
+    error_message TEXT,
+    retry_count INTEGER DEFAULT 0,
+
+    created_at TIMESTAMPTZ DEFAULT now(),
+    updated_at TIMESTAMPTZ DEFAULT now(),
+
+    CONSTRAINT fk_bom_job FOREIGN KEY (job_id)
+        REFERENCES public.bom_jobs(job_id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_bom_items_job_id ON public.bom_items(job_id);
+CREATE INDEX IF NOT EXISTS idx_bom_items_enrichment_status ON public.bom_items(enrichment_status);
+CREATE INDEX IF NOT EXISTS idx_bom_items_routing_destination ON public.bom_items(routing_destination);
+CREATE INDEX IF NOT EXISTS idx_bom_items_mpn ON public.bom_items(mpn);
+CREATE INDEX IF NOT EXISTS idx_bom_items_manufacturer ON public.bom_items(manufacturer);
+CREATE INDEX IF NOT EXISTS idx_bom_items_component_id ON public.bom_items(component_id);
+
+CREATE OR REPLACE FUNCTION public.update_bom_items_updated_at()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END; $$ LANGUAGE plpgsql;
+
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger WHERE tgname = 'bom_items_updated_at'
+  ) THEN
+    CREATE TRIGGER bom_items_updated_at
+      BEFORE UPDATE ON public.bom_items
+      FOR EACH ROW
+      EXECUTE FUNCTION public.update_bom_items_updated_at();
+  END IF;
+END $$;
+
+-- Grants for API roles
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.bom_jobs TO authenticated, service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.bom_items TO authenticated, service_role;
+GRANT USAGE, SELECT ON SEQUENCE bom_jobs_id_seq TO authenticated, service_role;
+GRANT USAGE, SELECT ON SEQUENCE bom_items_id_seq TO authenticated, service_role;
+
+-- Enable RLS and minimal policies (email-based)
+ALTER TABLE public.bom_jobs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bom_items ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS bom_jobs_select ON public.bom_jobs;
+CREATE POLICY bom_jobs_select ON public.bom_jobs
+  FOR SELECT USING (
+    public.is_platform_admin() OR
+    (COALESCE(source_metadata->>'user_email', '') <> '' AND (source_metadata->>'user_email') = public.current_user_email())
+  );
+
+DROP POLICY IF EXISTS bom_items_select ON public.bom_items;
+CREATE POLICY bom_items_select ON public.bom_items
+  FOR SELECT USING (
+    public.is_platform_admin() OR
+    job_id IN (
+      SELECT job_id FROM public.bom_jobs
+      WHERE COALESCE(source_metadata->>'user_email', '') <> ''
+        AND (source_metadata->>'user_email') = public.current_user_email()
+    )
+  );
+
+-- =====================================================================
+-- Helper functions
+-- =====================================================================
+
+CREATE OR REPLACE FUNCTION public.trigger_set_timestamp()
+RETURNS trigger AS $$
+BEGIN
+    NEW.updated_at = NOW();
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Auto-generate slug from name if not provided
+CREATE OR REPLACE FUNCTION public.generate_slug_from_name()
+RETURNS trigger AS $$
+BEGIN
+    -- Only generate slug if it's NULL or empty
+    IF NEW.slug IS NULL OR NEW.slug = '' THEN
+        NEW.slug := lower(
+            regexp_replace(
+                regexp_replace(
+                    regexp_replace(trim(NEW.name), '[^\w\s-]', '', 'g'),  -- Remove special chars
+                    '\s+', '-', 'g'                                        -- Replace spaces with hyphens
+                ),
+                '-+', '-', 'g'                                             -- Replace multiple hyphens with single
+            )
+        );
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+-- =====================================================================
+-- Core multi-tenant schema (tenants, users, projects, components, BOMs, alerts)
+-- =====================================================================
+
+-- Tenants (Organizations)
+CREATE TABLE IF NOT EXISTS public.tenants_v2 (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    slug text NOT NULL UNIQUE,
+    name text NOT NULL,
+    subscription_status text NOT NULL DEFAULT 'trial' CHECK (subscription_status IN ('trial', 'active', 'past_due', 'canceled', 'suspended')),
+    plan_tier text NOT NULL DEFAULT 'standard',
+    billing_email text,
+    billing_contact_name text,
+    billing_phone text,
+    timezone text NOT NULL DEFAULT 'UTC',
+    region text DEFAULT 'us-east-1',
+    notes text,
+    logo_url text,
+    max_users integer NOT NULL DEFAULT 10,
+    max_components integer NOT NULL DEFAULT 50000,
+    max_storage_gb integer NOT NULL DEFAULT 100,
+    current_users_count integer NOT NULL DEFAULT 0,
+    current_components_count integer NOT NULL DEFAULT 0,
+    current_storage_gb numeric(12,2) NOT NULL DEFAULT 0,
+    trial_ends_at timestamptz,
+    last_payment_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS tenants_v2_slug_idx ON public.tenants_v2(slug);
+CREATE INDEX IF NOT EXISTS tenants_v2_subscription_status_idx ON public.tenants_v2(subscription_status);
+CREATE INDEX IF NOT EXISTS tenants_v2_created_at_idx ON public.tenants_v2(created_at);
+
+-- Auto-generate slug before insert or update
+CREATE TRIGGER generate_slug_tenants_v2
+BEFORE INSERT OR UPDATE ON public.tenants_v2
+FOR EACH ROW
+EXECUTE PROCEDURE public.generate_slug_from_name();
+
+-- Update timestamp on update
+CREATE TRIGGER set_timestamp_tenants_v2
+BEFORE UPDATE ON public.tenants_v2
+FOR EACH ROW
+EXECUTE PROCEDURE public.trigger_set_timestamp();
+
+-- Users
+CREATE TABLE IF NOT EXISTS public.users_v2 (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id uuid NOT NULL REFERENCES public.tenants_v2(id) ON DELETE CASCADE,
+    email text NOT NULL UNIQUE,
+    first_name text,
+    last_name text,
+    full_name text GENERATED ALWAYS AS (trim(coalesce(first_name, '') || ' ' || coalesce(last_name, ''))) STORED,
+    role text NOT NULL DEFAULT 'member' CHECK (role IN ('owner', 'admin', 'member', 'viewer')),
+    job_title text,
+    phone text,
+    is_active boolean NOT NULL DEFAULT true,
+    is_staff boolean NOT NULL DEFAULT false,
+    platform_admin boolean NOT NULL DEFAULT false,
+    email_verified boolean NOT NULL DEFAULT false,
+    mfa_enabled boolean NOT NULL DEFAULT false,
+    auth_provider text DEFAULT 'supabase',
+    auth_subject text,
+    last_login_at timestamptz,
+    invited_by uuid REFERENCES public.users_v2(id),
+    metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS users_v2_tenant_idx ON public.users_v2(tenant_id);
+CREATE INDEX IF NOT EXISTS users_v2_role_idx ON public.users_v2(role);
+
+CREATE TRIGGER set_timestamp_users_v2
+BEFORE UPDATE ON public.users_v2
+FOR EACH ROW
+EXECUTE PROCEDURE public.trigger_set_timestamp();
+
+-- Projects
+CREATE TABLE IF NOT EXISTS public.projects_v2 (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id uuid NOT NULL REFERENCES public.tenants_v2(id) ON DELETE CASCADE,
+    name text NOT NULL,
+    description text,
+    project_code text,
+    status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'on_hold', 'completed', 'archived')),
+    visibility text NOT NULL DEFAULT 'private' CHECK (visibility IN ('private', 'internal', 'public')),
+    project_owner_id uuid REFERENCES public.users_v2(id),
+    created_by_id uuid REFERENCES public.users_v2(id),
+    total_boms integer NOT NULL DEFAULT 0,
+    completed_boms integer NOT NULL DEFAULT 0,
+    in_progress_boms integer NOT NULL DEFAULT 0,
+    total_components integer NOT NULL DEFAULT 0,
+    start_date date,
+    end_date date,
+    last_activity_at timestamptz,
+    tags text[],
+    metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS projects_v2_tenant_idx ON public.projects_v2(tenant_id);
+CREATE INDEX IF NOT EXISTS projects_v2_status_idx ON public.projects_v2(status);
+CREATE INDEX IF NOT EXISTS projects_v2_owner_idx ON public.projects_v2(project_owner_id);
+
+CREATE TRIGGER set_timestamp_projects_v2
+BEFORE UPDATE ON public.projects_v2
+FOR EACH ROW
+EXECUTE PROCEDURE public.trigger_set_timestamp();
+
+-- Components
+CREATE TABLE IF NOT EXISTS public.components_v2 (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id uuid NOT NULL REFERENCES public.tenants_v2(id) ON DELETE CASCADE,
+    manufacturer_part_number text NOT NULL,
+    manufacturer text,
+    category text,
+    description text,
+    datasheet_url text,
+    lifecycle_status text,
+    lifecycle_change_date date,
+    risk_level text CHECK (risk_level IN ('GREEN', 'YELLOW', 'ORANGE', 'RED', 'CRITICAL') OR risk_level IS NULL),
+    rohs_compliant text CHECK (rohs_compliant IN ('COMPLIANT', 'NON_COMPLIANT', 'UNKNOWN') OR rohs_compliant IS NULL),
+    reach_compliant text CHECK (reach_compliant IN ('COMPLIANT', 'NON_COMPLIANT', 'UNKNOWN') OR reach_compliant IS NULL),
+    has_alternatives boolean NOT NULL DEFAULT false,
+    alternative_part_numbers text[],
+    unit_price numeric(14,4),
+    currency text DEFAULT 'USD',
+    stock_quantity integer,
+    moq integer,
+    lead_time_days integer,
+    quality_score numeric(5,2),
+    metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    last_updated timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS components_v2_tenant_idx ON public.components_v2(tenant_id);
+CREATE INDEX IF NOT EXISTS components_v2_mpn_idx ON public.components_v2(manufacturer_part_number);
+CREATE INDEX IF NOT EXISTS components_v2_manufacturer_idx ON public.components_v2(manufacturer);
+CREATE INDEX IF NOT EXISTS components_v2_category_idx ON public.components_v2(category);
+
+CREATE TRIGGER set_timestamp_components_v2
+BEFORE UPDATE ON public.components_v2
+FOR EACH ROW
+EXECUTE PROCEDURE public.trigger_set_timestamp();
+
+-- BOMs
+CREATE TABLE IF NOT EXISTS public.boms_v2 (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id uuid NOT NULL REFERENCES public.tenants_v2(id) ON DELETE CASCADE,
+    project_id uuid REFERENCES public.projects_v2(id) ON DELETE SET NULL,
+    name text NOT NULL,
+    description text,
+    version text,
+    grade text,
+    status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'pending', 'analyzing', 'completed', 'failed', 'archived')),
+    workflow_status text CHECK (workflow_status IN ('queued', 'processing', 'completed', 'failed') OR workflow_status IS NULL),
+    component_count integer NOT NULL DEFAULT 0,
+    total_cost numeric(18,2) NOT NULL DEFAULT 0,
+    high_risk_count integer NOT NULL DEFAULT 0,
+    medium_risk_count integer NOT NULL DEFAULT 0,
+    low_risk_count integer NOT NULL DEFAULT 0,
+    last_analyzed_at timestamptz,
+    last_synced_at timestamptz,
+    created_by_id uuid REFERENCES public.users_v2(id),
+    source text,
+    metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS boms_v2_tenant_idx ON public.boms_v2(tenant_id);
+CREATE INDEX IF NOT EXISTS boms_v2_project_idx ON public.boms_v2(project_id);
+CREATE INDEX IF NOT EXISTS boms_v2_status_idx ON public.boms_v2(status);
+
+CREATE TRIGGER set_timestamp_boms_v2
+BEFORE UPDATE ON public.boms_v2
+FOR EACH ROW
+EXECUTE PROCEDURE public.trigger_set_timestamp();
+
+-- BOM Line Items
+CREATE TABLE IF NOT EXISTS public.bom_line_items_v2 (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    bom_id uuid NOT NULL REFERENCES public.boms_v2(id) ON DELETE CASCADE,
+    line_number integer,
+    reference_designator text,
+    manufacturer_part_number text,
+    manufacturer text,
+    description text,
+    quantity numeric(18,4) NOT NULL DEFAULT 1,
+    unit_price numeric(18,4),
+    currency text DEFAULT 'USD',
+    match_status text,
+    risk_level text,
+    metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS bom_line_items_v2_bom_idx ON public.bom_line_items_v2(bom_id);
+
+CREATE TRIGGER set_timestamp_bom_line_items_v2
+BEFORE UPDATE ON public.bom_line_items_v2
+FOR EACH ROW
+EXECUTE PROCEDURE public.trigger_set_timestamp();
+
+-- Alerts
+CREATE TABLE IF NOT EXISTS public.alerts_v2 (
+    id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id uuid NOT NULL REFERENCES public.tenants_v2(id) ON DELETE CASCADE,
+    component_id uuid REFERENCES public.components_v2(id) ON DELETE SET NULL,
+    bom_id uuid REFERENCES public.boms_v2(id) ON DELETE SET NULL,
+    alert_type text NOT NULL,
+    severity text NOT NULL DEFAULT 'INFO',
+    title text NOT NULL,
+    message text NOT NULL,
+    metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+    is_read boolean NOT NULL DEFAULT false,
+    read_at timestamptz,
+    dismissed boolean NOT NULL DEFAULT false,
+    dismissed_at timestamptz,
+    created_at timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS alerts_v2_tenant_idx ON public.alerts_v2(tenant_id);
+CREATE INDEX IF NOT EXISTS alerts_v2_component_idx ON public.alerts_v2(component_id);
+CREATE INDEX IF NOT EXISTS alerts_v2_severity_idx ON public.alerts_v2(severity);
+
+-- =====================================================================
+-- Seed data for development (default tenant & admin user)
+-- =====================================================================
+
+INSERT INTO public.tenants_v2 (id, slug, name, subscription_status, plan_tier, billing_email, created_at, updated_at)
+VALUES (
+    'a1111111-1111-1111-1111-111111111111',
+    'ananta',
+    'Ananta Platform',
+    'active',
+    'enterprise',
+    'ops@ananta.com',
+    NOW(),
+    NOW()
+)
+ON CONFLICT (slug) DO NOTHING;
+
+INSERT INTO public.users_v2 (id, tenant_id, email, first_name, last_name, role, is_staff, email_verified, metadata)
+VALUES (
+    'a0000000-0000-0000-0000-000000000000',
+    'a1111111-1111-1111-1111-111111111111',
+    'dev@ananta.com',
+    'Dev',
+    'Admin',
+    'owner',
+    true,
+    true,
+    jsonb_build_object('dev_mode', true)
+)
+ON CONFLICT (email) DO NOTHING;
+
+INSERT INTO public.projects_v2 (id, tenant_id, name, description, status, visibility, project_owner_id, created_by_id, created_at, updated_at)
+VALUES (
+    'a2222222-2222-2222-2222-222222222222',
+    'a1111111-1111-1111-1111-111111111111',
+    'Demo Project',
+    'Sample project for development and testing',
+    'active',
+    'internal',
+    'a0000000-0000-0000-0000-000000000000',
+    'a0000000-0000-0000-0000-000000000000',
+    NOW(),
+    NOW()
+)
+ON CONFLICT (id) DO NOTHING;
+
+-- ============================================================
+-- GRANT PERMISSIONS TO service_role
+-- ============================================================
+-- service_role needs full access to all tables to bypass RLS in dev mode
+
+GRANT ALL ON public.tenants_v2 TO service_role;
+GRANT ALL ON public.users_v2 TO service_role;
+GRANT ALL ON public.projects_v2 TO service_role;
+GRANT ALL ON public.components_v2 TO service_role;
+GRANT ALL ON public.boms_v2 TO service_role;
+GRANT ALL ON public.bom_line_items_v2 TO service_role;
+GRANT ALL ON public.alerts_v2 TO service_role;
+
+-- ============================================================
+-- ROW LEVEL SECURITY (RLS) POLICIES
+-- ============================================================
+
+-- Helper: current user email
+CREATE OR REPLACE FUNCTION public.current_user_email()
+RETURNS text LANGUAGE sql STABLE AS $$
+  select coalesce(nullif(current_setting('request.jwt.claims', true), '')::json->>'email', '')
+$$;
+
+-- Grant execute permission to authenticated and anon roles
+GRANT EXECUTE ON FUNCTION public.current_user_email() TO authenticated, anon;
+
+-- Helper: whether current user is platform admin
+-- SECURITY DEFINER allows this function to bypass RLS when checking users_v2
+-- This prevents infinite recursion: RLS policy -> is_platform_admin() -> users_v2 -> RLS policy
+CREATE OR REPLACE FUNCTION public.is_platform_admin()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.users_v2 u
+    WHERE u.email = public.current_user_email()
+      AND u.platform_admin = true
+  )
+$$;
+
+-- Grant execute permission to authenticated and anon roles
+GRANT EXECUTE ON FUNCTION public.is_platform_admin() TO authenticated, anon;
+
+-- Resolve current tenant id without invoking RLS
+CREATE OR REPLACE FUNCTION public.get_current_tenant_id()
+RETURNS uuid
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public
+AS $$
+  SELECT u.tenant_id FROM public.users_v2 u
+  WHERE u.email = public.current_user_email()
+  LIMIT 1
+$$;
+
+GRANT EXECUTE ON FUNCTION public.get_current_tenant_id() TO authenticated, anon;
+
+-- Enable RLS
+ALTER TABLE public.tenants_v2 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.users_v2 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.projects_v2 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.components_v2 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.boms_v2 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.bom_line_items_v2 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.alerts_v2 ENABLE ROW LEVEL SECURITY;
+
+-- Tenants: platform_admin can read all; others only their tenant by id
+DROP POLICY IF EXISTS tenants_v2_select ON public.tenants_v2;
+CREATE POLICY tenants_v2_select ON public.tenants_v2
+  FOR SELECT USING (
+    public.is_platform_admin() OR id = public.get_current_tenant_id()
+  );
+
+-- Users: platform_admin sees all; others see same-tenant users
+DROP POLICY IF EXISTS users_v2_select ON public.users_v2;
+CREATE POLICY users_v2_select ON public.users_v2
+  FOR SELECT USING (
+    public.is_platform_admin() OR tenant_id = public.get_current_tenant_id() OR email = public.current_user_email()
+  );
+
+-- Projects
+DROP POLICY IF EXISTS projects_v2_select ON public.projects_v2;
+CREATE POLICY projects_v2_select ON public.projects_v2
+  FOR SELECT USING (
+    public.is_platform_admin() OR tenant_id = public.get_current_tenant_id()
+  );
+
+-- Components
+DROP POLICY IF EXISTS components_v2_select ON public.components_v2;
+CREATE POLICY components_v2_select ON public.components_v2
+  FOR SELECT USING (
+    public.is_platform_admin() OR tenant_id = public.get_current_tenant_id()
+  );
+
+-- BOMs
+DROP POLICY IF EXISTS boms_v2_select ON public.boms_v2;
+CREATE POLICY boms_v2_select ON public.boms_v2
+  FOR SELECT USING (
+    public.is_platform_admin() OR tenant_id = public.get_current_tenant_id()
+  );
+
+-- BOM Line Items: visible if parent bom visible
+DROP POLICY IF EXISTS bom_line_items_v2_select ON public.bom_line_items_v2;
+CREATE POLICY bom_line_items_v2_select ON public.bom_line_items_v2
+  FOR SELECT USING (
+    public.is_platform_admin() OR bom_id IN (
+      SELECT id FROM public.boms_v2 WHERE tenant_id = public.get_current_tenant_id()
+    )
+  );
+
+-- Alerts
+DROP POLICY IF EXISTS alerts_v2_select ON public.alerts_v2;
+CREATE POLICY alerts_v2_select ON public.alerts_v2
+  FOR SELECT USING (
+    public.is_platform_admin() OR tenant_id = public.get_current_tenant_id()
+  );

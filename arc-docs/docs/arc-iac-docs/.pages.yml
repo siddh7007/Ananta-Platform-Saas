@@ -1,0 +1,109 @@
+title: ARC IaC
+nav:
+  - Introduction: "README.md"
+  - IaC Modules:
+      - AWS:
+          - Control Tower AFT: "arc-iac-docs/modules/terraform-aws-refarch-control-tower-aft"
+          - Environment Bootstrap: "arc-iac-docs/modules/terraform-aws-arc-bootstrap"
+          - Network:
+              - Network: "arc-iac-docs/modules/terraform-aws-ref-arch-network"
+              - Module Usage Guide: "arc-iac-docs/modules/terraform-aws-ref-arch-network/docs/module-usage-guide"
+          - RDBMS:
+              - Aurora: "arc-iac-docs/modules/terraform-aws-ref-arch-db"
+              - Module Usage Guide: "arc-iac-docs/modules/terraform-aws-ref-arch-db/docs/module-usage-guide"
+          - ARC Lambda: "arc-iac-docs/modules/arc-lambda"
+          - ARC CDK: "arc-iac-docs/modules/arc-cdk"
+          - ECS:
+              - ECS: "arc-iac-docs/modules/terraform-aws-arc-ecs"
+              - Module Usage Guide: "arc-iac-docs/modules/terraform-aws-arc-ecs/docs/module-usage-guide"
+          - EKS:
+              - EKS: "arc-iac-docs/modules/terraform-aws-ref-arch-eks"
+              - Module Usage Guide: "arc-iac-docs/modules/terraform-aws-ref-arch-eks/docs/module-usage-guide"
+          - Tags: "arc-iac-docs/modules/terraform-aws-refarch-tags"
+          - OpenSearch:
+              - OpenSearch: "arc-iac-docs/modules/terraform-aws-arc-opensearch"
+              - Module Usage Guide: "arc-iac-docs/modules/terraform-aws-arc-opensearch/docs/module-usage-guide"
+          - TypeScript Lambda Boilerplate: "arc-iac-docs/modules/typescript-lambda-boilerplate"
+          - Cloud Custodian: "arc-iac-docs/modules/terraform-aws-cloud-custodian"
+          - CloudFront:
+              - CloudFront: "arc-iac-docs/modules/terraform-aws-arc-cloudfront"
+              - Module Usage Guide: "arc-iac-docs/modules/terraform-aws-arc-cloudfront/docs/module-usage-guide"
+          - Elasticache:
+              - cache: "arc-iac-docs/modules/terraform-aws-arc-cache"
+              - Module Usage Guide: "arc-iac-docs/modules/terraform-aws-arc-cache/docs/module-usage-guide"
+          - ARC CICD:
+              - cicd: "arc-iac-docs/modules/terraform-aws-arc-cicd"
+              - Module Usage Guide: "arc-iac-docs/modules/terraform-aws-arc-cicd/docs/module-usage-guide"
+          - Healthcheck:
+              - Healthcheck: "arc-iac-docs/modules/terraform-aws-arc-healthcheck"
+              - Module Usage Guide: "arc-iac-docs/modules/terraform-aws-arc-healthcheck/docs/module-usage-guide"
+          - KMS:
+              - KMS: "arc-iac-docs/modules/terraform-aws-arc-kms"
+              - Module Usage Guide: "arc-iac-docs/modules/terraform-aws-arc-kms/docs/module-usage-guide"
+          - ARC Common Data: "arc-iac-docs/modules/terraform-aws-arc-common-data"
+          - Waf:
+              - Waf: "arc-iac-docs/modules/terraform-aws-arc-waf"
+              - Module Usage Guide: "arc-iac-docs/modules/terraform-aws-arc-waf/docs/module-usage-guide"
+          - Vpn:
+              - Vpn: "arc-iac-docs/modules/terraform-aws-arc-vpn"
+              - Module Usage Guide: "arc-iac-docs/modules/terraform-aws-arc-vpn/docs/module-usage-guide"
+          - GitHub-Runner:
+               - GitHub-Runner: "arc-iac-docs/modules/terraform-aws-arc-github-runner"
+               - Module Usage Guide: "arc-iac-docs/modules/terraform-aws-arc-github-runner/docs/module-usage-guide"
+          - Workspaces:
+              - Workspace: "arc-iac-docs/modules/terraform-aws-arc-workspace"
+              - Module Usage Guide: "arc-iac-docs/modules/terraform-aws-arc-workspace/docs/module-usage-guide"
+          - Postgres-Management:
+              - Postgresql: "arc-iac-docs/modules/terraform-postgresql-aws-arc-mgmt"
+              - Module Usage Guide: "arc-iac-docs/modules/terraform-postgresql-aws-arc-mgmt/docs/module-usage-guide"
+          - Security:
+              - Security: "arc-iac-docs/modules/terraform-aws-arc-security"
+              - Module Usage Guide: "arc-iac-docs/modules/terraform-aws-arc-security/docs/module-usage-guide"
+          - Synthetic-Monitoring:
+              - Synthetic-Monitoring: "arc-iac-docs/modules/terraform-aws-arc-synthetic-monitoring"
+              - Module Usage Guide: "arc-iac-docs/modules/terraform-aws-arc-synthetic-monitoring/docs/module-usage-guide"
+          - ARC Backup:
+              - Backup: "arc-iac-docs/modules/terraform-aws-arc-backup"
+              - Module Usage Guide: "arc-iac-docs/modules/terraform-aws-arc-backup/docs/module-usage-guide"
+          - Billing:
+              - Billing: "arc-iac-docs/modules/terraform-aws-arc-billing"
+              - Module Usage Guide: "arc-iac-docs/modules/terraform-aws-arc-billing/docs/module-usage-guide"
+          - Document-DB:
+              - Document-DB: "arc-iac-docs/modules/terraform-aws-arc-document-db"
+              - Module Usage Guide: "arc-iac-docs/modules/terraform-aws-arc-document-db/docs/module-usage-guide"
+          - GitHub:
+              - IAM: "arc-iac-docs/modules/terraform-aws-arc-github-iam"
+              - Module Usage Guide: "arc-iac-docs/modules/terraform-aws-arc-github-iam/docs/module-usage-guide"
+          - EC2:
+              - EC2: "arc-iac-docs/modules/terraform-aws-arc-ec2"
+              - Module Usage Guide: "arc-iac-docs/modules/terraform-aws-arc-ec2/docs/module-usage-guide"
+          - S3:
+              - S3: "arc-iac-docs/modules/terraform-aws-arc-s3"
+              - Module Usage Guide: "arc-iac-docs/modules/terraform-aws-arc-s3/docs/module-usage-guide"
+          - Kinesis-Stream:
+              - Kinesis-Stream: "arc-iac-docs/modules/terraform-aws-arc-kinesis-stream"
+              - Module Usage Guide: "arc-iac-docs/modules/terraform-aws-arc-kinesis-stream/docs/module-usage-guide"
+          - Transit-Gateway:
+              - Transit-Gateway: "arc-iac-docs/modules/terraform-aws-arc-transit-gateway"
+              - Module Usage Guide: "arc-iac-docs/modules/terraform-aws-arc-transit-gateway/docs/module-usage-guide"
+          - DMS:
+              - DMS: "arc-iac-docs/modules/terraform-aws-arc-dms"
+              - Module Usage Guide: "arc-iac-docs/modules/terraform-aws-dms/docs/module-usage-guide"
+          - Backstage:
+              - ECS: "arc-iac-docs/modules/arc-backstage-ecs-app"
+      - Cloud Native:
+          - Kubernetes App: "arc-iac-docs/modules/terraform-k8s-app"
+  - Reference Architectures:
+      - AWS Account Baseline: "arc-iac-docs/reference_architectures/aws_account_baseline"
+      - Control Tower and AFT: "arc-iac-docs/reference_architectures/control_tower_aft_setup"
+      - Control Tower and LZA: "arc-iac-docs/reference_architectures/control_tower_lza_setup"
+      - MAP Migrations: "arc-iac-docs/reference_architectures/map_migrations"
+      - Backstage Mono Repo Setup: "arc-iac-docs/reference_architectures/backstage_mono_repo_setup"
+      - Pre-Commit Usage: "arc-iac-docs/reference_architectures/pre-commit-usage-guide"
+      - ARC IaC and LZA: "arc-iac-docs/reference_architectures/arc_iac_lza"
+      - Network Baseline: "arc-iac-docs/reference_architectures/network_baseline"
+      - ECS Platform Baseline: "arc-iac-docs/reference_architectures/ecs_platform_baseline"
+      - EKS Platform Baseline: "arc-iac-docs/reference_architectures/eks_platform_baseline"
+      - Lambda Platform Baseline: "arc-iac-docs/reference_architectures/lambda_platform_baseline"
+      - Windows Basic Platform Baseline: "arc-iac-docs/reference_architectures/windows_basic_platform_baseline"
+      - Windows Enterprise Platform Baseline: "arc-iac-docs/reference_architectures/windows_enterprise_platform_baseline"

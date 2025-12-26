@@ -1,0 +1,878 @@
+/**
+ * Provision Tenant Workflow
+ *
+ * Orchestrates the complete tenant provisioning process with:
+ * - Multi-step provisioning (IdP, Infrastructure, Deployment)
+ * - Saga compensation (automatic rollback on failure)
+ * - Status queries for monitoring
+ * - Cancellation support via signals
+ *
+ * IMPORTANT: Workflows must be deterministic. Do NOT use:
+ * - console.log (use log from @temporalio/workflow instead)
+ * - Date.now() or new Date() for logic (only for display)
+ * - Math.random()
+ * - External API calls (use activities instead)
+ */
+
+import {
+  proxyActivities,
+  defineSignal,
+  defineQuery,
+  setHandler,
+  ApplicationFailure,
+  workflowInfo,
+  log,
+  condition,
+  sleep,
+} from '@temporalio/workflow';
+
+import type * as idpActivities from '../activities/idp.activities';
+import type * as infraActivities from '../activities/infrastructure.activities';
+import type * as deployActivities from '../activities/deployment.activities';
+import type * as tenantActivities from '../activities/tenant.activities';
+import type * as storageActivities from '../activities/storage.activities';
+import type * as notificationActivities from '../activities/notification.activities';
+import type * as userActivities from '../activities/user.activities';
+import type * as billingActivities from '../activities/billing.activities';
+import type * as appPlaneWebhookActivities from '../activities/app-plane-webhook.activities';
+import type * as supabaseAppPlaneActivities from '../activities/supabase-app-plane.activities';
+
+import {
+  TenantProvisioningInput,
+  TenantProvisioningResult,
+  ProvisioningStatus,
+  ProvisioningStep,
+} from '../types';
+
+// Non-retryable error types for configuration
+const NON_RETRYABLE_ERRORS = [
+  'InvalidConfigurationError',
+  'InvalidCredentialsError',
+  'ResourceAlreadyExistsError',
+  'ResourceNotFoundError',
+  'ValidationError',
+  'PermissionDeniedError',
+];
+
+// ============================================
+// Activity Proxies with Retry Configuration
+// ============================================
+
+const idp = proxyActivities<typeof idpActivities>({
+  startToCloseTimeout: '5 minutes',
+  scheduleToCloseTimeout: '10 minutes',
+  retry: {
+    initialInterval: '10s',
+    backoffCoefficient: 2,
+    maximumAttempts: 3,
+    maximumInterval: '2 minutes',
+    nonRetryableErrorTypes: NON_RETRYABLE_ERRORS,
+  },
+});
+
+const infra = proxyActivities<typeof infraActivities>({
+  startToCloseTimeout: '30 minutes',
+  scheduleToCloseTimeout: '45 minutes',
+  heartbeatTimeout: '2 minutes',
+  retry: {
+    initialInterval: '30s',
+    backoffCoefficient: 2,
+    maximumAttempts: 3,
+    maximumInterval: '5 minutes',
+    nonRetryableErrorTypes: NON_RETRYABLE_ERRORS,
+  },
+});
+
+const deploy = proxyActivities<typeof deployActivities>({
+  startToCloseTimeout: '15 minutes',
+  scheduleToCloseTimeout: '30 minutes',
+  heartbeatTimeout: '1 minute',
+  retry: {
+    initialInterval: '15s',
+    backoffCoefficient: 2,
+    maximumAttempts: 5,
+    maximumInterval: '3 minutes',
+    nonRetryableErrorTypes: NON_RETRYABLE_ERRORS,
+  },
+});
+
+const tenant = proxyActivities<typeof tenantActivities>({
+  startToCloseTimeout: '2 minutes',
+  scheduleToCloseTimeout: '5 minutes',
+  retry: {
+    maximumAttempts: 5,
+    initialInterval: '1s',
+    maximumInterval: '30 seconds',
+    nonRetryableErrorTypes: NON_RETRYABLE_ERRORS,
+  },
+});
+
+const storage = proxyActivities<typeof storageActivities>({
+  startToCloseTimeout: '2 minutes',
+  scheduleToCloseTimeout: '5 minutes',
+  retry: {
+    maximumAttempts: 3,
+    initialInterval: '5s',
+    maximumInterval: '1 minute',
+    nonRetryableErrorTypes: NON_RETRYABLE_ERRORS,
+  },
+});
+
+const notification = proxyActivities<typeof notificationActivities>({
+  startToCloseTimeout: '30 seconds',
+  scheduleToCloseTimeout: '2 minutes',
+  retry: {
+    maximumAttempts: 3,
+    initialInterval: '2s',
+    maximumInterval: '30 seconds',
+    nonRetryableErrorTypes: NON_RETRYABLE_ERRORS,
+  },
+});
+
+const user = proxyActivities<typeof userActivities>({
+  startToCloseTimeout: '2 minutes',
+  scheduleToCloseTimeout: '5 minutes',
+  retry: {
+    maximumAttempts: 3,
+    initialInterval: '5s',
+    maximumInterval: '1 minute',
+    nonRetryableErrorTypes: NON_RETRYABLE_ERRORS,
+  },
+});
+
+const billing = proxyActivities<typeof billingActivities>({
+  startToCloseTimeout: '2 minutes',
+  scheduleToCloseTimeout: '5 minutes',
+  retry: {
+    maximumAttempts: 3,
+    initialInterval: '5s',
+    maximumInterval: '1 minute',
+    nonRetryableErrorTypes: NON_RETRYABLE_ERRORS,
+  },
+});
+
+const appPlaneWebhook = proxyActivities<typeof appPlaneWebhookActivities>({
+  startToCloseTimeout: '1 minute',
+  scheduleToCloseTimeout: '3 minutes',
+  retry: {
+    maximumAttempts: 5,
+    initialInterval: '5s',
+    maximumInterval: '1 minute',
+    nonRetryableErrorTypes: ['WebhookRejectedError', ...NON_RETRYABLE_ERRORS],
+  },
+});
+
+// Supabase App Plane Activities - Direct provisioning (replaces webhook approach)
+const supabaseAppPlane = proxyActivities<typeof supabaseAppPlaneActivities>({
+  startToCloseTimeout: '2 minutes',
+  scheduleToCloseTimeout: '5 minutes',
+  retry: {
+    maximumAttempts: 3,
+    initialInterval: '5s',
+    maximumInterval: '1 minute',
+    nonRetryableErrorTypes: ['SupabaseOrganizationError', ...NON_RETRYABLE_ERRORS],
+  },
+});
+
+// ============================================
+// Signals and Queries
+// ============================================
+
+export const provisioningCancelledSignal = defineSignal('provisioningCancelled');
+
+// Signal for App Plane to confirm organization provisioning completed
+export interface AppPlaneProvisionedPayload {
+  organizationId: string;
+  adminUserId?: string;
+  success: boolean;
+  error?: string;
+}
+export const appPlaneProvisionedSignal = defineSignal<[AppPlaneProvisionedPayload]>('appPlaneProvisioned');
+
+export const getProvisioningStatusQuery =
+  defineQuery<ProvisioningStatus>('getProvisioningStatus');
+
+// ============================================
+// Input Validation
+// ============================================
+
+function validateInput(input: TenantProvisioningInput): void {
+  if (!input.tenantId || typeof input.tenantId !== 'string') {
+    throw ApplicationFailure.nonRetryable('tenantId is required', 'ValidationError');
+  }
+  if (!input.tenantKey || typeof input.tenantKey !== 'string') {
+    throw ApplicationFailure.nonRetryable('tenantKey is required', 'ValidationError');
+  }
+  if (!input.tenantName || typeof input.tenantName !== 'string') {
+    throw ApplicationFailure.nonRetryable('tenantName is required', 'ValidationError');
+  }
+  if (!input.tier || !['silo', 'pooled', 'bridge'].includes(input.tier)) {
+    throw ApplicationFailure.nonRetryable('Invalid tier', 'ValidationError');
+  }
+  if (input.idpConfig && (!input.contacts || input.contacts.length === 0)) {
+    throw ApplicationFailure.nonRetryable(
+      'At least one contact is required when IdP is configured',
+      'ValidationError'
+    );
+  }
+}
+
+// ============================================
+// Main Workflow
+// ============================================
+
+export async function provisionTenantWorkflow(
+  input: TenantProvisioningInput
+): Promise<TenantProvisioningResult> {
+  const { workflowId } = workflowInfo();
+
+  // Validate input first
+  validateInput(input);
+
+  log.info('Starting tenant provisioning workflow', {
+    tenantId: input.tenantId,
+    tenantKey: input.tenantKey,
+    tier: input.tier,
+  });
+
+  // Workflow state
+  let status: ProvisioningStatus = {
+    step: 'initializing',
+    progress: 0,
+    startedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  };
+
+  let cancelled = false;
+
+  // Compensation tracking
+  let idpCreated = false;
+  let idpOrganizationId: string | undefined;
+  let adminUserCreated = false;
+  let adminUserId: string | undefined;
+  let schemaProvisioned = false;
+  let storageProvisioned = false;
+  let storageBucketName: string | undefined;
+  let infraProvisioned = false;
+  let appDeployed = false;
+  let deploymentId: string | undefined;
+  let billingCustomerCreated = false;
+  let billingCustomerId: string | undefined;
+  let subscriptionCreated = false;
+  let subscriptionId: string | undefined;
+
+  // Results
+  let idpResult: Awaited<ReturnType<typeof idp.createIdPOrganization>> | null = null;
+  let adminUserResult: Awaited<ReturnType<typeof user.createKeycloakUser>> | null = null;
+  let schemaResult: Awaited<ReturnType<typeof tenant.provisionTenantSchema>> | null = null;
+  let storageResult: Awaited<ReturnType<typeof storage.provisionTenantStorage>> | null = null;
+  let infraResult: Awaited<ReturnType<typeof infra.provisionInfrastructure>> | null = null;
+  let deployResult: Awaited<ReturnType<typeof deploy.deployApplication>> | null = null;
+  let billingCustomerResult: Awaited<ReturnType<typeof billing.createBillingCustomer>> | null = null;
+  let subscriptionResult: Awaited<ReturnType<typeof billing.createTenantSubscription>> | null = null;
+
+  // Helper to update status
+  const updateStatus = (step: ProvisioningStep, progress: number, message?: string) => {
+    status = {
+      step,
+      progress,
+      message,
+      startedAt: status.startedAt,
+      updatedAt: new Date().toISOString(),
+    };
+    log.debug('Status updated', { step, progress, message });
+  };
+
+  // Helper to check cancellation
+  const checkCancellation = () => {
+    if (cancelled) {
+      log.warn('Provisioning cancelled by user', { tenantId: input.tenantId });
+      throw ApplicationFailure.nonRetryable(
+        'Provisioning cancelled by user',
+        'CancellationError'
+      );
+    }
+  };
+
+  // Set up signal and query handlers
+  setHandler(provisioningCancelledSignal, () => {
+    cancelled = true;
+    log.info('Received cancellation signal', { tenantId: input.tenantId });
+  });
+
+  setHandler(getProvisioningStatusQuery, () => status);
+
+  try {
+    // ========================================
+    // Step 1: Update tenant status to PROVISIONING
+    // ========================================
+    updateStatus('updating_status', 5, 'Initiating provisioning...');
+
+    await tenant.updateTenantStatus({
+      tenantId: input.tenantId,
+      status: 'PROVISIONING',
+      message: 'Provisioning workflow started',
+    });
+
+    checkCancellation();
+
+    // ========================================
+    // Step 2: Create IdP Organization (if configured)
+    // ========================================
+    if (input.idpConfig) {
+      updateStatus('creating_idp_organization', 15, 'Setting up identity provider...');
+      log.info('Creating IdP organization', {
+        provider: input.idpConfig.provider,
+        tenantId: input.tenantId,
+      });
+
+      idpResult = await idp.createIdPOrganization({
+        tenantId: input.tenantId,
+        tenantKey: input.tenantKey,
+        tenantName: input.tenantName,
+        provider: input.idpConfig.provider,
+        domains: input.domains,
+        adminContact: input.contacts[0],
+        config: {
+          ssoEnabled: input.idpConfig.ssoEnabled,
+          mfaEnabled: input.idpConfig.mfaEnabled,
+        },
+      });
+
+      idpCreated = true;
+      idpOrganizationId = idpResult.organizationId;
+      log.info('IdP organization created', { organizationId: idpOrganizationId });
+
+      checkCancellation();
+
+      // ========================================
+      // Step 2b: Create Admin User in Keycloak
+      // ========================================
+      updateStatus('creating_admin_user', 20, 'Creating admin user...');
+      log.info('Creating admin user in Keycloak', {
+        tenantId: input.tenantId,
+        adminEmail: input.contacts[0].email,
+      });
+
+      adminUserResult = await user.createKeycloakUser({
+        tenantId: input.tenantId,
+        tenantKey: input.tenantKey,
+        email: input.contacts[0].email,
+        firstName: input.contacts[0].firstName,
+        lastName: input.contacts[0].lastName,
+        role: 'admin',
+        metadata: {
+          isPrimaryContact: 'true',
+        },
+      });
+
+      adminUserCreated = true;
+      adminUserId = adminUserResult.userId;
+      log.info('Admin user created', { userId: adminUserId, email: input.contacts[0].email });
+
+      checkCancellation();
+    }
+
+    // ========================================
+    // Step 3: Provision Database Schema (PostgreSQL)
+    // ========================================
+    updateStatus('provisioning_database', 25, 'Creating tenant database schema...');
+    log.info('Provisioning tenant database schema', { tenantKey: input.tenantKey });
+
+    schemaResult = await tenant.provisionTenantSchema({
+      tenantId: input.tenantId,
+      tenantKey: input.tenantKey,
+    });
+
+    schemaProvisioned = true;
+    log.info('Database schema provisioned', {
+      schemaName: schemaResult.schemaName,
+      tableCount: schemaResult.tables.length,
+    });
+
+    checkCancellation();
+
+    // ========================================
+    // Step 4: Provision Storage (S3/MinIO)
+    // ========================================
+    updateStatus('provisioning_storage', 35, 'Creating tenant storage bucket...');
+    log.info('Provisioning tenant storage', { tenantKey: input.tenantKey });
+
+    storageResult = await storage.provisionTenantStorage({
+      tenantId: input.tenantId,
+      tenantKey: input.tenantKey,
+      tier: input.tier,
+    });
+
+    storageProvisioned = true;
+    storageBucketName = storageResult.bucketName;
+    log.info('Storage provisioned', { bucketName: storageBucketName });
+
+    checkCancellation();
+
+    // ========================================
+    // Step 5: Provision Infrastructure (Terraform)
+    // Only for silo/bridge tiers - pooled tenants use shared infrastructure
+    // ========================================
+    if (input.tier === 'silo' || input.tier === 'bridge') {
+      updateStatus('provisioning_infrastructure', 45, 'Provisioning infrastructure...');
+      log.info('Provisioning infrastructure', { tier: input.tier });
+
+      infraResult = await infra.provisionInfrastructure({
+        tenantId: input.tenantId,
+        tenantKey: input.tenantKey,
+        tier: input.tier,
+        region: input.infrastructureConfig?.region,
+        idpOrganizationId,
+        customVariables: input.infrastructureConfig?.customVariables,
+      });
+
+      infraProvisioned = true;
+      log.info('Infrastructure provisioned', { runId: infraResult.runId });
+
+      checkCancellation();
+    } else {
+      // Pooled tier - use shared infrastructure (Free/Starter plans)
+      log.info('Skipping infrastructure provisioning for pooled tier', {
+        tenantId: input.tenantId,
+        tier: input.tier,
+      });
+      // Create a minimal infraResult for pooled deployments
+      infraResult = {
+        runId: `pooled-${input.tenantId}`,
+        status: 'applied',
+        outputs: {},
+        resources: [],
+      };
+    }
+
+    // ========================================
+    // Step 6: Deploy Application
+    // ========================================
+    updateStatus('deploying_application', 60, 'Deploying application...');
+    log.info('Deploying application', { tier: input.tier });
+
+    deployResult = await deploy.deployApplication({
+      tenantId: input.tenantId,
+      tenantKey: input.tenantKey,
+      tier: input.tier,
+      infrastructureOutputs: infraResult?.outputs || {},
+    });
+
+    appDeployed = true;
+    deploymentId = deployResult.deploymentId;
+    log.info('Application deployed', {
+      deploymentId,
+      appPlaneUrl: deployResult.appPlaneUrl,
+    });
+
+    checkCancellation();
+
+    // ========================================
+    // Step 7: Configure DNS (if custom domains)
+    // ========================================
+    if (input.domains.length > 0 && infraResult?.outputs?.loadBalancerDns) {
+      updateStatus('configuring_dns', 70, 'Configuring DNS...');
+      log.info('Configuring DNS', { domains: input.domains });
+
+      await deploy.configureDns({
+        tenantId: input.tenantId,
+        tenantKey: input.tenantKey,
+        domains: input.domains,
+        targetEndpoint: infraResult.outputs.loadBalancerDns,
+      });
+
+      log.info('DNS configured successfully');
+    }
+
+    // ========================================
+    // Step 6: Create resource records
+    // ========================================
+    updateStatus('creating_resources', 80, 'Recording provisioned resources...');
+
+    const allResources = [
+      ...(infraResult?.resources || []),
+      ...(deployResult?.resources || []),
+    ];
+
+    if (allResources.length > 0) {
+      await tenant.createResources({
+        tenantId: input.tenantId,
+        resources: allResources,
+      });
+      log.info('Resources recorded', { count: allResources.length });
+    }
+
+    // ========================================
+    // Step 7: Update tenant to ACTIVE
+    // ========================================
+    updateStatus('activating_tenant', 90, 'Activating tenant...');
+
+    await tenant.updateTenantStatus({
+      tenantId: input.tenantId,
+      status: 'ACTIVE',
+      message: 'Provisioning completed successfully',
+      metadata: {
+        appPlaneUrl: deployResult.appPlaneUrl,
+        idpOrganizationId,
+        provisionedAt: new Date().toISOString(),
+      },
+    });
+
+    log.info('Tenant activated', { tenantId: input.tenantId });
+
+    // ========================================
+    // Step 8: Create Billing Customer (Stripe)
+    // ========================================
+    if (input.contacts && input.contacts.length > 0) {
+      updateStatus('creating_billing_customer', 92, 'Setting up billing...');
+      log.info('Creating billing customer', { tenantId: input.tenantId });
+
+      const primaryContact = input.contacts[0];
+      billingCustomerResult = await billing.createBillingCustomer({
+        tenantId: input.tenantId,
+        firstName: primaryContact.firstName,
+        lastName: primaryContact.lastName,
+        email: primaryContact.email,
+        company: input.tenantName,
+        phone: primaryContact.phone,
+      });
+
+      billingCustomerCreated = true;
+      billingCustomerId = billingCustomerResult.customerId;
+      log.info('Billing customer created', { customerId: billingCustomerId });
+
+      checkCancellation();
+
+      // ========================================
+      // Step 9: Create Subscription
+      // ========================================
+      if (input.subscription?.planId) {
+        updateStatus('creating_subscription', 94, 'Creating subscription...');
+        log.info('Creating subscription', {
+          tenantId: input.tenantId,
+          planId: input.subscription.planId,
+        });
+
+        subscriptionResult = await billing.createTenantSubscription({
+          tenantId: input.tenantId,
+          planId: input.subscription.planId,
+          startDate: input.subscription.startDate ? new Date(input.subscription.startDate) : undefined,
+        });
+
+        subscriptionCreated = true;
+        subscriptionId = subscriptionResult.subscriptionId;
+        log.info('Subscription created', { subscriptionId });
+
+        checkCancellation();
+      }
+    }
+
+    // ========================================
+    // Step 10: Send welcome notification
+    // ========================================
+    if (input.notificationConfig?.sendWelcomeEmail !== false) {
+      updateStatus('sending_notifications', 92, 'Sending welcome email...');
+
+      await notification.sendWelcomeEmail({
+        tenantId: input.tenantId,
+        tenantName: input.tenantName,
+        contacts: input.contacts,
+        appPlaneUrl: deployResult.appPlaneUrl,
+        adminPortalUrl: deployResult.adminPortalUrl,
+        loginUrl: idpResult?.loginUrl,
+      });
+
+      log.info('Welcome email sent');
+    }
+
+    // ========================================
+    // Step 11: Provision App Plane Organization (via Webhook with Confirmation)
+    // CRITICAL: Uses unified tenant_id = organization_id strategy
+    // Flow: Send webhook → Wait for confirmation signal → Continue
+    // ========================================
+    updateStatus('provisioning_app_plane', 96, 'Creating App Plane organization...');
+    log.info('Sending App Plane provisioning webhook', {
+      tenantId: input.tenantId,
+      tenantKey: input.tenantKey,
+    });
+
+    // Track confirmation state
+    let appPlaneConfirmation: AppPlaneProvisionedPayload | null = null;
+
+    // Set up handler for App Plane confirmation signal
+    setHandler(appPlaneProvisionedSignal, (payload: AppPlaneProvisionedPayload) => {
+      log.info('Received App Plane provisioning confirmation', {
+        organizationId: payload.organizationId,
+        success: payload.success,
+      });
+      appPlaneConfirmation = payload;
+    });
+
+    // Send webhook to App Plane (includes workflowId for callback confirmation)
+    const primaryContact = input.contacts?.[0] || { email: '', firstName: '', lastName: '' };
+    await appPlaneWebhook.notifyTenantProvisioned({
+      tenantId: input.tenantId,
+      tenantKey: input.tenantKey,
+      tenantName: input.tenantName,
+      planId: input.subscription?.planId,
+      adminUser: {
+        email: primaryContact.email,
+        firstName: primaryContact.firstName,
+        lastName: primaryContact.lastName,
+        keycloakUserId: adminUserId,
+      },
+      limits: {
+        maxUsers: input.subscription?.limits?.maxUsers,
+        maxComponents: input.subscription?.limits?.maxComponents,
+        maxStorageGb: input.subscription?.limits?.maxStorageGb,
+      },
+      // Include workflow callback fields so App Plane can signal completion
+      workflowId,
+      temporalNamespace: 'arc-saas',
+    });
+
+    log.info('Webhook sent, waiting for App Plane confirmation...', {
+      workflowId,
+      tenantId: input.tenantId,
+    });
+
+    // Wait for confirmation signal (timeout after 5 minutes)
+    const APP_PLANE_CONFIRMATION_TIMEOUT = '5 minutes';
+    const confirmationReceived = await condition(
+      () => appPlaneConfirmation !== null || cancelled,
+      APP_PLANE_CONFIRMATION_TIMEOUT
+    );
+
+    if (cancelled) {
+      throw ApplicationFailure.nonRetryable('Provisioning cancelled by user', 'CancellationError');
+    }
+
+    if (!confirmationReceived) {
+      log.warn('App Plane confirmation timeout - continuing anyway', {
+        tenantId: input.tenantId,
+        timeout: APP_PLANE_CONFIRMATION_TIMEOUT,
+      });
+      // Don't fail the workflow, just log warning - organization may have been created
+    } else if (appPlaneConfirmation && !appPlaneConfirmation.success) {
+      log.error('App Plane provisioning failed', {
+        tenantId: input.tenantId,
+        error: appPlaneConfirmation.error,
+      });
+      throw ApplicationFailure.nonRetryable(
+        `App Plane provisioning failed: ${appPlaneConfirmation.error}`,
+        'AppPlaneProvisioningError'
+      );
+    } else {
+      log.info('App Plane organization provisioned successfully', {
+        organizationId: appPlaneConfirmation?.organizationId,
+        adminUserId: appPlaneConfirmation?.adminUserId,
+      });
+    }
+
+    // ========================================
+    // Complete!
+    // ========================================
+    updateStatus('completed', 100, 'Provisioning completed successfully');
+
+    log.info('Provisioning workflow completed successfully', {
+      tenantId: input.tenantId,
+      appPlaneUrl: deployResult.appPlaneUrl,
+    });
+
+    return {
+      success: true,
+      tenantId: input.tenantId,
+      workflowId,
+      appPlaneUrl: deployResult.appPlaneUrl,
+      adminPortalUrl: deployResult.adminPortalUrl,
+      resources: allResources,
+      idpOrganizationId,
+      idpClientId: idpResult?.clientId,
+      schemaName: schemaResult?.schemaName,
+      storageBucket: storageResult?.bucketName,
+    };
+
+  } catch (error) {
+    // ========================================
+    // SAGA COMPENSATION - Rollback in reverse order
+    // ========================================
+    updateStatus('compensation', 0, 'Rolling back due to failure...');
+
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    const failedStep = status.step;
+
+    log.error('Provisioning failed, starting compensation', {
+      tenantId: input.tenantId,
+      failedStep,
+      error: errorMessage,
+    });
+
+    // Rollback billing (subscription first, then customer)
+    if (billingCustomerCreated) {
+      try {
+        log.info('Deleting billing customer', { tenantId: input.tenantId });
+        await billing.deleteBillingCustomer({
+          tenantId: input.tenantId,
+        });
+        log.info('Billing customer deleted successfully');
+      } catch (rollbackError) {
+        log.error('Failed to delete billing customer', {
+          error: rollbackError instanceof Error ? rollbackError.message : 'Unknown',
+        });
+        // Continue with other compensations
+      }
+    }
+
+    // Rollback deployment
+    if (appDeployed && deploymentId) {
+      try {
+        log.info('Rolling back deployment', { deploymentId });
+        await deploy.rollbackDeployment({
+          tenantId: input.tenantId,
+          deploymentId,
+        });
+        log.info('Deployment rolled back successfully');
+      } catch (rollbackError) {
+        log.error('Failed to rollback deployment', {
+          error: rollbackError instanceof Error ? rollbackError.message : 'Unknown',
+        });
+        // Continue with other compensations
+      }
+    }
+
+    // Rollback infrastructure
+    if (infraProvisioned) {
+      try {
+        log.info('Destroying infrastructure', { tenantId: input.tenantId });
+        await infra.destroyInfrastructure({
+          tenantId: input.tenantId,
+          tenantKey: input.tenantKey,
+          tier: input.tier,
+        });
+        log.info('Infrastructure destroyed successfully');
+      } catch (rollbackError) {
+        log.error('Failed to destroy infrastructure', {
+          error: rollbackError instanceof Error ? rollbackError.message : 'Unknown',
+        });
+        // Continue with other compensations
+      }
+    }
+
+    // Rollback storage
+    if (storageProvisioned) {
+      try {
+        log.info('Deleting storage bucket', { tenantKey: input.tenantKey });
+        await storage.deprovisionTenantStorage({
+          tenantId: input.tenantId,
+          tenantKey: input.tenantKey,
+          forceDelete: true,
+        });
+        log.info('Storage bucket deleted successfully');
+      } catch (rollbackError) {
+        log.error('Failed to delete storage bucket', {
+          error: rollbackError instanceof Error ? rollbackError.message : 'Unknown',
+        });
+        // Continue with other compensations
+      }
+    }
+
+    // Rollback database schema
+    if (schemaProvisioned) {
+      try {
+        log.info('Dropping database schema', { tenantKey: input.tenantKey });
+        await tenant.deprovisionTenantSchema({
+          tenantId: input.tenantId,
+          tenantKey: input.tenantKey,
+          backupFirst: false, // Don't backup on failed provision
+        });
+        log.info('Database schema dropped successfully');
+      } catch (rollbackError) {
+        log.error('Failed to drop database schema', {
+          error: rollbackError instanceof Error ? rollbackError.message : 'Unknown',
+        });
+        // Continue with other compensations
+      }
+    }
+
+    // Rollback admin user (before IdP organization since user is in the realm)
+    if (adminUserCreated && adminUserId && input.tenantKey) {
+      try {
+        log.info('Deleting admin user', { userId: adminUserId, tenantKey: input.tenantKey });
+        await user.deleteKeycloakUser(input.tenantKey, adminUserId);
+        log.info('Admin user deleted successfully');
+      } catch (rollbackError) {
+        log.error('Failed to delete admin user', {
+          error: rollbackError instanceof Error ? rollbackError.message : 'Unknown',
+        });
+        // Continue with other compensations
+      }
+    }
+
+    // Rollback IdP organization
+    if (idpCreated && idpOrganizationId && input.idpConfig) {
+      try {
+        log.info('Deleting IdP organization', { organizationId: idpOrganizationId });
+        await idp.deleteIdPOrganization({
+          tenantId: input.tenantId,
+          provider: input.idpConfig.provider,
+          organizationId: idpOrganizationId,
+        });
+        log.info('IdP organization deleted successfully');
+      } catch (rollbackError) {
+        log.error('Failed to delete IdP organization', {
+          error: rollbackError instanceof Error ? rollbackError.message : 'Unknown',
+        });
+      }
+    }
+
+    // Update tenant status to FAILED
+    try {
+      await tenant.updateTenantStatus({
+        tenantId: input.tenantId,
+        status: 'PROVISION_FAILED',
+        message: `Provisioning failed: ${errorMessage}`,
+        metadata: {
+          failedAt: failedStep,
+          error: errorMessage,
+          compensationExecuted: true,
+        },
+      });
+    } catch (statusError) {
+      log.error('Failed to update tenant status to PROVISION_FAILED', {
+        error: statusError instanceof Error ? statusError.message : 'Unknown',
+      });
+    }
+
+    // Send failure notification
+    if (input.contacts && input.contacts.length > 0) {
+      try {
+        await notification.sendProvisioningFailedEmail({
+          tenantId: input.tenantId,
+          tenantName: input.tenantName,
+          contacts: input.contacts,
+          error: errorMessage,
+          failedStep,
+        });
+        log.info('Failure notification sent');
+      } catch (notifyError) {
+        log.error('Failed to send failure notification', {
+          error: notifyError instanceof Error ? notifyError.message : 'Unknown',
+        });
+      }
+    }
+
+    updateStatus('failed', 0, `Provisioning failed: ${errorMessage}`);
+
+    log.info('Compensation completed', { tenantId: input.tenantId });
+
+    return {
+      success: false,
+      tenantId: input.tenantId,
+      workflowId,
+      error: errorMessage,
+      failedStep,
+      compensationExecuted: true,
+    };
+  }
+}

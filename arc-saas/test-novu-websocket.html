@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test Novu WebSocket</title>
+    <script src="https://cdn.jsdelivr.net/npm/@novu/notification-center@latest/dist/umd/index.umd.min.js"></script>
+</head>
+<body>
+    <h1>Testing Novu WebSocket Connection</h1>
+    <div id="status">Connecting...</div>
+    <div id="notifications"></div>
+
+    <script>
+        const appId = '6931905380e6f7e26e0ddaad';
+        const subscriberId = 'admin';
+        const backendUrl = 'http://localhost:13100';
+        const socketUrl = 'http://localhost:13101';
+
+        console.log('Initializing Novu with:', {
+            appId,
+            subscriberId,
+            backendUrl,
+            socketUrl
+        });
+
+        // Test WebSocket connection
+        // IMPORTANT: Replace <your-novu-api-key> with your actual Novu API key
+        const apiKey = '<your-novu-api-key>';
+
+        if (apiKey === '<your-novu-api-key>') {
+            document.getElementById('status').innerHTML =
+                '❌ Error: Please replace <your-novu-api-key> with your actual Novu API key in the HTML file';
+        } else {
+            fetch(`${backendUrl}/v1/subscribers/${subscriberId}/notifications/feed`, {
+                headers: {
+                    'Authorization': `ApiKey ${apiKey}`
+                }
+            })
+            .then(r => r.json())
+            .then(data => {
+                document.getElementById('status').innerHTML =
+                    `✅ Connected! Found ${data.data.length} notification(s)`;
+                document.getElementById('notifications').innerHTML =
+                    `<pre>${JSON.stringify(data.data, null, 2)}</pre>`;
+            })
+            .catch(err => {
+                document.getElementById('status').innerHTML =
+                    `❌ Error: ${err.message}`;
+            });
+        }
+    </script>
+</body>
+</html>

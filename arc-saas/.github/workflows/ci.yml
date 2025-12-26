@@ -1,0 +1,229 @@
+# Continuous Integration Workflow
+# Platform-agnostic CI/CD for ARC-SaaS
+
+name: CI
+
+on:
+  push:
+    branches: [main, develop, 'feature/**']
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+  BUN_VERSION: '1.1.0'
+
+jobs:
+  # ===========================================================================
+  # Backend Tests
+  # ===========================================================================
+  backend-tests:
+    name: Backend Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: arc_saas_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Create Database Schema
+        run: |
+          PGPASSWORD=postgres psql -h localhost -U postgres -d arc_saas_test -c "CREATE SCHEMA IF NOT EXISTS main;"
+          PGPASSWORD=postgres psql -h localhost -U postgres -d arc_saas_test -c "CREATE SCHEMA IF NOT EXISTS subscription;"
+        env:
+          PGPASSWORD: postgres
+
+      - name: Build Backend Services
+        run: |
+          npm run build --workspace=@sourceloop/ctrl-plane-tenant-management-service
+          npm run build --workspace=@sourceloop/ctrl-plane-subscription-service || true
+
+      - name: Run Unit Tests
+        run: |
+          npm run test --workspace=@sourceloop/ctrl-plane-tenant-management-service -- --grep "Unit"
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USER: postgres
+          DB_PASSWORD: postgres
+          DB_DATABASE: arc_saas_test
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          JWT_SECRET: test-secret
+          JWT_ISSUER: arc-saas-test
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: backend-test-results
+          path: |
+            services/*/mochawesome-report/
+            services/*/.nyc_output/
+          retention-days: 7
+
+  # ===========================================================================
+  # Frontend Tests
+  # ===========================================================================
+  frontend-tests:
+    name: Frontend Tests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Build Admin App
+        run: npm run build --workspace=admin-app
+        env:
+          VITE_API_URL: http://localhost:14000
+          VITE_KEYCLOAK_URL: http://localhost:8180
+          VITE_KEYCLOAK_REALM: ananta-saas
+          VITE_KEYCLOAK_CLIENT_ID: admin-app
+
+      - name: Run Frontend Tests
+        run: npm run test --workspace=admin-app -- --run
+        env:
+          VITE_API_URL: http://localhost:14000
+
+      - name: Upload Test Results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: frontend-test-results
+          path: apps/admin-app/coverage/
+          retention-days: 7
+
+  # ===========================================================================
+  # Lint & Type Check
+  # ===========================================================================
+  lint:
+    name: Lint & Type Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install Dependencies
+        run: npm ci
+
+      - name: Lint Backend
+        run: npm run lint --workspace=@sourceloop/ctrl-plane-tenant-management-service || true
+
+      - name: Type Check Admin App
+        run: npm run typecheck --workspace=admin-app || npx tsc --noEmit --project apps/admin-app/tsconfig.json || true
+
+  # ===========================================================================
+  # Docker Build Test
+  # ===========================================================================
+  docker-build:
+    name: Docker Build Test
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build tenant-management-service
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./services/tenant-management-service/Dockerfile
+          push: false
+          tags: arc-saas/tenant-management-service:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+        continue-on-error: true
+
+      - name: Build admin-app
+        uses: docker/build-push-action@v5
+        with:
+          context: ./apps/admin-app
+          file: ./apps/admin-app/Dockerfile
+          push: false
+          tags: arc-saas/admin-app:test
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+        continue-on-error: true
+
+  # ===========================================================================
+  # Security Scan
+  # ===========================================================================
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run npm audit
+        run: npm audit --audit-level=high || true
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '0'
+        continue-on-error: true

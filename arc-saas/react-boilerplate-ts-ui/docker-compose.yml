@@ -1,0 +1,13 @@
+version: '3.9'
+services:
+  ui:
+    build: .
+    ports:
+      - '3000:80'
+    environment:
+      - CLIENT_ID=${CLIENT_ID}
+      - APP_API_BASE_URL=${APP_API_BASE_URL}
+      - AUTH_API_BASE_URL=${AUTH_API_BASE_URL}
+      - ENABLE_SESSION_TIMEOUT=${ENABLE_SESSION_TIMEOUT}
+      - EXPIRY_TIME_IN_MINUTE=${EXPIRY_TIME_IN_MINUTE}
+      - WARNING_ALERT_TIMEOUT_IN_MINUTE=${WARNING_ALERT_TIMEOUT_IN_MINUTE}

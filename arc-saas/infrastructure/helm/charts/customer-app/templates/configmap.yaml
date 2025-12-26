@@ -1,0 +1,146 @@
+{{- $baseDomain := .Values.externalUrls.baseDomain -}}
+{{- $protocol := .Values.externalUrls.protocol | default "https" -}}
+{{- $wsProtocol := ternary "wss" "ws" (eq $protocol "https") -}}
+
+{{/* Compute external URLs with defaults */}}
+{{- $keycloakUrl := .Values.externalUrls.keycloak | default (printf "%s://auth.%s" $protocol $baseDomain) -}}
+{{- $platformApiUrl := .Values.externalUrls.platformApi | default (printf "%s://api.%s" $protocol $baseDomain) -}}
+{{- $cnsApiUrl := .Values.externalUrls.cnsApi | default (printf "%s://cns.%s" $protocol $baseDomain) -}}
+{{- $supabaseApiUrl := .Values.externalUrls.supabaseApi | default (printf "%s://supabase.%s" $protocol $baseDomain) -}}
+{{- $otlpEndpoint := .Values.externalUrls.otlpEndpoint | default (printf "%s://jaeger.%s/v1/traces" $protocol $baseDomain) -}}
+{{- $websocketUrl := .Values.externalUrls.websocket | default (printf "%s://ws.%s" $wsProtocol $baseDomain) -}}
+
+{{/* Build CSP connect-src */}}
+{{- $connectSrc := printf "'self' %s %s %s %s %s %s" $platformApiUrl $cnsApiUrl $supabaseApiUrl $keycloakUrl $otlpEndpoint $websocketUrl -}}
+{{- if .Values.csp.additionalConnectSrc }}
+{{- $connectSrc = printf "%s %s" $connectSrc .Values.csp.additionalConnectSrc -}}
+{{- end }}
+
+{{/* Build CSP frame-src */}}
+{{- $frameSrc := printf "'self' %s" $keycloakUrl -}}
+{{- if .Values.csp.additionalFrameSrc }}
+{{- $frameSrc = printf "%s %s" $frameSrc .Values.csp.additionalFrameSrc -}}
+{{- end }}
+
+{{/* CSP header name based on report-only mode */}}
+{{- $cspHeaderName := ternary "Content-Security-Policy-Report-Only" "Content-Security-Policy" .Values.csp.reportOnly -}}
+
+{{/* CSP report-uri directive if configured */}}
+{{- $cspReportUri := "" -}}
+{{- if .Values.csp.reportUri }}
+{{- $cspReportUri = printf " report-uri %s;" .Values.csp.reportUri -}}
+{{- end }}
+
+{{/* CSP report-to directive for modern browsers */}}
+{{- $cspReportTo := "" -}}
+{{- if .Values.csp.reportTo }}
+{{- $cspReportTo = printf " report-to %s;" .Values.csp.reportTo -}}
+{{- end }}
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "customer-app.fullname" . }}-nginx
+  labels:
+    {{- include "customer-app.labels" . | nindent 4 }}
+data:
+  default.conf: |
+    server {
+      listen 80;
+      server_name _;
+      root /usr/share/nginx/html;
+      index index.html;
+
+      # Security headers
+      add_header X-Frame-Options "SAMEORIGIN" always;
+      add_header X-Content-Type-Options "nosniff" always;
+      add_header X-XSS-Protection "1; mode=block" always;
+      add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+      add_header {{ $cspHeaderName }} "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src {{ $connectSrc }}; frame-src {{ $frameSrc }}; frame-ancestors 'self'; form-action 'self' {{ $keycloakUrl }}; base-uri 'self'; object-src 'none'; worker-src 'self' blob:; manifest-src 'self';{{ $cspReportUri }}{{ $cspReportTo }}" always;
+
+      # SPA routing - serve index.html for all routes
+      location / {
+        try_files $uri $uri/ /index.html;
+      }
+
+      # Runtime configuration endpoint
+      location /config.js {
+        default_type application/javascript;
+        return 200 'window.__RUNTIME_CONFIG__ = {
+          VITE_KEYCLOAK_URL: "{{ $keycloakUrl }}",
+          VITE_KEYCLOAK_REALM: "{{ .Values.env.VITE_KEYCLOAK_REALM }}",
+          VITE_KEYCLOAK_CLIENT_ID: "{{ .Values.env.VITE_KEYCLOAK_CLIENT_ID }}",
+          VITE_API_URL: "{{ $platformApiUrl }}",
+          VITE_CNS_API_URL: "{{ $cnsApiUrl }}",
+          VITE_SUPABASE_URL: "{{ $supabaseApiUrl }}",
+          VITE_OTEL_ENABLED: "{{ .Values.env.VITE_OTEL_ENABLED }}",
+          VITE_OTEL_EXPORTER_ENDPOINT: "{{ $otlpEndpoint }}",
+          VITE_SERVICE_NAME: "{{ .Values.env.VITE_SERVICE_NAME }}",
+          VITE_APP_NAME: "{{ .Values.env.VITE_APP_NAME }}",
+          VITE_APP_VERSION: "{{ .Values.env.VITE_APP_VERSION }}"
+        };';
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+      }
+
+      # Cache static assets
+      location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+      }
+
+      # Health check endpoint
+      location /health {
+        return 200 'OK';
+        add_header Content-Type text/plain;
+      }
+
+      # Platform API proxy
+      location /api/ {
+        proxy_pass http://{{ .Values.services.platformApi.host }}:{{ .Values.services.platformApi.port }}/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+      }
+
+      # CNS API proxy
+      location /cns/ {
+        proxy_pass http://{{ .Values.services.cnsApi.host }}:{{ .Values.services.cnsApi.port }}/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+      }
+
+      # Supabase API proxy
+      location /supabase/ {
+        proxy_pass http://{{ .Values.services.supabaseApi.host }}:{{ .Values.services.supabaseApi.port }}/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+      }
+
+      {{- if .Values.nginx.extraConfig }}
+{{ .Values.nginx.extraConfig | indent 6 }}
+      {{- end }}
+    }
+
+  # Runtime config as separate file for easier debugging
+  runtime-config.json: |
+    {
+      "keycloakUrl": "{{ $keycloakUrl }}",
+      "keycloakRealm": "{{ .Values.env.VITE_KEYCLOAK_REALM }}",
+      "keycloakClientId": "{{ .Values.env.VITE_KEYCLOAK_CLIENT_ID }}",
+      "platformApiUrl": "{{ $platformApiUrl }}",
+      "cnsApiUrl": "{{ $cnsApiUrl }}",
+      "supabaseApiUrl": "{{ $supabaseApiUrl }}",
+      "otelEnabled": {{ .Values.env.VITE_OTEL_ENABLED }},
+      "otelEndpoint": "{{ $otlpEndpoint }}",
+      "serviceName": "{{ .Values.env.VITE_SERVICE_NAME }}",
+      "appName": "{{ .Values.env.VITE_APP_NAME }}",
+      "appVersion": "{{ .Values.env.VITE_APP_VERSION }}"
+    }

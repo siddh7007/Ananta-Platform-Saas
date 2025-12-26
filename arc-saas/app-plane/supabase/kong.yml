@@ -1,0 +1,70 @@
+_format_version: "1.1"
+
+###
+### Arc-SaaS Supabase Kong Configuration
+### Routes Supabase services through Kong API Gateway
+### NOTE: Authentication is handled by Keycloak, NOT Supabase Auth
+###
+
+services:
+  - name: rest-v1
+    url: http://arc-saas-supabase-rest:3000
+    routes:
+      - name: rest-v1-all
+        strip_path: true
+        paths:
+          - /rest/v1/
+    plugins:
+      - name: cors
+      - name: key-auth
+        config:
+          hide_credentials: false
+
+  - name: meta
+    url: http://arc-saas-supabase-meta:8080
+    routes:
+      - name: meta-all
+        strip_path: true
+        paths:
+          - /pg/
+    plugins:
+      - name: key-auth
+        config:
+          hide_credentials: false
+
+consumers:
+  - username: anon
+    keyauth_credentials:
+      - key: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsImF1ZCI6ImF1dGhlbnRpY2F0ZWQiLCJzdWIiOiJhbm9ueW1vdXMiLCJyb2xlIjoiYW5vbiIsInJlZiI6ImxvY2FsaG9zdCIsImlhdCI6MTc2NTIyNjY1NCwiZXhwIjoyMDgwNTg2NjU0fQ.L0YnPkH63b9IsCK9xmHsh9w_06fQTCaq1_CsApS-4M0
+  - username: service_role
+    keyauth_credentials:
+      - key: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsImF1ZCI6ImF1dGhlbnRpY2F0ZWQiLCJzdWIiOiJzZXJ2aWNlX3JvbGUiLCJyb2xlIjoic2VydmljZV9yb2xlIiwicmVmIjoibG9jYWxob3N0IiwiaWF0IjoxNzY1MjI2NjU0LCJleHAiOjIwODA1ODY2NTR9.hfyvW7q5t3rbIlwrng_ORjis-WSddqe85Ggw8duAEok
+
+plugins:
+  - name: cors
+    config:
+      origins:
+        - "*"
+      methods:
+        - GET
+        - HEAD
+        - PUT
+        - PATCH
+        - POST
+        - DELETE
+        - OPTIONS
+      headers:
+        - Accept
+        - Accept-Version
+        - Content-Length
+        - Content-MD5
+        - Content-Type
+        - Date
+        - X-Auth-Token
+        - Authorization
+        - apikey
+        - X-Client-Info
+      exposed_headers:
+        - X-Auth-Token
+      credentials: true
+      max_age: 3600

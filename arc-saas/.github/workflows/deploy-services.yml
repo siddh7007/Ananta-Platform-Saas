@@ -1,0 +1,178 @@
+# =============================================================================
+# Deploy Services Workflow
+# =============================================================================
+# Builds and deploys application services to ECS
+
+name: Deploy Services
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'services/**'
+      - 'apps/**'
+      - 'packages/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      services:
+        description: 'Services to deploy (comma-separated or "all")'
+        required: true
+        default: 'all'
+
+permissions:
+  contents: read
+  id-token: write
+  packages: write
+
+env:
+  AWS_REGION: us-east-1
+  ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
+
+jobs:
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.changes.outputs.services }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect Changed Services
+        id: changes
+        run: |
+          if [ "${{ github.event.inputs.services }}" == "all" ] || [ -z "${{ github.event.inputs.services }}" ]; then
+            # Check for changes in each service
+            SERVICES=()
+
+            if git diff --name-only HEAD~1 | grep -q "^services/tenant-management-service/"; then
+              SERVICES+=("tenant-management-service")
+            fi
+
+            if git diff --name-only HEAD~1 | grep -q "^services/temporal-worker-service/"; then
+              SERVICES+=("temporal-worker-service")
+            fi
+
+            if git diff --name-only HEAD~1 | grep -q "^apps/admin-app/"; then
+              SERVICES+=("admin-app")
+            fi
+
+            # If no specific changes, deploy all on workflow_dispatch
+            if [ ${#SERVICES[@]} -eq 0 ] && [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+              SERVICES=("tenant-management-service" "temporal-worker-service" "admin-app")
+            fi
+
+            echo "services=$(echo ${SERVICES[@]} | jq -R -s -c 'split(" ") | map(select(length > 0))')" >> $GITHUB_OUTPUT
+          else
+            echo "services=$(echo ${{ github.event.inputs.services }} | jq -R -s -c 'split(",") | map(gsub(" "; ""))')" >> $GITHUB_OUTPUT
+          fi
+
+  build-and-push:
+    name: Build and Push
+    needs: detect-changes
+    if: needs.detect-changes.outputs.services != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: ${{ fromJson(needs.detect-changes.outputs.services) }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Set Service Path
+        id: service-path
+        run: |
+          if [[ "${{ matrix.service }}" == *"-app" ]]; then
+            echo "path=apps/${{ matrix.service }}" >> $GITHUB_OUTPUT
+          else
+            echo "path=services/${{ matrix.service }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build and Push Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ steps.service-path.outputs.path }}
+          push: true
+          tags: |
+            ${{ env.ECR_REGISTRY }}/${{ matrix.service }}:${{ github.sha }}
+            ${{ env.ECR_REGISTRY }}/${{ matrix.service }}:latest
+          cache-from: type=registry,ref=${{ env.ECR_REGISTRY }}/${{ matrix.service }}:buildcache
+          cache-to: type=registry,ref=${{ env.ECR_REGISTRY }}/${{ matrix.service }}:buildcache,mode=max
+
+  deploy:
+    name: Deploy to ECS
+    needs: [detect-changes, build-and-push]
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+    strategy:
+      matrix:
+        service: ${{ fromJson(needs.detect-changes.outputs.services) }}
+
+    steps:
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Update ECS Service
+        run: |
+          CLUSTER_NAME="arc-saas-${{ github.event.inputs.environment || 'dev' }}"
+          SERVICE_NAME="${{ matrix.service }}"
+
+          # Force new deployment
+          aws ecs update-service \
+            --cluster $CLUSTER_NAME \
+            --service $SERVICE_NAME \
+            --force-new-deployment
+
+      - name: Wait for Deployment
+        run: |
+          CLUSTER_NAME="arc-saas-${{ github.event.inputs.environment || 'dev' }}"
+          SERVICE_NAME="${{ matrix.service }}"
+
+          aws ecs wait services-stable \
+            --cluster $CLUSTER_NAME \
+            --services $SERVICE_NAME
+
+      - name: Deployment Summary
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Service:** ${{ matrix.service }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ github.event.inputs.environment || 'dev' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Image Tag:** ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** Deployed Successfully" >> $GITHUB_STEP_SUMMARY

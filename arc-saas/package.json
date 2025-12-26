@@ -1,0 +1,46 @@
+{
+  "name": "arc-saas",
+  "private": false,
+  "scripts": {
+    "prepare": "husky install",
+    "build": "npm run build --workspaces --if-present",
+    "test": "lerna run test",
+    "migrate": "npm run db:migrate --workspaces --if-present",
+    "clean-deps": "lerna clean --yes && lerna exec --no-private \"npm install --ignore-scripts --package-lock-only --no-audit\"",
+    "export-typedocs": "npx tsc export-typedocs.ts && node export-typedocs",
+    "clean": "npm run clean --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@commitlint/cli": "^16.1.0",
+    "@commitlint/config-conventional": "^16.0.0",
+    "@commitlint/config-lerna-scopes": "^16.0.0",
+    "commitizen": "^4.2.4",
+    "concurrently": "^8.2.2",
+    "custom-sf-changelog": "file:packages/custom-sf-changelog",
+    "cz-conventional-changelog": "^3.3.0",
+    "cz-customizable": "^6.3.0",
+    "husky": "^7.0.4",
+    "lerna": "^7.3.0"
+  },
+  "workspaces": [
+    "services/*",
+    "packages/*",
+    "apps/*"
+  ],
+  "overrides": {
+    "@commitlint/config-lerna-scopes": {
+      "lerna": "^7.3.0"
+    },
+    "semver": "^7.5.2"
+  },
+  "config": {
+    "commitizen": {
+      "path": "./node_modules/cz-customizable"
+    }
+  },
+  "dependencies": {
+    "@novu/node": "^2.6.6",
+    "bcryptjs": "^3.0.3",
+    "mongodb": "^7.0.0"
+  }
+}

@@ -1,0 +1,330 @@
+# =============================================================================
+# ARC-SaaS Staging Environment Values
+# =============================================================================
+# Cloud-agnostic configuration for staging environment.
+# All secrets should be injected via external secret stores.
+# =============================================================================
+
+global:
+  environment: staging
+  cloudProvider: kubernetes  # kubernetes | aws | gcp | oracle
+
+  # Image settings
+  imageRegistry: ""  # Set to your registry: gcr.io/project, xxx.dkr.ecr.region.amazonaws.com, etc.
+  imagePullPolicy: Always
+  imageTag: "staging"  # Use staging tag for all images
+
+  # Secrets strategy
+  secrets:
+    provider: external-secrets  # kubernetes | vault | external-secrets
+    # For Vault:
+    # vaultAddress: "https://vault.staging.example.com:8200"
+    # vaultRole: "arc-saas-staging"
+    # For External Secrets Operator:
+    externalSecretsBackend: ""  # aws-secretsmanager | gcp-secretmanager | azure-keyvault | oracle-vault
+
+# -----------------------------------------------------------------------------
+# Tenant Management Service
+# -----------------------------------------------------------------------------
+tenant-management-service:
+  replicaCount: 2
+
+  image:
+    repository: arc-saas/tenant-management-service
+    tag: "staging"
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1024Mi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+  # Environment variables (non-sensitive)
+  env:
+    NODE_ENV: staging
+    PORT: "14000"
+    LOG_LEVEL: info
+
+  # External secrets configuration
+  externalSecrets:
+    enabled: true
+    refreshInterval: 30m
+    secretStoreRef:
+      name: arc-saas-secret-store
+      kind: ClusterSecretStore
+
+  # Kubernetes secrets references (provider-neutral)
+  secrets:
+    database:
+      existingSecret: "arc-saas-database-credentials"
+      keys:
+        host: DB_HOST
+        port: DB_PORT
+        username: DB_USER
+        password: DB_PASSWORD
+        database: DB_DATABASE
+    redis:
+      existingSecret: "arc-saas-redis-credentials"
+      keys:
+        url: REDIS_URL
+    jwt:
+      existingSecret: "arc-saas-jwt-secret"
+      keys:
+        secret: JWT_SECRET
+        issuer: JWT_ISSUER
+    keycloak:
+      existingSecret: "arc-saas-keycloak-credentials"
+      keys:
+        url: KEYCLOAK_URL
+        realm: KEYCLOAK_REALM
+        clientId: KEYCLOAK_CLIENT_ID
+        clientSecret: KEYCLOAK_CLIENT_SECRET
+    novu:
+      existingSecret: "arc-saas-novu-credentials"
+      keys:
+        apiKey: NOVU_API_KEY
+        appId: NOVU_APP_ID
+    stripe:
+      existingSecret: "arc-saas-stripe-credentials"
+      keys:
+        apiKey: STRIPE_API_KEY
+        webhookSecret: STRIPE_WEBHOOK_SECRET
+
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 14000
+
+  # Ingress - staging uses internal ingress
+  ingress:
+    enabled: true
+    className: "nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      cert-manager.io/cluster-issuer: "letsencrypt-staging"
+    hosts:
+      - host: "api.staging.arc-saas.example.com"
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: arc-saas-staging-tls
+        hosts:
+          - "api.staging.arc-saas.example.com"
+
+  # Health probes
+  livenessProbe:
+    httpGet:
+      path: /ping
+      port: http
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /ping
+      port: http
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    failureThreshold: 3
+
+  # Pod disruption budget
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+
+# -----------------------------------------------------------------------------
+# Temporal Worker Service
+# -----------------------------------------------------------------------------
+temporal-worker-service:
+  replicaCount: 2
+
+  image:
+    repository: arc-saas/temporal-worker-service
+    tag: "staging"
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1024Mi
+
+  # Temporal connection
+  temporal:
+    address: "temporal:7233"
+    namespace: "arc-saas"
+    taskQueue: "tenant-provisioning"
+
+  # External secrets for worker
+  secrets:
+    database:
+      existingSecret: "arc-saas-database-credentials"
+    keycloak:
+      existingSecret: "arc-saas-keycloak-credentials"
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 70
+
+# -----------------------------------------------------------------------------
+# Admin App (React Frontend)
+# -----------------------------------------------------------------------------
+admin-app:
+  replicaCount: 2
+
+  image:
+    repository: arc-saas/admin-app
+    tag: "staging"
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  # Environment variables (build-time or runtime config)
+  env:
+    VITE_API_URL: "https://api.staging.arc-saas.example.com"
+    VITE_KEYCLOAK_URL: "https://auth.staging.arc-saas.example.com"
+    VITE_KEYCLOAK_REALM: "arc-saas"
+    VITE_KEYCLOAK_CLIENT_ID: "admin-app"
+
+  service:
+    type: ClusterIP
+    port: 80
+
+  ingress:
+    enabled: true
+    className: "nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      cert-manager.io/cluster-issuer: "letsencrypt-staging"
+    hosts:
+      - host: "admin.staging.arc-saas.example.com"
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: arc-saas-admin-staging-tls
+        hosts:
+          - "admin.staging.arc-saas.example.com"
+
+  autoscaling:
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 4
+    targetCPUUtilizationPercentage: 70
+
+# -----------------------------------------------------------------------------
+# Keycloak (Use managed service in staging if available)
+# -----------------------------------------------------------------------------
+keycloak:
+  enabled: true
+  replicaCount: 2
+
+  image:
+    repository: quay.io/keycloak/keycloak
+    tag: "23.0"
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1024Mi
+    limits:
+      cpu: 2000m
+      memory: 2048Mi
+
+  # Admin credentials from secret
+  secrets:
+    admin:
+      existingSecret: "arc-saas-keycloak-admin"
+      keys:
+        username: KEYCLOAK_ADMIN
+        password: KEYCLOAK_ADMIN_PASSWORD
+
+  # Database connection from secret
+  database:
+    existingSecret: "arc-saas-keycloak-database"
+    vendor: postgres
+
+  ingress:
+    enabled: true
+    className: "nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      cert-manager.io/cluster-issuer: "letsencrypt-staging"
+    hosts:
+      - host: "auth.staging.arc-saas.example.com"
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: arc-saas-auth-staging-tls
+        hosts:
+          - "auth.staging.arc-saas.example.com"
+
+# -----------------------------------------------------------------------------
+# Temporal (Use managed Temporal Cloud in staging if available)
+# -----------------------------------------------------------------------------
+temporal:
+  enabled: true
+
+  server:
+    replicaCount: 2
+
+  web:
+    enabled: true
+    replicaCount: 1
+
+  # Database for Temporal
+  cassandra:
+    enabled: false
+  postgresql:
+    enabled: true
+    existingSecret: "arc-saas-temporal-database"
+
+# -----------------------------------------------------------------------------
+# PostgreSQL (Prefer managed DB - RDS, Cloud SQL, OCI DB)
+# -----------------------------------------------------------------------------
+postgresql:
+  # Set to false when using managed database
+  enabled: false
+  # When enabled: false, provide connection via existingSecret
+
+# -----------------------------------------------------------------------------
+# Redis (Prefer managed Redis - ElastiCache, Memorystore, OCI Cache)
+# -----------------------------------------------------------------------------
+redis:
+  # Set to false when using managed Redis
+  enabled: false
+  # When enabled: false, provide connection via existingSecret
+
+# -----------------------------------------------------------------------------
+# Monitoring (Provider-neutral)
+# -----------------------------------------------------------------------------
+monitoring:
+  enabled: true
+
+  prometheus:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+
+  grafana:
+    enabled: false  # Use managed Grafana if available

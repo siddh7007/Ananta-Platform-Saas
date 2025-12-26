@@ -1,0 +1,6 @@
+# Playwright test artifacts
+.auth/
+test-results/
+playwright-report/
+playwright/.cache/
+trace.zip

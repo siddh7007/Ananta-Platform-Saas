@@ -1,0 +1,50 @@
+# =============================================================================
+# ARC-SaaS Umbrella Chart - Default Values
+# =============================================================================
+# These are minimal defaults. Use environment-specific values files
+# (values.dev.yaml, values.staging.yaml, values.prod.yaml) for full config.
+# =============================================================================
+
+# Global settings shared across all sub-charts
+global:
+  environment: dev
+  cloudProvider: kubernetes
+
+  # Image registry (leave empty for local, set for cloud registries)
+  imageRegistry: ""
+  imagePullPolicy: IfNotPresent
+
+  # Secrets strategy
+  secrets:
+    provider: kubernetes  # kubernetes | vault | external-secrets
+
+# -----------------------------------------------------------------------------
+# Sub-chart Enable/Disable Toggles
+# -----------------------------------------------------------------------------
+
+# Core services - enabled by default
+tenant-management-service:
+  enabled: true
+
+temporal-worker-service:
+  enabled: true
+
+admin-app:
+  enabled: true
+
+# Optional components - disabled by default
+monitoring:
+  enabled: false
+
+# Third-party - typically disabled (use external managed services)
+postgresql:
+  enabled: false
+
+redis:
+  enabled: false
+
+keycloak:
+  enabled: false
+
+temporal:
+  enabled: false

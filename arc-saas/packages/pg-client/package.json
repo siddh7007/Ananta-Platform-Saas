@@ -1,0 +1,47 @@
+{
+  "name": "@arc-saas/pg-client",
+  "version": "1.0.0",
+  "description": "PostgreSQL client utilities for ARC SaaS tenant applications",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist",
+    "lint": "eslint src --ext .ts",
+    "test": "jest"
+  },
+  "keywords": [
+    "postgresql",
+    "pg",
+    "saas",
+    "multi-tenant",
+    "arc-saas"
+  ],
+  "author": "ARC SaaS",
+  "license": "MIT",
+  "dependencies": {
+    "pg": "^8.11.3",
+    "pg-pool": "^3.6.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/pg": "^8.10.9",
+    "typescript": "^5.3.2"
+  },
+  "peerDependencies": {
+    "@tanstack/react-query": "^5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@tanstack/react-query": {
+      "optional": true
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

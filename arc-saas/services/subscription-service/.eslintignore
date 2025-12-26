@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+.eslintrc.js
+migrations/
+
+migration.js
+mochawesome-report

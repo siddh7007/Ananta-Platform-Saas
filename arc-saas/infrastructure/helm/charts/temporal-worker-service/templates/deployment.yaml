@@ -1,0 +1,186 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "temporal-worker-service.fullname" . }}
+  labels:
+    {{- include "temporal-worker-service.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "temporal-worker-service.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "temporal-worker-service.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "temporal-worker-service.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            # =================================================================
+            # Temporal Configuration (always from values)
+            # =================================================================
+            - name: TEMPORAL_ADDRESS
+              value: {{ .Values.temporal.address | quote }}
+            - name: TEMPORAL_NAMESPACE
+              value: {{ .Values.temporal.namespace | quote }}
+            - name: TEMPORAL_TASK_QUEUE
+              value: {{ .Values.temporal.taskQueue | quote }}
+
+            # =================================================================
+            # Database Configuration
+            # =================================================================
+            {{- if .Values.secrets.database.existingSecret }}
+            # Using existingSecret - ALL credentials come from secret
+            - name: DB_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.database.existingSecret }}
+                  key: {{ .Values.secrets.database.keys.host }}
+            - name: DB_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.database.existingSecret }}
+                  key: {{ .Values.secrets.database.keys.port }}
+            - name: DB_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.database.existingSecret }}
+                  key: {{ .Values.secrets.database.keys.name }}
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.database.existingSecret }}
+                  key: {{ .Values.secrets.database.keys.user }}
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.database.existingSecret }}
+                  key: {{ .Values.secrets.database.keys.password }}
+            {{- else }}
+            # Fallback to defaults (development only)
+            - name: DB_HOST
+              value: {{ .Values.defaults.database.host | quote }}
+            - name: DB_PORT
+              value: {{ .Values.defaults.database.port | quote }}
+            - name: DB_NAME
+              value: {{ .Values.defaults.database.name | quote }}
+            - name: DB_USER
+              value: {{ .Values.defaults.database.user | quote }}
+            {{- if .Values.defaults.database.password }}
+            - name: DB_PASSWORD
+              value: {{ .Values.defaults.database.password | quote }}
+            {{- end }}
+            {{- end }}
+
+            # =================================================================
+            # Keycloak Configuration
+            # =================================================================
+            {{- if .Values.secrets.keycloak.existingSecret }}
+            # Using existingSecret - ALL credentials come from secret
+            - name: KEYCLOAK_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.keycloak.existingSecret }}
+                  key: {{ .Values.secrets.keycloak.keys.url }}
+            - name: KEYCLOAK_REALM
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.keycloak.existingSecret }}
+                  key: {{ .Values.secrets.keycloak.keys.realm }}
+            - name: KEYCLOAK_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.keycloak.existingSecret }}
+                  key: {{ .Values.secrets.keycloak.keys.adminUser }}
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.secrets.keycloak.existingSecret }}
+                  key: {{ .Values.secrets.keycloak.keys.adminPassword }}
+            {{- else }}
+            # Fallback to defaults (development only)
+            - name: KEYCLOAK_URL
+              value: {{ .Values.defaults.keycloak.url | quote }}
+            - name: KEYCLOAK_REALM
+              value: {{ .Values.defaults.keycloak.realm | quote }}
+            - name: KEYCLOAK_ADMIN_USER
+              value: {{ .Values.defaults.keycloak.adminUser | quote }}
+            {{- if .Values.defaults.keycloak.adminPassword }}
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              value: {{ .Values.defaults.keycloak.adminPassword | quote }}
+            {{- end }}
+            {{- end }}
+
+            # =================================================================
+            # Static Environment Variables from values.env
+            # =================================================================
+            {{- range $key, $value := .Values.env }}
+            - name: {{ $key }}
+              value: {{ $value | quote }}
+            {{- end }}
+
+            # =================================================================
+            # Extra Environment Variables
+            # =================================================================
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+
+          {{- if .Values.configMap.enabled }}
+          envFrom:
+            - configMapRef:
+                name: {{ include "temporal-worker-service.fullname" . }}
+          {{- end }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          {{- if .Values.livenessProbe.enabled }}
+          livenessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pgrep -f "temporal-worker" || exit 1
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          {{- end }}
+          {{- if .Values.readinessProbe.enabled }}
+          readinessProbe:
+            exec:
+              command:
+                - /bin/sh
+                - -c
+                - pgrep -f "temporal-worker" || exit 1
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          {{- end }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

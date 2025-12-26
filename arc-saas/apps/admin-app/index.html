@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#ffffff" />
+    <title>ARC SaaS Admin</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <!--
+      No-Flash Theme Script
+      Prevents flash of wrong theme on page load by applying theme before paint.
+      Must run synchronously before body renders.
+
+      Resilience: If this script is blocked (CSP, ad-blocker, etc.), the CSS
+      fallback ensures light theme is shown after a brief delay rather than
+      permanently hiding content.
+    -->
+    <script>
+      (function() {
+        var storageKey = 'admin-theme';
+        var validThemes = ['light', 'dark', 'mid-light', 'mid-dark'];
+
+        function getStoredTheme() {
+          try {
+            return localStorage.getItem(storageKey);
+          } catch (e) {
+            return null;
+          }
+        }
+
+        function getSystemTheme() {
+          try {
+            return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          } catch (e) {
+            return 'light';
+          }
+        }
+
+        function applyTheme(theme) {
+          document.documentElement.setAttribute('data-theme', theme);
+          // Mark that script executed successfully
+          document.documentElement.setAttribute('data-theme-loaded', 'true');
+          // Update theme-color meta for mobile browsers
+          var themeColors = {
+            light: '#ffffff',
+            dark: '#0a0a1a',
+            'mid-light': '#f0f2f5',
+            'mid-dark': '#1a1d24'
+          };
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute('content', themeColors[theme] || '#ffffff');
+        }
+
+        var stored = getStoredTheme();
+        var theme;
+
+        if (stored && validThemes.indexOf(stored) !== -1) {
+          theme = stored;
+        } else if (stored === 'system' || !stored) {
+          theme = getSystemTheme();
+        } else {
+          theme = 'light';
+        }
+
+        applyTheme(theme);
+      })();
+    </script>
+    <style>
+      /*
+       * No-Flash Guard with Resilience
+       *
+       * Primary: Hide body until data-theme is set (prevents flash)
+       * Fallback: If script blocked, show content after 100ms with light theme
+       *
+       * The animation ensures content becomes visible even if JS fails,
+       * avoiding permanent invisible state.
+       */
+      html:not([data-theme]) body {
+        visibility: hidden;
+        animation: theme-fallback 0s 100ms forwards;
+      }
+
+      @keyframes theme-fallback {
+        to {
+          visibility: visible;
+        }
+      }
+
+      /* Once theme is loaded, cancel the fallback animation */
+      html[data-theme] body {
+        visibility: visible;
+        animation: none;
+      }
+    </style>
+    <noscript>
+      <style>
+        /* If JavaScript is completely disabled, show content immediately */
+        html body {
+          visibility: visible !important;
+          animation: none !important;
+        }
+      </style>
+    </noscript>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

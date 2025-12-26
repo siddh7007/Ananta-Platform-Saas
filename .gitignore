@@ -3,9 +3,11 @@ original-arc-saas/
 sourcefuse-references/
 components-platform-v2-ref/
 
-# Nested git repos (have their own separate repos)
-arc-saas/
-arc-docs/
+# Nested .git folders (exclude nested git metadata, keep the code)
+arc-saas/.git/
+arc-docs/.git/
+**/git.bak/
+**/.git.bak/
 
 # Dependencies
 node_modules/

@@ -1,0 +1,354 @@
+import { ReactNode } from 'react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Settings, LogOut, Menu, X, ChevronDown, ChevronRight, Building2, ExternalLink, LayoutDashboard } from 'lucide-react';
+import { useState } from 'react';
+import { cn } from '@/lib/utils';
+import { env } from '@/config/env';
+import { useAuth } from '@/contexts/AuthContext';
+import { useTenant } from '@/contexts/TenantContext';
+import { TenantSelector } from '@/components/tenant/TenantSelector';
+import { ThemeSelector } from '@/components/theme';
+import { TenantErrorScreen, GlobalSearch, GlobalSearchTrigger } from '@/components/shared';
+import { PageLoading } from '@/components/shared';
+import { getNavigationForRole, NavItem } from '@/config/navigation';
+import { AppRole, hasMinimumRole } from '@/config/auth';
+import { NotificationCenter } from '@/components/notifications';
+import { BottomNavigation } from './BottomNavigation';
+import { ProjectsSection } from './ProjectsSection';
+import { Breadcrumbs } from './Breadcrumbs';
+import { CommandPalette } from '@/components/command/CommandPalette';
+
+interface LayoutProps {
+  children: ReactNode;
+}
+
+// Items to filter from navigation (handled elsewhere or deprecated)
+// Dashboard is linked to workspace selector - clicking workspace goes to dashboard
+// Projects handled by ProjectsSection component
+// BOMs shown in main nav for direct access
+const FILTERED_NAV_ITEMS = ['projects', 'workspaces', 'dashboard'];
+
+export function Layout({ children }: LayoutProps) {
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [expandedMenus, setExpandedMenus] = useState<Record<string, boolean>>({});
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { user, logout } = useAuth();
+  const { tenants, currentTenant, selectTenant, tenantError, isLoading: isTenantLoading, refreshTenants, clearError } = useTenant();
+
+  // Show loading state while fetching tenant info
+  if (isTenantLoading) {
+    return <PageLoading />;
+  }
+
+  // Show error screen if there's a tenant error
+  if (tenantError) {
+    const handleRetry = () => {
+      clearError();
+      refreshTenants();
+    };
+    return <TenantErrorScreen error={tenantError} onRetry={handleRetry} />;
+  }
+
+  // Get filtered navigation based on user role
+  const userRole = (user?.role || 'analyst') as AppRole;
+  const navigation = getNavigationForRole(userRole);
+
+  // Check if user can access settings (admin+)
+  const canAccessSettings = hasMinimumRole(userRole, 'admin');
+
+  const handleLogout = async () => {
+    try {
+      await logout();
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
+  };
+
+  const toggleMenu = (name: string) => {
+    setExpandedMenus(prev => ({ ...prev, [name]: !prev[name] }));
+  };
+
+  const renderNavItem = (item: NavItem) => {
+    const isActive =
+      location.pathname === item.href ||
+      (item.href !== '/' && location.pathname.startsWith(item.href));
+    const Icon = item.icon;
+    const hasChildren = item.children && item.children.length > 0;
+    const isExpanded = expandedMenus[item.name] || isActive;
+
+    // If item has children, render collapsible menu
+    if (hasChildren) {
+      return (
+        <div key={item.name} className="space-y-1">
+          <button
+            onClick={() => toggleMenu(item.name)}
+            className={cn(
+              'flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+              isActive
+                ? 'bg-primary/10 text-primary'
+                : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+            )}
+          >
+            <Icon className="h-5 w-5" />
+            {item.label}
+            <span className="ml-auto">
+              {isExpanded ? (
+                <ChevronDown className="h-4 w-4" />
+              ) : (
+                <ChevronRight className="h-4 w-4" />
+              )}
+            </span>
+          </button>
+          {isExpanded && (
+            <div className="ml-4 space-y-1 border-l border-border pl-4">
+              {item.children!.map((child) => {
+                const childIsActive = location.pathname === child.href;
+                return (
+                  <Link
+                    key={child.name}
+                    to={child.href}
+                    onClick={() => setSidebarOpen(false)}
+                    className={cn(
+                      'flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors',
+                      childIsActive
+                        ? 'bg-primary text-primary-foreground'
+                        : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                    )}
+                  >
+                    {child.label}
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // Regular nav item without children
+    return (
+      <Link
+        key={item.name}
+        to={item.href}
+        onClick={() => setSidebarOpen(false)}
+        className={cn(
+          'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+          isActive
+            ? 'bg-primary text-primary-foreground'
+            : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+        )}
+      >
+        <Icon className="h-5 w-5" />
+        {item.label}
+        {item.badge && (
+          <span className="ml-auto flex h-5 min-w-5 items-center justify-center rounded-full bg-primary/20 px-1.5 text-xs font-medium text-primary">
+            {item.badge}
+          </span>
+        )}
+      </Link>
+    );
+  };
+
+  return (
+    <div className="min-h-screen bg-background">
+      {/* Mobile sidebar backdrop */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* Sidebar */}
+      <aside
+        className={cn(
+          'fixed inset-y-0 left-0 z-50 w-64 transform bg-card shadow-lg transition-transform duration-200 ease-in-out lg:translate-x-0',
+          sidebarOpen ? 'translate-x-0' : '-translate-x-full'
+        )}
+      >
+        <div className="flex h-full flex-col">
+          {/* Logo */}
+          <div className="flex h-16 items-center justify-between border-b px-4">
+            <Link to="/" className="flex items-center space-x-2">
+              <div className="h-8 w-8 rounded-lg bg-primary" />
+              <span className="text-lg font-semibold">{env.app.name}</span>
+            </Link>
+            <button
+              onClick={() => setSidebarOpen(false)}
+              className="rounded-md p-1 hover:bg-muted lg:hidden"
+              aria-label="Close sidebar"
+            >
+              <X className="h-5 w-5" />
+            </button>
+          </div>
+
+          {/* Navigation */}
+          <nav className="flex-1 space-y-1 overflow-y-auto p-4">
+            {/* Workspace Switcher - at top of sidebar */}
+            {/* Clicking workspace name navigates to dashboard */}
+            {tenants.length > 1 && (
+              <div className="mb-4">
+                <Link
+                  to="/"
+                  onClick={() => setSidebarOpen(false)}
+                  className={cn(
+                    'flex items-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors mb-2',
+                    location.pathname === '/'
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-foreground hover:bg-muted'
+                  )}
+                >
+                  <Building2 className="h-5 w-5" />
+                  <span className="truncate flex-1">{currentTenant?.name || 'Select Workspace'}</span>
+                </Link>
+                <select
+                  value={currentTenant?.id || ''}
+                  onChange={(e) => {
+                    selectTenant(e.target.value);
+                    navigate('/'); // Navigate to dashboard on workspace change
+                    setSidebarOpen(false);
+                  }}
+                  className="w-full rounded-lg border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  {tenants.map((tenant) => (
+                    <option key={tenant.id} value={tenant.id}>
+                      {tenant.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Single workspace display (when only 1 tenant) - clickable to go to dashboard */}
+            {tenants.length === 1 && currentTenant && (
+              <Link
+                to="/"
+                onClick={() => setSidebarOpen(false)}
+                className={cn(
+                  'mb-4 flex items-center gap-2 rounded-lg px-3 py-2 text-sm transition-colors',
+                  location.pathname === '/'
+                    ? 'bg-primary text-primary-foreground'
+                    : 'bg-muted/50 hover:bg-muted'
+                )}
+              >
+                <Building2 className="h-5 w-5" />
+                <span className="font-medium truncate">{currentTenant.name}</span>
+              </Link>
+            )}
+
+            {/* Dynamic Projects Section */}
+            <ProjectsSection
+              userRole={userRole}
+              onNavClick={() => setSidebarOpen(false)}
+            />
+
+            {/* Separator */}
+            <div className="my-3 border-t border-border" />
+
+            {/* Static navigation (Components, Monitoring, etc.) */}
+            {navigation
+              .filter((item) => !FILTERED_NAV_ITEMS.includes(item.name))
+              .map((item) => renderNavItem(item))}
+          </nav>
+
+          {/* Bottom section */}
+          <div className="border-t p-4 space-y-1">
+            {/* CNS Dashboard - External Link (admin+ only) */}
+            {canAccessSettings && (
+              <a
+                href={env.dashboards.cns}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+              >
+                <LayoutDashboard className="h-5 w-5" />
+                CNS Dashboard
+                <ExternalLink className="h-3 w-3 ml-auto opacity-50" />
+              </a>
+            )}
+            {canAccessSettings && (
+              <Link
+                to="/settings"
+                onClick={() => setSidebarOpen(false)}
+                className={cn(
+                  'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+                  location.pathname === '/settings'
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                )}
+              >
+                <Settings className="h-5 w-5" />
+                Settings
+              </Link>
+            )}
+            <button
+              onClick={handleLogout}
+              className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <LogOut className="h-5 w-5" />
+              Sign Out
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      {/* Main content */}
+      <div className="lg:pl-64">
+        {/* Top header */}
+        <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b bg-card px-4 lg:px-6">
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="rounded-md p-1 hover:bg-muted lg:hidden"
+            aria-label="Open sidebar"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+
+          {/* Search, Notifications, Theme selector, Tenant selector and user info */}
+          <div className="ml-auto flex items-center gap-4">
+            <GlobalSearchTrigger onClick={() => setSearchOpen(true)} />
+            <NotificationCenter
+              appIdentifier={import.meta.env.VITE_NOVU_APP_IDENTIFIER || '6931905380e6f7e26e0ddaad'}
+              apiUrl={import.meta.env.VITE_NOVU_API_URL || 'http://localhost:13100'}
+            />
+            <ThemeSelector />
+            <TenantSelector />
+
+            {/* User avatar/info */}
+            <div className="flex items-center gap-2">
+              <div className="hidden text-right text-sm md:block">
+                <div className="font-medium">{user?.name || 'User'}</div>
+                <div className="text-xs capitalize text-muted-foreground">
+                  {user?.role?.replace('_', ' ') || 'User'}
+                </div>
+              </div>
+              <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-sm font-medium text-primary-foreground">
+                {user?.name?.charAt(0).toUpperCase() || 'U'}
+              </div>
+            </div>
+          </div>
+        </header>
+
+        {/* Breadcrumbs */}
+        <div className="border-b bg-background px-4 py-3 lg:px-6">
+          <Breadcrumbs />
+        </div>
+
+        {/* Page content */}
+        <main className="p-4 lg:p-6">{children}</main>
+      </div>
+
+      {/* Global Search Dialog */}
+      <GlobalSearch open={searchOpen} onOpenChange={setSearchOpen} />
+
+      {/* Command Palette (Cmd+K) */}
+      <CommandPalette open={commandPaletteOpen} onOpenChange={setCommandPaletteOpen} />
+
+      {/* Bottom Navigation (Tablet Portrait Only) */}
+      <BottomNavigation />
+    </div>
+  );
+}

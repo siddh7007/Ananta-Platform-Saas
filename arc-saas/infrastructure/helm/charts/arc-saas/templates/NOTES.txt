@@ -1,0 +1,67 @@
+===============================================================================
+  ARC-SaaS Platform Deployed!
+===============================================================================
+
+Environment: {{ .Values.global.environment }}
+Cloud Provider: {{ .Values.global.cloudProvider }}
+
+Deployed Components:
+{{- if index .Values "tenant-management-service" "enabled" }}
+  - Tenant Management Service
+{{- end }}
+{{- if index .Values "temporal-worker-service" "enabled" }}
+  - Temporal Worker Service
+{{- end }}
+{{- if index .Values "admin-app" "enabled" }}
+  - Admin App (React UI)
+{{- end }}
+{{- if .Values.monitoring.enabled }}
+  - Monitoring Stack (Prometheus/Grafana)
+{{- end }}
+
+-------------------------------------------------------------------------------
+Access Points (after configuring Ingress or port-forwarding):
+-------------------------------------------------------------------------------
+
+{{- if index .Values "tenant-management-service" "enabled" }}
+Tenant Management API:
+  kubectl port-forward svc/tenant-management-service 14000:14000 -n {{ .Release.Namespace }}
+  URL: http://localhost:14000
+  Health: http://localhost:14000/ping
+{{- end }}
+
+{{- if index .Values "admin-app" "enabled" }}
+Admin UI:
+  kubectl port-forward svc/admin-app 27555:80 -n {{ .Release.Namespace }}
+  URL: http://localhost:27555
+{{- end }}
+
+-------------------------------------------------------------------------------
+Required Secrets:
+-------------------------------------------------------------------------------
+Ensure the following Kubernetes secrets exist in namespace {{ .Release.Namespace }}:
+
+  - arc-saas-database-credentials (DB_HOST, DB_PORT, DB_USER, DB_PASSWORD, DB_DATABASE)
+  - arc-saas-redis-credentials (REDIS_URL)
+  - arc-saas-jwt-secret (JWT_SECRET, JWT_ISSUER)
+  - arc-saas-keycloak-credentials (KEYCLOAK_URL, KEYCLOAK_REALM, KEYCLOAK_CLIENT_ID, KEYCLOAK_CLIENT_SECRET)
+
+For External Secrets Operator:
+  Ensure ClusterSecretStore 'arc-saas-secret-store' is configured.
+
+-------------------------------------------------------------------------------
+Verification Commands:
+-------------------------------------------------------------------------------
+# Check all pods
+kubectl get pods -n {{ .Release.Namespace }}
+
+# Check services
+kubectl get svc -n {{ .Release.Namespace }}
+
+# View logs
+kubectl logs -l app.kubernetes.io/instance={{ .Release.Name }} -n {{ .Release.Namespace }} --tail=50
+
+# Check secrets exist
+kubectl get secrets -n {{ .Release.Namespace }}
+
+===============================================================================

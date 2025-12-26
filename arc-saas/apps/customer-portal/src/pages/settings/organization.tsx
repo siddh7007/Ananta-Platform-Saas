@@ -1,0 +1,466 @@
+/**
+ * Organization Settings Page
+ * CBP-P2-005: Enhanced Organization Management with Team & Invitations
+ *
+ * Edit organization details (admin+ only).
+ * Manage team members and invitations (admin+ only).
+ * Delete organization (owner only).
+ */
+
+import { useEffect, useState } from 'react';
+import {
+  Building2,
+  Globe,
+  Mail,
+  MapPin,
+  Save,
+  AlertTriangle,
+  Trash2,
+  Loader2,
+  Users,
+  BarChart3,
+} from 'lucide-react';
+import { useAuth } from '@/contexts/AuthContext';
+import { hasMinimumRole } from '@/config/auth';
+import {
+  getOrganization,
+  updateOrganization,
+  deleteOrganization,
+} from '@/services/organization.service';
+import type { Organization, OrganizationUpdatePayload, Address } from '@/types/organization';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { TeamMembers } from './components/TeamMembers';
+import { Invitations } from './components/Invitations';
+import { UsageStats } from './components/UsageStats';
+import { useToast } from '@/hooks/useToast';
+
+type OrgTabValue = 'details' | 'team' | 'invitations' | 'usage';
+
+export default function OrganizationSettingsPage() {
+  const { user } = useAuth();
+  const { toast } = useToast();
+  const isAdmin = hasMinimumRole(user?.role, 'admin');
+  const isOwner = hasMinimumRole(user?.role, 'owner');
+  const [activeTab, setActiveTab] = useState<OrgTabValue>('details');
+
+  const [org, setOrg] = useState<Organization | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+
+  // Form state
+  const [formData, setFormData] = useState<OrganizationUpdatePayload>({
+    name: '',
+    billingEmail: '',
+    website: '',
+    domains: [],
+    address: {
+      line1: '',
+      line2: '',
+      city: '',
+      state: '',
+      postalCode: '',
+      country: '',
+    },
+  });
+
+  // Delete confirmation state
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleteConfirmation, setDeleteConfirmation] = useState('');
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  // Load organization data
+  useEffect(() => {
+    async function loadOrg() {
+      setIsLoading(true);
+      setError(null);
+
+      try {
+        const data = await getOrganization();
+        setOrg(data);
+        setFormData({
+          name: data.name || '',
+          billingEmail: data.billingEmail || '',
+          website: data.website || '',
+          domains: data.domains || [],
+          address: data.address || {
+            line1: '',
+            line2: '',
+            city: '',
+            state: '',
+            postalCode: '',
+            country: '',
+          },
+        });
+      } catch (err) {
+        console.error('Failed to load organization:', err);
+        setError('Failed to load organization settings');
+      } finally {
+        setIsLoading(false);
+      }
+    }
+
+    loadOrg();
+  }, []);
+
+  const handleInputChange = (field: keyof OrganizationUpdatePayload, value: string) => {
+    setFormData((prev) => ({ ...prev, [field]: value }));
+    setSuccessMessage(null);
+  };
+
+  const handleAddressChange = (field: keyof Address, value: string) => {
+    setFormData((prev) => ({
+      ...prev,
+      address: { ...prev.address, [field]: value },
+    }));
+    setSuccessMessage(null);
+  };
+
+  const handleSave = async () => {
+    if (!isAdmin) return;
+
+    setIsSaving(true);
+    setError(null);
+    setSuccessMessage(null);
+
+    try {
+      const updated = await updateOrganization(formData);
+      setOrg(updated);
+      setSuccessMessage('Organization settings saved successfully');
+      
+      // Add success toast notification
+      toast({
+        title: 'Success',
+        description: 'Organization settings saved successfully',
+        variant: 'success',
+      });
+    } catch (err) {
+      console.error('Failed to save organization:', err);
+      setError('Failed to save organization settings');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!isOwner || deleteConfirmation !== org?.name) return;
+
+    setIsDeleting(true);
+    setError(null);
+
+    try {
+      await deleteOrganization(deleteConfirmation);
+      // Redirect to logout or home after deletion
+      window.location.href = '/logout';
+    } catch (err) {
+      console.error('Failed to delete organization:', err);
+      setError('Failed to delete organization');
+      setIsDeleting(false);
+    }
+  };
+
+  if (isLoading) {
+    return (
+      <div className="max-w-4xl mx-auto">
+        <div className="animate-pulse space-y-6">
+          <div className="h-8 w-48 bg-muted rounded" />
+          <div className="h-64 bg-muted rounded-lg" />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-6">
+      {/* Header */}
+      <div>
+        <h2 className="text-xl font-bold flex items-center gap-2">
+          <Building2 className="h-5 w-5" aria-hidden="true" />
+          Organization Management
+        </h2>
+        <p className="text-muted-foreground text-sm">
+          {isAdmin
+            ? 'Manage your organization details, team, and settings.'
+            : 'View your organization details.'}
+        </p>
+      </div>
+
+      {/* Error/Success Messages */}
+      {error && (
+        <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-400">
+          {error}
+        </div>
+      )}
+      {successMessage && (
+        <div className="p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-lg text-green-700 dark:text-green-400">
+          {successMessage}
+        </div>
+      )}
+
+      {/* Tabbed Interface for Organization Management */}
+      <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as OrgTabValue)}>
+        <TabsList className="grid w-full grid-cols-4">
+          <TabsTrigger value="details" className="flex items-center gap-2">
+            <Building2 className="h-4 w-4" aria-hidden="true" />
+            <span className="hidden sm:inline">Details</span>
+          </TabsTrigger>
+          <TabsTrigger value="team" className="flex items-center gap-2">
+            <Users className="h-4 w-4" aria-hidden="true" />
+            <span className="hidden sm:inline">Team</span>
+          </TabsTrigger>
+          <TabsTrigger value="invitations" className="flex items-center gap-2">
+            <Mail className="h-4 w-4" aria-hidden="true" />
+            <span className="hidden sm:inline">Invitations</span>
+          </TabsTrigger>
+          <TabsTrigger value="usage" className="flex items-center gap-2">
+            <BarChart3 className="h-4 w-4" aria-hidden="true" />
+            <span className="hidden sm:inline">Usage</span>
+          </TabsTrigger>
+        </TabsList>
+
+        {/* Details Tab */}
+        <TabsContent value="details" className="mt-6 space-y-6">
+          {/* Organization Details Form */}
+          <div className="rounded-lg border bg-card">
+            <div className="p-6 border-b">
+              <h3 className="font-semibold">Organization Details</h3>
+            </div>
+            <div className="p-6 space-y-6">
+              {/* Name */}
+              <div className="space-y-2">
+                <label htmlFor="org-name" className="text-sm font-medium flex items-center gap-2">
+                  <Building2 className="h-4 w-4" aria-hidden="true" />
+                  Organization Name
+                </label>
+                <input
+                  id="org-name"
+                  type="text"
+                  value={formData.name}
+                  onChange={(e) => handleInputChange('name', e.target.value)}
+                  disabled={!isAdmin}
+                  className="w-full px-3 py-2 border rounded-md bg-background disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
+
+              {/* Billing Email */}
+              <div className="space-y-2">
+                <label htmlFor="billing-email" className="text-sm font-medium flex items-center gap-2">
+                  <Mail className="h-4 w-4" aria-hidden="true" />
+                  Billing Email
+                </label>
+                <input
+                  id="billing-email"
+                  type="email"
+                  value={formData.billingEmail}
+                  onChange={(e) => handleInputChange('billingEmail', e.target.value)}
+                  disabled={!isAdmin}
+                  className="w-full px-3 py-2 border rounded-md bg-background disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
+
+              {/* Website */}
+              <div className="space-y-2">
+                <label htmlFor="org-website" className="text-sm font-medium flex items-center gap-2">
+                  <Globe className="h-4 w-4" aria-hidden="true" />
+                  Website
+                </label>
+                <input
+                  id="org-website"
+                  type="url"
+                  value={formData.website || ''}
+                  onChange={(e) => handleInputChange('website', e.target.value)}
+                  disabled={!isAdmin}
+                  placeholder="https://example.com"
+                  className="w-full px-3 py-2 border rounded-md bg-background disabled:opacity-60 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-primary"
+                />
+              </div>
+
+              {/* Address */}
+              <div className="space-y-4">
+                <label className="text-sm font-medium flex items-center gap-2">
+                  <MapPin className="h-4 w-4" aria-hidden="true" />
+                  Address
+                </label>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <input
+                    type="text"
+                    placeholder="Address Line 1"
+                    aria-label="Address Line 1"
+                    value={formData.address?.line1 || ''}
+                    onChange={(e) => handleAddressChange('line1', e.target.value)}
+                    disabled={!isAdmin}
+                    className="px-3 py-2 border rounded-md bg-background disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Address Line 2"
+                    aria-label="Address Line 2"
+                    value={formData.address?.line2 || ''}
+                    onChange={(e) => handleAddressChange('line2', e.target.value)}
+                    disabled={!isAdmin}
+                    className="px-3 py-2 border rounded-md bg-background disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                  <input
+                    type="text"
+                    placeholder="City"
+                    aria-label="City"
+                    value={formData.address?.city || ''}
+                    onChange={(e) => handleAddressChange('city', e.target.value)}
+                    disabled={!isAdmin}
+                    className="px-3 py-2 border rounded-md bg-background disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                  <input
+                    type="text"
+                    placeholder="State/Province"
+                    aria-label="State or Province"
+                    value={formData.address?.state || ''}
+                    onChange={(e) => handleAddressChange('state', e.target.value)}
+                    disabled={!isAdmin}
+                    className="px-3 py-2 border rounded-md bg-background disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Postal Code"
+                    aria-label="Postal Code"
+                    value={formData.address?.postalCode || ''}
+                    onChange={(e) => handleAddressChange('postalCode', e.target.value)}
+                    disabled={!isAdmin}
+                    className="px-3 py-2 border rounded-md bg-background disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Country"
+                    aria-label="Country"
+                    value={formData.address?.country || ''}
+                    onChange={(e) => handleAddressChange('country', e.target.value)}
+                    disabled={!isAdmin}
+                    className="px-3 py-2 border rounded-md bg-background disabled:opacity-60 focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                </div>
+              </div>
+
+              {/* Save Button */}
+              {isAdmin && (
+                <div className="pt-4">
+                  <button
+                    onClick={handleSave}
+                    disabled={isSaving}
+                    className="flex items-center gap-2 px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90 disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2"
+                  >
+                    {isSaving ? (
+                      <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                    ) : (
+                      <Save className="h-4 w-4" aria-hidden="true" />
+                    )}
+                    Save Changes
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Danger Zone - Owner Only */}
+          {isOwner && (
+            <div className="rounded-lg border border-red-200 dark:border-red-800 bg-red-50/50 dark:bg-red-900/20">
+              <div className="p-6 border-b border-red-200 dark:border-red-800">
+                <h3 className="font-semibold text-red-700 dark:text-red-400 flex items-center gap-2">
+                  <AlertTriangle className="h-5 w-5" aria-hidden="true" />
+                  Danger Zone
+                </h3>
+              </div>
+              <div className="p-6">
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h4 className="font-medium text-red-800 dark:text-red-300">Delete Organization</h4>
+                    <p className="text-sm text-red-700 dark:text-red-400 mt-1">
+                      Permanently delete this organization and all associated data.
+                      This action cannot be undone.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setShowDeleteConfirm(true)}
+                    className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 flex items-center gap-2 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2"
+                  >
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
+                    Delete
+                  </button>
+                </div>
+
+                {/* Delete Confirmation Modal */}
+                {showDeleteConfirm && (
+                  <div
+                    className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
+                    role="dialog"
+                    aria-modal="true"
+                    aria-labelledby="delete-dialog-title"
+                  >
+                    <div className="bg-background rounded-lg p-6 max-w-md w-full mx-4 space-y-4">
+                      <h3
+                        id="delete-dialog-title"
+                        className="text-lg font-semibold text-red-700 dark:text-red-400 flex items-center gap-2"
+                      >
+                        <AlertTriangle className="h-5 w-5" aria-hidden="true" />
+                        Delete Organization
+                      </h3>
+                      <p className="text-sm text-muted-foreground">
+                        This will permanently delete <strong>{org?.name}</strong> and
+                        all associated data including BOMs, team members, and billing
+                        history.
+                      </p>
+                      <p className="text-sm">
+                        Type <strong>{org?.name}</strong> to confirm:
+                      </p>
+                      <input
+                        type="text"
+                        value={deleteConfirmation}
+                        onChange={(e) => setDeleteConfirmation(e.target.value)}
+                        placeholder={org?.name}
+                        aria-label="Type organization name to confirm deletion"
+                        className="w-full px-3 py-2 border rounded-md focus:outline-none focus:ring-2 focus:ring-red-500"
+                      />
+                      <div className="flex gap-3 justify-end">
+                        <button
+                          onClick={() => {
+                            setShowDeleteConfirm(false);
+                            setDeleteConfirmation('');
+                          }}
+                          className="px-4 py-2 border rounded-md hover:bg-muted focus:outline-none focus:ring-2 focus:ring-primary"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={handleDelete}
+                          disabled={deleteConfirmation !== org?.name || isDeleting}
+                          className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50 flex items-center gap-2 focus:outline-none focus:ring-2 focus:ring-red-500"
+                        >
+                          {isDeleting && <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />}
+                          Delete Forever
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </TabsContent>
+
+        {/* Team Members Tab */}
+        <TabsContent value="team" className="mt-6">
+          <TeamMembers canManage={isAdmin} />
+        </TabsContent>
+
+        {/* Invitations Tab */}
+        <TabsContent value="invitations" className="mt-6">
+          <Invitations canManage={isAdmin} />
+        </TabsContent>
+
+        {/* Usage Tab */}
+        <TabsContent value="usage" className="mt-6">
+          <UsageStats planName="Professional" />
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}

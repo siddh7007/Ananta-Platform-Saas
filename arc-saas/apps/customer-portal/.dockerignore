@@ -1,0 +1,51 @@
+# Dependencies
+node_modules
+.pnpm-store
+
+# Build output (keep dist for production-only Dockerfile)
+# dist  - needed for production image
+build
+
+# Environment files (should be passed at build time)
+.env
+.env.*
+!.env.example
+
+# Development files
+*.log
+*.local
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Test files
+coverage
+*.test.ts
+*.test.tsx
+*.spec.ts
+*.spec.tsx
+__tests__
+
+# Documentation
+*.md
+!README.md
+
+# Git
+.git
+.gitignore
+
+# Docker files (don't need to copy themselves)
+Dockerfile*
+docker-compose*
+
+# Storybook
+.storybook
+storybook-static
+
+# Bundle analysis
+stats.html

@@ -1,0 +1,14 @@
+apiVersion: v2
+name: temporal-worker-service
+description: Temporal worker service for ARC-SaaS tenant provisioning workflows
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - temporal
+  - worker
+  - workflows
+  - arc-saas
+maintainers:
+  - name: ARC-SaaS Team
+    email: team@arc-saas.example.com

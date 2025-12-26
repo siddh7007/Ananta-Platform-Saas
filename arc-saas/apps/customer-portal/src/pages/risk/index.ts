@@ -1,0 +1,1 @@
+export { RiskDashboardPage } from './RiskDashboard';

@@ -1,0 +1,26 @@
+# =============================================================================
+# ARC-SaaS Development Environment - Example Variables
+# =============================================================================
+# Copy this file to terraform.tfvars and fill in your values
+
+project_name = "arc-saas"
+environment  = "dev"
+aws_region   = "us-east-1"
+
+# Network
+vpc_cidr             = "10.0.0.0/16"
+az_count             = 2
+enable_nat_gateway   = true
+enable_vpc_endpoints = true
+
+# Database
+db_instance_class = "db.t3.micro"
+
+# Redis
+redis_node_type = "cache.t3.micro"
+
+# SSL/TLS (optional - leave empty for HTTP only)
+# certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/abc123"
+
+# Keycloak
+keycloak_hostname = "auth.dev.arc-saas.example.com"

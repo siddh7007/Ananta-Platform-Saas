@@ -1,0 +1,83 @@
+# =============================================================================
+# Terraform Apply Workflow
+# =============================================================================
+# Applies infrastructure changes on merge to main
+
+name: Terraform Apply
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'infrastructure/terraform/**'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      action:
+        description: 'Terraform action'
+        required: true
+        default: 'apply'
+        type: choice
+        options:
+          - apply
+          - destroy
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  TF_LOG: INFO
+  AWS_REGION: us-east-1
+
+jobs:
+  apply:
+    name: Terraform Apply
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'dev' }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.0
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Terraform Init
+        run: terraform init
+        working-directory: infrastructure/terraform/environments/${{ github.event.inputs.environment || 'dev' }}
+
+      - name: Terraform Apply
+        if: github.event.inputs.action != 'destroy'
+        run: terraform apply -auto-approve
+        working-directory: infrastructure/terraform/environments/${{ github.event.inputs.environment || 'dev' }}
+
+      - name: Terraform Destroy
+        if: github.event.inputs.action == 'destroy'
+        run: terraform destroy -auto-approve
+        working-directory: infrastructure/terraform/environments/${{ github.event.inputs.environment || 'dev' }}
+
+      - name: Output Summary
+        run: |
+          echo "## Terraform Apply Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Environment:** ${{ github.event.inputs.environment || 'dev' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Action:** ${{ github.event.inputs.action || 'apply' }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** Success" >> $GITHUB_STEP_SUMMARY

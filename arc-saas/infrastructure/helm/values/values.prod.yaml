@@ -1,0 +1,425 @@
+# =============================================================================
+# ARC-SaaS Production Environment Values
+# =============================================================================
+# Cloud-agnostic configuration for production environment.
+# All secrets MUST be injected via external secret stores.
+# NEVER commit actual secrets to this file.
+# =============================================================================
+
+global:
+  environment: prod
+  cloudProvider: kubernetes  # kubernetes | aws | gcp | oracle
+
+  # Image settings
+  imageRegistry: ""  # Set to your production registry
+  imagePullPolicy: IfNotPresent
+  imageTag: ""  # Use specific version tags, NEVER "latest" in prod
+
+  # Secrets strategy - MUST use external provider in production
+  secrets:
+    provider: external-secrets  # vault | external-secrets (NOT kubernetes in prod)
+    # For Vault:
+    # vaultAddress: "https://vault.prod.example.com:8200"
+    # vaultRole: "arc-saas-prod"
+    # For External Secrets Operator:
+    externalSecretsBackend: ""  # aws-secretsmanager | gcp-secretmanager | azure-keyvault | oracle-vault
+
+# -----------------------------------------------------------------------------
+# Tenant Management Service
+# -----------------------------------------------------------------------------
+tenant-management-service:
+  replicaCount: 3
+
+  image:
+    repository: arc-saas/tenant-management-service
+    tag: ""  # Specify version tag
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1024Mi
+    limits:
+      cpu: 2000m
+      memory: 2048Mi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 60
+    targetMemoryUtilizationPercentage: 70
+
+  # Environment variables (non-sensitive)
+  env:
+    NODE_ENV: production
+    PORT: "14000"
+    LOG_LEVEL: warn
+
+  # External secrets configuration - REQUIRED in production
+  externalSecrets:
+    enabled: true
+    refreshInterval: 15m
+    secretStoreRef:
+      name: arc-saas-secret-store
+      kind: ClusterSecretStore
+
+  # Kubernetes secrets references (provider-neutral)
+  secrets:
+    database:
+      existingSecret: "arc-saas-database-credentials"
+      keys:
+        host: DB_HOST
+        port: DB_PORT
+        username: DB_USER
+        password: DB_PASSWORD
+        database: DB_DATABASE
+    redis:
+      existingSecret: "arc-saas-redis-credentials"
+      keys:
+        url: REDIS_URL
+    jwt:
+      existingSecret: "arc-saas-jwt-secret"
+      keys:
+        secret: JWT_SECRET
+        issuer: JWT_ISSUER
+    keycloak:
+      existingSecret: "arc-saas-keycloak-credentials"
+      keys:
+        url: KEYCLOAK_URL
+        realm: KEYCLOAK_REALM
+        clientId: KEYCLOAK_CLIENT_ID
+        clientSecret: KEYCLOAK_CLIENT_SECRET
+    novu:
+      existingSecret: "arc-saas-novu-credentials"
+      keys:
+        apiKey: NOVU_API_KEY
+        appId: NOVU_APP_ID
+    stripe:
+      existingSecret: "arc-saas-stripe-credentials"
+      keys:
+        apiKey: STRIPE_API_KEY
+        webhookSecret: STRIPE_WEBHOOK_SECRET
+
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 14000
+
+  # Ingress - production with proper TLS
+  ingress:
+    enabled: true
+    className: "nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+      nginx.ingress.kubernetes.io/rate-limit: "100"
+      nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    hosts:
+      - host: "api.arc-saas.example.com"
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: arc-saas-api-tls
+        hosts:
+          - "api.arc-saas.example.com"
+
+  # Health probes - stricter in production
+  livenessProbe:
+    httpGet:
+      path: /ping
+      port: http
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    failureThreshold: 3
+    timeoutSeconds: 5
+
+  readinessProbe:
+    httpGet:
+      path: /ping
+      port: http
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    failureThreshold: 3
+    timeoutSeconds: 3
+
+  # Pod disruption budget - maintain availability
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 2
+
+  # Pod anti-affinity for HA
+  affinity:
+    podAntiAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          podAffinityTerm:
+            labelSelector:
+              matchLabels:
+                app.kubernetes.io/name: tenant-management-service
+            topologyKey: kubernetes.io/hostname
+
+  # Topology spread constraints
+  topologySpreadConstraints:
+    - maxSkew: 1
+      topologyKey: topology.kubernetes.io/zone
+      whenUnsatisfiable: ScheduleAnyway
+      labelSelector:
+        matchLabels:
+          app.kubernetes.io/name: tenant-management-service
+
+# -----------------------------------------------------------------------------
+# Temporal Worker Service
+# -----------------------------------------------------------------------------
+temporal-worker-service:
+  replicaCount: 3
+
+  image:
+    repository: arc-saas/temporal-worker-service
+    tag: ""  # Specify version tag
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1024Mi
+    limits:
+      cpu: 2000m
+      memory: 2048Mi
+
+  # Temporal connection
+  temporal:
+    address: "temporal:7233"
+    namespace: "arc-saas"
+    taskQueue: "tenant-provisioning"
+
+  # External secrets for worker
+  secrets:
+    database:
+      existingSecret: "arc-saas-database-credentials"
+    keycloak:
+      existingSecret: "arc-saas-keycloak-credentials"
+
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 8
+    targetCPUUtilizationPercentage: 60
+
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 2
+
+# -----------------------------------------------------------------------------
+# Admin App (React Frontend)
+# -----------------------------------------------------------------------------
+admin-app:
+  replicaCount: 3
+
+  image:
+    repository: arc-saas/admin-app
+    tag: ""  # Specify version tag
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+
+  # Environment variables (build-time or runtime config)
+  env:
+    VITE_API_URL: "https://api.arc-saas.example.com"
+    VITE_KEYCLOAK_URL: "https://auth.arc-saas.example.com"
+    VITE_KEYCLOAK_REALM: "arc-saas"
+    VITE_KEYCLOAK_CLIENT_ID: "admin-app"
+
+  service:
+    type: ClusterIP
+    port: 80
+
+  ingress:
+    enabled: true
+    className: "nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      nginx.ingress.kubernetes.io/configuration-snippet: |
+        add_header X-Frame-Options "SAMEORIGIN" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header X-XSS-Protection "1; mode=block" always;
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    hosts:
+      - host: "admin.arc-saas.example.com"
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: arc-saas-admin-tls
+        hosts:
+          - "admin.arc-saas.example.com"
+
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 6
+    targetCPUUtilizationPercentage: 60
+
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 2
+
+# -----------------------------------------------------------------------------
+# Keycloak (STRONGLY recommend managed service in production)
+# -----------------------------------------------------------------------------
+keycloak:
+  # Set to false and use managed Keycloak service (AWS Cognito, Auth0, etc.)
+  enabled: false
+
+  # If self-managed Keycloak is required:
+  replicaCount: 3
+
+  image:
+    repository: quay.io/keycloak/keycloak
+    tag: "23.0"
+
+  resources:
+    requests:
+      cpu: 1000m
+      memory: 2048Mi
+    limits:
+      cpu: 4000m
+      memory: 4096Mi
+
+  # Admin credentials from secret
+  secrets:
+    admin:
+      existingSecret: "arc-saas-keycloak-admin"
+      keys:
+        username: KEYCLOAK_ADMIN
+        password: KEYCLOAK_ADMIN_PASSWORD
+
+  # Database connection from secret
+  database:
+    existingSecret: "arc-saas-keycloak-database"
+    vendor: postgres
+
+  ingress:
+    enabled: true
+    className: "nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/ssl-redirect: "true"
+      cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    hosts:
+      - host: "auth.arc-saas.example.com"
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: arc-saas-auth-tls
+        hosts:
+          - "auth.arc-saas.example.com"
+
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 2
+
+# -----------------------------------------------------------------------------
+# Temporal (STRONGLY recommend Temporal Cloud in production)
+# -----------------------------------------------------------------------------
+temporal:
+  # Set to false and use Temporal Cloud
+  enabled: false
+
+  # If self-managed Temporal is required:
+  server:
+    replicaCount: 3
+
+  web:
+    enabled: true
+    replicaCount: 2
+
+  # Database for Temporal
+  cassandra:
+    enabled: false
+  postgresql:
+    enabled: true
+    existingSecret: "arc-saas-temporal-database"
+
+# -----------------------------------------------------------------------------
+# PostgreSQL (MUST use managed DB in production)
+# -----------------------------------------------------------------------------
+postgresql:
+  # ALWAYS false in production - use managed DB
+  enabled: false
+  # Managed DB examples:
+  # - AWS: RDS PostgreSQL
+  # - GCP: Cloud SQL
+  # - Oracle: OCI Database
+  # Provide connection via existingSecret
+
+# -----------------------------------------------------------------------------
+# Redis (MUST use managed Redis in production)
+# -----------------------------------------------------------------------------
+redis:
+  # ALWAYS false in production - use managed Redis
+  enabled: false
+  # Managed Redis examples:
+  # - AWS: ElastiCache
+  # - GCP: Memorystore
+  # - Oracle: OCI Cache
+  # Provide connection via existingSecret
+
+# -----------------------------------------------------------------------------
+# Monitoring (Provider-neutral)
+# -----------------------------------------------------------------------------
+monitoring:
+  enabled: true
+
+  prometheus:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      scrapeInterval: 15s
+
+  grafana:
+    enabled: false  # Use managed Grafana
+
+  alerts:
+    enabled: true
+    # High-level alert rules (provider-neutral)
+    rules:
+      - name: HighErrorRate
+        expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.1
+        for: 5m
+        severity: critical
+      - name: HighLatency
+        expr: histogram_quantile(0.99, rate(http_request_duration_seconds_bucket[5m])) > 2
+        for: 5m
+        severity: warning
+      - name: PodNotReady
+        expr: kube_pod_status_ready{condition="false"} == 1
+        for: 10m
+        severity: warning
+
+# -----------------------------------------------------------------------------
+# Network Policies (Defense in depth)
+# -----------------------------------------------------------------------------
+networkPolicies:
+  enabled: true
+  # Default deny all ingress/egress, then allow specific flows
+
+# -----------------------------------------------------------------------------
+# Pod Security Standards
+# -----------------------------------------------------------------------------
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL

@@ -1,0 +1,8 @@
+node_modules
+lerna-debug.log
+.env
+.env.local
+.env.*.local
+
+*storybook.log
+storybook-static

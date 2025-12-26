@@ -1,0 +1,171 @@
+# Default values for customer-app (Customer Business Portal - React frontend)
+replicaCount: 1
+
+image:
+  repository: arc-saas/customer-app
+  pullPolicy: IfNotPresent
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext:
+  fsGroup: 101
+  runAsNonRoot: true
+  runAsUser: 101
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 101
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+  hosts:
+    - host: portal.arc-saas.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 256Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+
+# =============================================================================
+# Service Discovery - Internal Kubernetes DNS names
+# =============================================================================
+# Used by nginx to proxy API calls within the cluster
+services:
+  platformApi:
+    host: "tenant-management-service"
+    port: 14000
+  cnsApi:
+    host: "cns-service"
+    port: 27200
+  supabaseApi:
+    host: "supabase-api"
+    port: 27810
+  keycloak:
+    host: "keycloak"
+    port: 8080
+  jaeger:
+    host: "jaeger-collector"
+    port: 4318
+
+# =============================================================================
+# External URLs - Browser-accessible URLs (via Ingress)
+# =============================================================================
+# Used in CSP headers and runtime config for browser access
+externalUrls:
+  # Base domain for constructing URLs
+  baseDomain: "arc-saas.local"
+  # Protocol (http/https)
+  protocol: "https"
+  # Individual service URLs (override baseDomain defaults)
+  keycloak: ""       # Default: https://auth.{baseDomain}
+  platformApi: ""    # Default: https://api.{baseDomain}
+  cnsApi: ""         # Default: https://cns.{baseDomain}
+  supabaseApi: ""    # Default: https://supabase.{baseDomain}
+  otlpEndpoint: ""   # Default: https://jaeger.{baseDomain}/v1/traces
+  websocket: ""      # Default: wss://ws.{baseDomain}
+
+# =============================================================================
+# Environment configuration
+# =============================================================================
+env:
+  # Keycloak
+  VITE_KEYCLOAK_REALM: "ananta"
+  VITE_KEYCLOAK_CLIENT_ID: "cbp-frontend"
+  # OpenTelemetry
+  VITE_OTEL_ENABLED: "true"
+  VITE_SERVICE_NAME: "cbp-frontend"
+  # App configuration
+  VITE_APP_NAME: "Ananta Customer Portal"
+  VITE_APP_VERSION: "1.0.0"
+
+# =============================================================================
+# Secrets
+# =============================================================================
+secrets:
+  # Use existing secret for sensitive values
+  existingSecret: ""
+  # Secret keys (if existingSecret is set)
+  sentryDsnKey: "sentry-dsn"
+
+# =============================================================================
+# CSP Configuration
+# =============================================================================
+csp:
+  # Enable CSP report-only mode for testing
+  reportOnly: false
+  # CSP report-uri endpoint (optional, legacy - for older browsers)
+  reportUri: ""
+  # CSP report-to group name (optional, modern Reporting API)
+  # Requires Report-To header configuration in nginx.extraConfig
+  reportTo: ""
+  # Additional connect-src entries (space-separated)
+  additionalConnectSrc: ""
+  # Additional frame-src entries (space-separated)
+  additionalFrameSrc: ""
+
+# =============================================================================
+# Nginx Configuration (templated - see configmap.yaml)
+# =============================================================================
+nginx:
+  # Additional nginx configuration
+  extraConfig: ""
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 5
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1

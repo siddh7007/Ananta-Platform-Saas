@@ -1,0 +1,36 @@
+# Temporal Dynamic Configuration for Development
+# See: https://docs.temporal.io/references/dynamic-configuration
+
+# Namespace configuration
+system.forceSearchAttributesCacheRefreshOnRead:
+  - value: true
+    constraints: {}
+
+# Limit configuration for development
+limit.maxIDLength:
+  - value: 1000
+    constraints: {}
+
+# History configuration
+history.maximumSignalsPerExecution:
+  - value: 10000
+    constraints: {}
+
+history.maximumBufferedEvents:
+  - value: 100
+    constraints: {}
+
+# Frontend configuration
+frontend.enableTokenNamespaceEnforcement:
+  - value: false
+    constraints: {}
+
+# Worker configuration
+worker.enableBatcher:
+  - value: true
+    constraints: {}
+
+# Archival configuration (disabled for dev)
+archival.EnableArchivalCompression:
+  - value: false
+    constraints: {}

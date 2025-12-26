@@ -1,0 +1,364 @@
+# =============================================================================
+# Multi-Provider Deployment Workflow
+# =============================================================================
+# Deploys ARC-SaaS to any supported cloud provider (AWS, GCP, Oracle, or
+# vanilla Kubernetes). Provider selection happens at runtime via input.
+#
+# Container Registries per provider:
+#   - kubernetes: Uses ${{ vars.CONTAINER_REGISTRY }} (generic registry)
+#   - aws: Uses ${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com
+#   - gcp: Uses ${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT }}
+#   - oracle: Uses ${{ vars.OCI_REGION }}.ocir.io/${{ vars.OCI_TENANCY }}
+# =============================================================================
+
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      cloud_provider:
+        description: 'Cloud provider'
+        required: true
+        type: choice
+        options:
+          - kubernetes
+          - aws
+          - gcp
+          - oracle
+      version:
+        description: 'Version to deploy (tag or branch)'
+        required: true
+        default: 'main'
+      dry_run:
+        description: 'Dry run (plan only, no apply)'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  HELM_VERSION: '3.13.0'
+  TERRAFORM_VERSION: '1.5.0'
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Build & Push Container Images
+  # ---------------------------------------------------------------------------
+  build:
+    name: Build Images
+    runs-on: ubuntu-latest
+    outputs:
+      image_tag: ${{ github.sha }}
+      container_registry: ${{ steps.registry.outputs.url }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.version }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # =========================================================================
+      # Compute Container Registry URL based on cloud_provider
+      # =========================================================================
+      - name: Compute Container Registry URL
+        id: registry
+        run: |
+          case "${{ github.event.inputs.cloud_provider }}" in
+            aws)
+              REGISTRY_URL="${{ vars.AWS_ACCOUNT_ID }}.dkr.ecr.${{ vars.AWS_REGION }}.amazonaws.com"
+              ;;
+            gcp)
+              REGISTRY_URL="${{ vars.GCP_REGION }}-docker.pkg.dev/${{ vars.GCP_PROJECT }}"
+              ;;
+            oracle)
+              REGISTRY_URL="${{ vars.OCI_REGION }}.ocir.io/${{ vars.OCI_TENANCY }}"
+              ;;
+            kubernetes|*)
+              REGISTRY_URL="${{ vars.CONTAINER_REGISTRY }}"
+              ;;
+          esac
+          echo "url=${REGISTRY_URL}" >> $GITHUB_OUTPUT
+          echo "Container Registry: ${REGISTRY_URL}"
+
+      # =========================================================================
+      # Provider-specific registry login
+      # =========================================================================
+      - name: Login to AWS ECR
+        if: github.event.inputs.cloud_provider == 'aws'
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Login to GCP Artifact Registry
+        if: github.event.inputs.cloud_provider == 'gcp'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.GCP_REGION }}-docker.pkg.dev
+          username: _json_key
+          password: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Login to Oracle Container Registry
+        if: github.event.inputs.cloud_provider == 'oracle'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.OCI_REGION }}.ocir.io
+          username: ${{ vars.OCI_TENANCY }}/${{ secrets.OCI_USERNAME }}
+          password: ${{ secrets.OCI_AUTH_TOKEN }}
+
+      - name: Login to Generic Registry
+        if: github.event.inputs.cloud_provider == 'kubernetes'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ vars.CONTAINER_REGISTRY }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      # =========================================================================
+      # Build and Push Images (using computed registry URL)
+      # =========================================================================
+      - name: Build and push tenant-management-service
+        uses: docker/build-push-action@v5
+        with:
+          context: ./services/tenant-management-service
+          push: ${{ !github.event.inputs.dry_run }}
+          tags: |
+            ${{ steps.registry.outputs.url }}/arc-saas/tenant-management-service:${{ github.sha }}
+            ${{ steps.registry.outputs.url }}/arc-saas/tenant-management-service:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push temporal-worker-service
+        uses: docker/build-push-action@v5
+        with:
+          context: ./services/temporal-worker-service
+          push: ${{ !github.event.inputs.dry_run }}
+          tags: |
+            ${{ steps.registry.outputs.url }}/arc-saas/temporal-worker-service:${{ github.sha }}
+            ${{ steps.registry.outputs.url }}/arc-saas/temporal-worker-service:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push admin-app
+        uses: docker/build-push-action@v5
+        with:
+          context: ./apps/admin-app
+          push: ${{ !github.event.inputs.dry_run }}
+          tags: |
+            ${{ steps.registry.outputs.url }}/arc-saas/admin-app:${{ github.sha }}
+            ${{ steps.registry.outputs.url }}/arc-saas/admin-app:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ---------------------------------------------------------------------------
+  # Infrastructure Deployment (Terraform)
+  # ---------------------------------------------------------------------------
+  terraform:
+    name: Deploy Infrastructure
+    runs-on: ubuntu-latest
+    needs: build
+    environment: ${{ github.event.inputs.environment }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.version }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+
+      # Provider-specific credentials
+      - name: Configure AWS Credentials
+        if: github.event.inputs.cloud_provider == 'aws'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Configure GCP Credentials
+        if: github.event.inputs.cloud_provider == 'gcp'
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY }}
+
+      - name: Configure OCI Credentials
+        if: github.event.inputs.cloud_provider == 'oracle'
+        run: |
+          mkdir -p ~/.oci
+          echo "[DEFAULT]" >> ~/.oci/config
+          echo "user=${{ secrets.OCI_USER_OCID }}" >> ~/.oci/config
+          echo "fingerprint=${{ secrets.OCI_FINGERPRINT }}" >> ~/.oci/config
+          echo "tenancy=${{ secrets.OCI_TENANCY_OCID }}" >> ~/.oci/config
+          echo "region=${{ vars.OCI_REGION }}" >> ~/.oci/config
+          echo "key_file=~/.oci/oci_api_key.pem" >> ~/.oci/config
+          echo "${{ secrets.OCI_PRIVATE_KEY }}" > ~/.oci/oci_api_key.pem
+          chmod 600 ~/.oci/oci_api_key.pem
+
+      - name: Terraform Init
+        working-directory: infrastructure/terraform/environments/${{ github.event.inputs.environment }}
+        run: terraform init
+
+      - name: Terraform Plan
+        working-directory: infrastructure/terraform/environments/${{ github.event.inputs.environment }}
+        run: |
+          terraform plan \
+            -var="cloud_provider=${{ github.event.inputs.cloud_provider }}" \
+            -var="environment=${{ github.event.inputs.environment }}" \
+            -out=tfplan
+
+      - name: Terraform Apply
+        if: ${{ !github.event.inputs.dry_run }}
+        working-directory: infrastructure/terraform/environments/${{ github.event.inputs.environment }}
+        run: terraform apply -auto-approve tfplan
+
+  # ---------------------------------------------------------------------------
+  # Application Deployment (Helm)
+  # ---------------------------------------------------------------------------
+  helm:
+    name: Deploy Application
+    runs-on: ubuntu-latest
+    needs: [build, terraform]
+    environment: ${{ github.event.inputs.environment }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.version }}
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      # Provider-specific kubeconfig
+      - name: Configure AWS EKS kubeconfig
+        if: github.event.inputs.cloud_provider == 'aws'
+        run: |
+          aws eks update-kubeconfig \
+            --name arc-saas-${{ github.event.inputs.environment }} \
+            --region ${{ vars.AWS_REGION }}
+
+      - name: Configure GCP GKE kubeconfig
+        if: github.event.inputs.cloud_provider == 'gcp'
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: arc-saas-${{ github.event.inputs.environment }}
+          location: ${{ vars.GCP_REGION }}
+
+      - name: Configure OCI OKE kubeconfig
+        if: github.event.inputs.cloud_provider == 'oracle'
+        run: |
+          oci ce cluster create-kubeconfig \
+            --cluster-id ${{ secrets.OKE_CLUSTER_OCID }} \
+            --file $HOME/.kube/config \
+            --region ${{ vars.OCI_REGION }} \
+            --token-version 2.0.0
+
+      - name: Configure vanilla Kubernetes
+        if: github.event.inputs.cloud_provider == 'kubernetes'
+        run: |
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+
+      - name: Update Helm Dependencies
+        run: |
+          cd infrastructure/helm/charts/arc-saas
+          helm dependency update
+
+      - name: Deploy with Helm (Umbrella Chart)
+        run: |
+          # Select values file based on environment
+          VALUES_FILE="infrastructure/helm/values/values.${{ github.event.inputs.environment }}.yaml"
+
+          # Get computed registry URL from build job
+          REGISTRY_URL="${{ needs.build.outputs.container_registry }}"
+          IMAGE_TAG="${{ needs.build.outputs.image_tag }}"
+
+          # Deploy entire platform using umbrella chart
+          # This applies all values from environment file to all sub-charts
+          helm upgrade --install arc-saas \
+            infrastructure/helm/charts/arc-saas \
+            -f "$VALUES_FILE" \
+            --set global.cloudProvider=${{ github.event.inputs.cloud_provider }} \
+            --set global.imageRegistry=${REGISTRY_URL} \
+            --set tenant-management-service.image.repository=${REGISTRY_URL}/arc-saas/tenant-management-service \
+            --set tenant-management-service.image.tag=${IMAGE_TAG} \
+            --set temporal-worker-service.image.repository=${REGISTRY_URL}/arc-saas/temporal-worker-service \
+            --set temporal-worker-service.image.tag=${IMAGE_TAG} \
+            --set admin-app.image.repository=${REGISTRY_URL}/arc-saas/admin-app \
+            --set admin-app.image.tag=${IMAGE_TAG} \
+            --namespace arc-saas \
+            --create-namespace \
+            --wait \
+            --timeout 10m \
+            ${{ github.event.inputs.dry_run && '--dry-run' || '' }}
+
+      - name: Verify Deployment
+        if: ${{ !github.event.inputs.dry_run }}
+        run: |
+          echo "Verifying deployment..."
+          # Umbrella chart creates deployments with arc-saas- prefix
+          kubectl rollout status deployment/arc-saas-tenant-management-service -n arc-saas --timeout=5m
+          kubectl rollout status deployment/arc-saas-temporal-worker-service -n arc-saas --timeout=5m
+          kubectl rollout status deployment/arc-saas-admin-app -n arc-saas --timeout=5m
+          echo "All deployments successful!"
+
+          # Show deployed images for verification
+          echo "Deployed images:"
+          kubectl get deployments -n arc-saas -o jsonpath='{range .items[*]}{.metadata.name}: {.spec.template.spec.containers[0].image}{"\n"}{end}'
+
+  # ---------------------------------------------------------------------------
+  # Post-Deployment Verification
+  # ---------------------------------------------------------------------------
+  verify:
+    name: Verify Deployment
+    runs-on: ubuntu-latest
+    needs: helm
+    if: ${{ !github.event.inputs.dry_run }}
+    environment: ${{ github.event.inputs.environment }}
+
+    steps:
+      - name: Health Check
+        run: |
+          # Wait for services to be ready
+          sleep 30
+
+          # Health check (URL from environment variables)
+          HEALTH_URL="${{ vars.API_URL }}/ping"
+
+          for i in {1..10}; do
+            if curl -sf "$HEALTH_URL"; then
+              echo "Health check passed!"
+              exit 0
+            fi
+            echo "Attempt $i failed, retrying..."
+            sleep 10
+          done
+
+          echo "Health check failed after 10 attempts"
+          exit 1
+
+      - name: Deployment Summary
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Parameter | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Environment | ${{ github.event.inputs.environment }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Cloud Provider | ${{ github.event.inputs.cloud_provider }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Version | ${{ github.event.inputs.version }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Image Tag | ${{ github.sha }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Deployed By | ${{ github.actor }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Timestamp | $(date -u +'%Y-%m-%d %H:%M:%S UTC') |" >> $GITHUB_STEP_SUMMARY

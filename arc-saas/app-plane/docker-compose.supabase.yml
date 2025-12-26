@@ -1,0 +1,197 @@
+# Arc-SaaS App Plane - Supabase with Keycloak JWT Integration
+#
+# This docker-compose runs Supabase services configured to accept Keycloak JWTs.
+#
+# KEY CONFIGURATION:
+# - PGRST_JWT_SECRET must match Keycloak client secret OR use RSA public key
+# - For Keycloak integration, we use a symmetric HS256 secret shared with Keycloak
+# - The JWT must contain: sub (user ID), tenant_id (organization ID)
+#
+# USAGE:
+#   docker-compose -f docker-compose.supabase.yml up -d
+#
+# PORTS:
+#   - 27540: Supabase API Gateway (Kong)
+#   - 27541: PostgreSQL
+#   - 27543: Supabase Studio
+
+version: '3.8'
+
+services:
+  # ==========================================================================
+  # Supabase PostgreSQL
+  # ==========================================================================
+  supabase-db:
+    image: supabase/postgres:15.1.0.117
+    container_name: arc-saas-supabase-db
+    restart: unless-stopped
+    ports:
+      - "${SUPABASE_DB_PORT:-27541}:5432"
+    environment:
+      POSTGRES_PASSWORD: ${SUPABASE_DB_PASSWORD:-arc-saas-supabase-secure-2024}
+      POSTGRES_DB: supabase
+      POSTGRES_USER: postgres
+    volumes:
+      - arc-saas-supabase-db-data:/var/lib/postgresql/data
+      - ./supabase/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - arc-saas-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: '1.0'
+
+  # ==========================================================================
+  # Supabase REST (PostgREST) - Configured for Keycloak JWTs
+  # ==========================================================================
+  supabase-rest:
+    image: postgrest/postgrest:v11.2.0
+    container_name: arc-saas-supabase-rest
+    restart: unless-stopped
+    environment:
+      PGRST_DB_URI: postgres://authenticator:${SUPABASE_DB_PASSWORD:-arc-saas-supabase-secure-2024}@arc-saas-supabase-db:5432/supabase
+      PGRST_DB_SCHEMAS: public,storage
+      PGRST_DB_ANON_ROLE: anon
+      # JWT Secret - MUST match Keycloak client secret for HS256
+      # Or use PGRST_JWT_SECRET_IS_BASE64 with RSA public key for RS256
+      PGRST_JWT_SECRET: ${ARC_SAAS_JWT_SECRET:-arc-saas-shared-jwt-secret-for-keycloak-must-be-at-least-32-chars}
+      PGRST_DB_USE_LEGACY_GUCS: "false"
+      PGRST_APP_SETTINGS_JWT_SECRET: ${ARC_SAAS_JWT_SECRET:-arc-saas-shared-jwt-secret-for-keycloak-must-be-at-least-32-chars}
+      PGRST_APP_SETTINGS_JWT_EXP: 3600
+    networks:
+      - arc-saas-network
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+
+  # ==========================================================================
+  # Supabase Meta (Database metadata API)
+  # ==========================================================================
+  supabase-meta:
+    image: supabase/postgres-meta:v0.68.0
+    container_name: arc-saas-supabase-meta
+    restart: unless-stopped
+    environment:
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: arc-saas-supabase-db
+      PG_META_DB_PORT: 5432
+      PG_META_DB_NAME: supabase
+      PG_META_DB_USER: postgres
+      PG_META_DB_PASSWORD: ${SUPABASE_DB_PASSWORD:-arc-saas-supabase-secure-2024}
+    networks:
+      - arc-saas-network
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.25'
+
+  # ==========================================================================
+  # Supabase Kong (API Gateway)
+  # ==========================================================================
+  supabase-kong:
+    image: kong:2.8.1
+    container_name: arc-saas-supabase-kong
+    restart: unless-stopped
+    ports:
+      - "${SUPABASE_KONG_PORT:-27540}:8000"
+      - "${SUPABASE_KONG_HTTPS_PORT:-27542}:8443"
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /usr/local/kong/kong.yml
+      KONG_DNS_ORDER: LAST,A,CNAME
+      KONG_PLUGINS: request-transformer,cors,key-auth,acl,rate-limiting
+      KONG_NGINX_PROXY_PROXY_BUFFER_SIZE: 160k
+      KONG_NGINX_PROXY_PROXY_BUFFERS: 64 160k
+      KONG_MEM_CACHE_SIZE: 256m
+    volumes:
+      - ./supabase/kong.yml:/usr/local/kong/kong.yml:ro
+    networks:
+      - arc-saas-network
+    depends_on:
+      - supabase-rest
+      - supabase-meta
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1.0'
+
+  # ==========================================================================
+  # Supabase Studio (Admin UI)
+  # ==========================================================================
+  supabase-studio:
+    image: supabase/studio:latest
+    container_name: arc-saas-supabase-studio
+    restart: unless-stopped
+    ports:
+      - "${SUPABASE_STUDIO_PORT:-27543}:3000"
+    environment:
+      SUPABASE_URL: http://localhost:${SUPABASE_KONG_PORT:-27540}
+      SUPABASE_PUBLIC_URL: http://localhost:${SUPABASE_KONG_PORT:-27540}
+      SUPABASE_ANON_KEY: ${SUPABASE_ANON_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsImF1ZCI6ImF1dGhlbnRpY2F0ZWQiLCJzdWIiOiJhbm9ueW1vdXMiLCJyb2xlIjoiYW5vbiIsInJlZiI6ImxvY2FsaG9zdCIsImlhdCI6MTc2NTIyNjY1NCwiZXhwIjoyMDgwNTg2NjU0fQ.L0YnPkH63b9IsCK9xmHsh9w_06fQTCaq1_CsApS-4M0}
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsImF1ZCI6ImF1dGhlbnRpY2F0ZWQiLCJzdWIiOiJzZXJ2aWNlX3JvbGUiLCJyb2xlIjoic2VydmljZV9yb2xlIiwicmVmIjoibG9jYWxob3N0IiwiaWF0IjoxNzY1MjI2NjU0LCJleHAiOjIwODA1ODY2NTR9.hfyvW7q5t3rbIlwrng_ORjis-WSddqe85Ggw8duAEok}
+      STUDIO_PG_META_URL: http://arc-saas-supabase-meta:8080
+      # Disable built-in healthcheck that fails due to binding issues
+      HOSTNAME: "0.0.0.0"
+    networks:
+      - arc-saas-network
+    depends_on:
+      - supabase-kong
+    # Override the image's built-in healthcheck with a working one (using node since wget/curl not available)
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://localhost:3000/').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+
+  # ==========================================================================
+  # Webhook Bridge (App Plane ← Control Plane events)
+  # ==========================================================================
+  webhook-bridge:
+    build:
+      context: ./services/webhook-bridge
+      dockerfile: Dockerfile
+    container_name: arc-saas-webhook-bridge
+    restart: unless-stopped
+    ports:
+      - "${WEBHOOK_BRIDGE_PORT:-27550}:3000"
+    environment:
+      PORT: 3000
+      SUPABASE_URL: http://arc-saas-supabase-kong:8000
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsImF1ZCI6ImF1dGhlbnRpY2F0ZWQiLCJzdWIiOiJzZXJ2aWNlX3JvbGUiLCJyb2xlIjoic2VydmljZV9yb2xlIiwicmVmIjoibG9jYWxob3N0IiwiaWF0IjoxNzY1MjI2NjU0LCJleHAiOjIwODA1ODY2NTR9.hfyvW7q5t3rbIlwrng_ORjis-WSddqe85Ggw8duAEok}
+      WEBHOOK_SECRET: ${ARC_SAAS_WEBHOOK_SECRET:-arc-saas-webhook-secret-change-in-production}
+      TEMPORAL_ADDRESS: ${TEMPORAL_ADDRESS:-temporal:7233}
+    networks:
+      - arc-saas-network
+    depends_on:
+      - supabase-kong
+
+networks:
+  arc-saas-network:
+    name: arc-saas-network
+    external: true
+
+volumes:
+  arc-saas-supabase-db-data:
+    driver: local

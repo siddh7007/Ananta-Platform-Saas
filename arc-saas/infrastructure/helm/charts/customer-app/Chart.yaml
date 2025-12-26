@@ -1,0 +1,16 @@
+apiVersion: v2
+name: customer-app
+description: Customer Business Portal (CBP) - React frontend for tenant users
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - react
+  - customer
+  - portal
+  - arc-saas
+  - cbp
+  - tenant
+maintainers:
+  - name: ARC-SaaS Team
+    email: team@arc-saas.example.com

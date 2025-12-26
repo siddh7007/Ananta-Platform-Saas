@@ -1,0 +1,1 @@
+export { AlertsDashboardPage } from './AlertsDashboard';

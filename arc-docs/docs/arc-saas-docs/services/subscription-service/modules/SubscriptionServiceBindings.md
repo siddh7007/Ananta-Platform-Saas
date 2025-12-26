@@ -1,0 +1,19 @@
+[@sourceloop/ctrl-plane-subscription-service](../README.md) / [Exports](../modules.md) / SubscriptionServiceBindings
+
+# Namespace: SubscriptionServiceBindings
+
+## Table of contents
+
+### Variables
+
+- [Config](SubscriptionServiceBindings.md#config)
+
+## Variables
+
+### Config
+
+• `Const` **Config**: `BindingKey`<[`ISubscriptionServiceConfig`](../interfaces/ISubscriptionServiceConfig.md)\>
+
+#### Defined in
+
+[services/subscription-service/src/keys.ts:9](https://github.com/sourcefuse/arc-saas/blob/27b4636/services/subscription-service/src/keys.ts#L9)

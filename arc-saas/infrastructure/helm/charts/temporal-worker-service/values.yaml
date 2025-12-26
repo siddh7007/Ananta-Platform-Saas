@@ -1,0 +1,144 @@
+# =============================================================================
+# Temporal Worker Service - Default Values
+# =============================================================================
+# IMPORTANT: For production, use existingSecret references instead of
+# hardcoded defaults. See values.dev|staging|prod.yaml for proper patterns.
+# =============================================================================
+
+replicaCount: 1
+
+image:
+  repository: arc-saas/temporal-worker-service
+  pullPolicy: IfNotPresent
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext:
+  fsGroup: 1000
+  runAsNonRoot: true
+  runAsUser: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+
+# Temporal worker doesn't expose HTTP - no service needed
+service:
+  enabled: false
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
+# -----------------------------------------------------------------------------
+# Temporal Configuration
+# -----------------------------------------------------------------------------
+temporal:
+  address: "temporal:7233"
+  namespace: "arc-saas"
+  taskQueue: "tenant-provisioning"
+
+# -----------------------------------------------------------------------------
+# Secrets Configuration (Provider-Neutral)
+# -----------------------------------------------------------------------------
+# For production: Use existingSecret to reference Kubernetes secrets
+# that are populated by External Secrets Operator or directly created.
+#
+# When secrets.database.existingSecret is set, ALL database credentials
+# are read from that secret (not just password).
+# When empty, the fallback defaults (below) are used.
+# -----------------------------------------------------------------------------
+secrets:
+  # Database credentials - for activities that need DB access
+  database:
+    existingSecret: ""  # e.g., "arc-saas-database-credentials"
+    keys:
+      host: DB_HOST
+      port: DB_PORT
+      name: DB_NAME
+      user: DB_USER
+      password: DB_PASSWORD
+
+  # Keycloak credentials - for user provisioning activities
+  keycloak:
+    existingSecret: ""  # e.g., "arc-saas-keycloak-credentials"
+    keys:
+      url: KEYCLOAK_URL
+      realm: KEYCLOAK_REALM
+      adminUser: KEYCLOAK_ADMIN_USER
+      adminPassword: KEYCLOAK_ADMIN_PASSWORD
+
+# -----------------------------------------------------------------------------
+# Fallback Defaults (Development Only)
+# -----------------------------------------------------------------------------
+# These are ONLY used when secrets.*.existingSecret is empty.
+# DO NOT rely on these in staging/production environments!
+# -----------------------------------------------------------------------------
+defaults:
+  database:
+    host: "postgres"
+    port: "5432"
+    name: "arc_saas"
+    user: "postgres"
+    password: ""  # Must be provided via secret or env
+  keycloak:
+    url: "http://keycloak:8080"
+    realm: "master"
+    adminUser: "admin"
+    adminPassword: ""  # Must be provided via secret or env
+
+# Environment variables (non-sensitive)
+env:
+  NODE_ENV: "production"
+  LOG_LEVEL: "info"
+
+# Extra environment variables
+extraEnv: []
+
+# ConfigMap for additional configuration
+configMap:
+  enabled: true
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# Liveness probe - workers don't have HTTP endpoints, use exec
+livenessProbe:
+  enabled: false
+
+# Readiness probe
+readinessProbe:
+  enabled: false
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1

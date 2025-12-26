@@ -1,0 +1,15 @@
+apiVersion: v2
+name: admin-app
+description: React admin portal for ARC-SaaS platform management
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - react
+  - admin
+  - portal
+  - arc-saas
+  - refine
+maintainers:
+  - name: ARC-SaaS Team
+    email: team@arc-saas.example.com

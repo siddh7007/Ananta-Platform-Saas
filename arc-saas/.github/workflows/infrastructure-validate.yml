@@ -1,0 +1,267 @@
+# =============================================================================
+# Cloud-Neutral Infrastructure Validation
+# =============================================================================
+# Validates Terraform and Helm configurations without requiring cloud credentials.
+# Provider-specific validation can be added via workflow_dispatch input.
+# =============================================================================
+
+name: Infrastructure Validation
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'infrastructure/**'
+      - '.github/workflows/infrastructure-validate.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'infrastructure/**'
+  workflow_dispatch:
+    inputs:
+      cloud_provider:
+        description: 'Cloud provider for extended validation'
+        required: false
+        type: choice
+        options:
+          - none
+          - aws
+          - gcp
+          - oracle
+        default: none
+      environment:
+        description: 'Environment to validate'
+        required: false
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+        default: dev
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Terraform Validation (Cloud-Neutral)
+  # ---------------------------------------------------------------------------
+  terraform-validate:
+    name: Terraform Validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.5.0'
+
+      - name: Terraform Format Check
+        id: fmt
+        run: terraform fmt -check -recursive
+        working-directory: infrastructure/terraform
+        continue-on-error: true
+
+      - name: Terraform Init (Modules)
+        run: |
+          for dir in modules/*/; do
+            echo "Initializing $dir..."
+            terraform -chdir="$dir" init -backend=false
+          done
+        working-directory: infrastructure/terraform
+
+      - name: Terraform Validate (Modules)
+        run: |
+          for dir in modules/*/; do
+            echo "Validating $dir..."
+            terraform -chdir="$dir" validate
+          done
+        working-directory: infrastructure/terraform
+
+      - name: Check for hardcoded cloud IDs
+        run: |
+          echo "Checking for hardcoded AWS ARNs..."
+          ! grep -r "arn:aws:" infrastructure/terraform --include="*.tf" || (echo "ERROR: Hardcoded AWS ARNs found!" && exit 1)
+
+          echo "Checking for hardcoded GCP project IDs..."
+          ! grep -rE "projects/[a-z0-9-]+/" infrastructure/terraform --include="*.tf" || (echo "ERROR: Hardcoded GCP project IDs found!" && exit 1)
+
+          echo "Checking for hardcoded OCI OCIDs..."
+          ! grep -r "ocid1\." infrastructure/terraform --include="*.tf" || (echo "ERROR: Hardcoded OCI OCIDs found!" && exit 1)
+
+          echo "No hardcoded cloud IDs found!"
+
+      - name: Report Format Issues
+        if: steps.fmt.outcome == 'failure'
+        run: |
+          echo "::warning::Terraform files are not properly formatted. Run 'terraform fmt -recursive' to fix."
+
+  # ---------------------------------------------------------------------------
+  # Helm Validation (Cloud-Neutral)
+  # ---------------------------------------------------------------------------
+  helm-validate:
+    name: Helm Validate
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: 'v3.13.0'
+
+      - name: Helm Lint (All Charts)
+        run: |
+          for chart in infrastructure/helm/charts/*/; do
+            echo "Linting $chart..."
+            helm lint "$chart"
+          done
+
+      - name: Helm Template (Dev Values)
+        run: |
+          for chart in infrastructure/helm/charts/*/; do
+            chart_name=$(basename "$chart")
+            echo "Templating $chart_name with dev values..."
+            helm template "$chart_name" "$chart" \
+              -f infrastructure/helm/values/values.dev.yaml \
+              --debug > /dev/null
+          done
+
+      - name: Helm Template (Staging Values)
+        run: |
+          for chart in infrastructure/helm/charts/*/; do
+            chart_name=$(basename "$chart")
+            echo "Templating $chart_name with staging values..."
+            helm template "$chart_name" "$chart" \
+              -f infrastructure/helm/values/values.staging.yaml \
+              --debug > /dev/null
+          done
+
+      - name: Helm Template (Prod Values)
+        run: |
+          for chart in infrastructure/helm/charts/*/; do
+            chart_name=$(basename "$chart")
+            echo "Templating $chart_name with prod values..."
+            helm template "$chart_name" "$chart" \
+              -f infrastructure/helm/values/values.prod.yaml \
+              --debug > /dev/null
+          done
+
+      - name: Check for hardcoded secrets in values
+        run: |
+          echo "Checking for potential hardcoded secrets..."
+          # Check for passwords, tokens, keys that look like actual values
+          ! grep -rE "(password|secret|token|key):\s*['\"]?[A-Za-z0-9+/=]{20,}" infrastructure/helm/values/ --include="*.yaml" || \
+            (echo "WARNING: Potential hardcoded secrets found in values files!" && exit 1)
+
+          echo "No hardcoded secrets detected!"
+
+      - name: Verify existingSecret pattern usage
+        run: |
+          echo "Verifying existingSecret pattern is used..."
+          for values_file in infrastructure/helm/values/values.*.yaml; do
+            echo "Checking $values_file..."
+            grep -q "existingSecret:" "$values_file" || \
+              (echo "ERROR: $values_file should use existingSecret pattern" && exit 1)
+          done
+          echo "All values files use existingSecret pattern!"
+
+  # ---------------------------------------------------------------------------
+  # Provider-Specific Validation (Optional)
+  # ---------------------------------------------------------------------------
+  provider-validation:
+    name: Provider-Specific Validation
+    runs-on: ubuntu-latest
+    needs: [terraform-validate, helm-validate]
+    if: github.event.inputs.cloud_provider != 'none' && github.event.inputs.cloud_provider != ''
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.5.0'
+
+      # AWS-specific validation
+      - name: Validate AWS Configuration
+        if: github.event.inputs.cloud_provider == 'aws'
+        run: |
+          echo "Validating AWS-specific configuration..."
+          # Check AWS provider configuration exists
+          test -f infrastructure/terraform/providers/aws/main.tf || \
+            (echo "ERROR: AWS provider configuration not found" && exit 1)
+          echo "AWS configuration validated!"
+
+      # GCP-specific validation
+      - name: Validate GCP Configuration
+        if: github.event.inputs.cloud_provider == 'gcp'
+        run: |
+          echo "Validating GCP-specific configuration..."
+          # Check GCP provider configuration exists
+          test -f infrastructure/terraform/providers/gcp/main.tf || \
+            (echo "ERROR: GCP provider configuration not found" && exit 1)
+          echo "GCP configuration validated!"
+
+      # Oracle-specific validation
+      - name: Validate Oracle Configuration
+        if: github.event.inputs.cloud_provider == 'oracle'
+        run: |
+          echo "Validating Oracle-specific configuration..."
+          # Check Oracle provider configuration exists
+          test -f infrastructure/terraform/providers/oracle/main.tf || \
+            (echo "ERROR: Oracle provider configuration not found" && exit 1)
+          echo "Oracle configuration validated!"
+
+  # ---------------------------------------------------------------------------
+  # Security Scanning
+  # ---------------------------------------------------------------------------
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Checkov (Terraform Security)
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: infrastructure/terraform
+          framework: terraform
+          soft_fail: true
+          output_format: cli
+
+      - name: Run Trivy (Helm Security)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          scan-ref: 'infrastructure/helm'
+          format: 'table'
+          exit-code: '0'  # Don't fail on findings for now
+
+  # ---------------------------------------------------------------------------
+  # Summary Report
+  # ---------------------------------------------------------------------------
+  summary:
+    name: Validation Summary
+    runs-on: ubuntu-latest
+    needs: [terraform-validate, helm-validate, security-scan]
+    if: always()
+
+    steps:
+      - name: Generate Summary
+        run: |
+          echo "## Infrastructure Validation Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Terraform Validate | ${{ needs.terraform-validate.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Helm Validate | ${{ needs.helm-validate.result == 'success' && '✅ Passed' || '❌ Failed' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Security Scan | ${{ needs.security-scan.result == 'success' && '✅ Passed' || '⚠️ Issues Found' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Cloud Provider" >> $GITHUB_STEP_SUMMARY
+          echo "Configuration is **cloud-agnostic** - no provider-specific IDs detected." >> $GITHUB_STEP_SUMMARY

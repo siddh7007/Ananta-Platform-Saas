@@ -1,0 +1,198 @@
+name: Bundle Size Check
+
+on:
+  pull_request:
+    paths:
+      - 'apps/customer-portal/**'
+      - '!apps/customer-portal/**/*.md'
+      - '!apps/customer-portal/**/*.test.ts'
+      - '!apps/customer-portal/**/*.test.tsx'
+      - '!apps/customer-portal/**/*.spec.ts'
+      - '!apps/customer-portal/**/*.spec.tsx'
+      - '!apps/customer-portal/**/*.stories.tsx'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  bundle-size:
+    name: Check Bundle Size
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/customer-portal
+
+    steps:
+      - name: Checkout PR
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: apps/customer-portal/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build PR bundle
+        run: npm run build
+
+      - name: Analyze PR bundle size
+        id: pr_size
+        run: |
+          node scripts/check-bundle-size.mjs --warn-only
+          PR_SIZE=$(cat dist/bundle-size-report.json | jq '.totals.all.gzip')
+          PR_JS=$(cat dist/bundle-size-report.json | jq '.totals.js.gzip')
+          PR_CSS=$(cat dist/bundle-size-report.json | jq '.totals.css.gzip')
+          VIOLATIONS=$(cat dist/bundle-size-report.json | jq '.violations | length')
+          echo "pr_total=$PR_SIZE" >> $GITHUB_OUTPUT
+          echo "pr_js=$PR_JS" >> $GITHUB_OUTPUT
+          echo "pr_css=$PR_CSS" >> $GITHUB_OUTPUT
+          echo "violations=$VIOLATIONS" >> $GITHUB_OUTPUT
+
+      - name: Checkout base branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.base_ref }}
+          path: base
+
+      - name: Build base bundle
+        id: base_size
+        run: |
+          cd $GITHUB_WORKSPACE/base/apps/customer-portal
+          npm ci
+          npm run build
+          if [ -f "scripts/check-bundle-size.mjs" ]; then
+            node scripts/check-bundle-size.mjs --warn-only || true
+            BASE_SIZE=$(cat dist/bundle-size-report.json | jq '.totals.all.gzip')
+            BASE_JS=$(cat dist/bundle-size-report.json | jq '.totals.js.gzip')
+            BASE_CSS=$(cat dist/bundle-size-report.json | jq '.totals.css.gzip')
+          else
+            # Fallback: calculate from files directly
+            BASE_SIZE=0
+            BASE_JS=0
+            BASE_CSS=0
+          fi
+          echo "base_total=$BASE_SIZE" >> $GITHUB_OUTPUT
+          echo "base_js=$BASE_JS" >> $GITHUB_OUTPUT
+          echo "base_css=$BASE_CSS" >> $GITHUB_OUTPUT
+
+      - name: Calculate size diff
+        id: diff
+        run: |
+          PR_TOTAL="${{ steps.pr_size.outputs.pr_total }}"
+          BASE_TOTAL="${{ steps.base_size.outputs.base_total }}"
+
+          if [ "$BASE_TOTAL" = "0" ] || [ -z "$BASE_TOTAL" ]; then
+            DIFF="N/A (new)"
+            DIFF_PERCENT="N/A"
+          else
+            DIFF=$(echo "$PR_TOTAL - $BASE_TOTAL" | bc)
+            DIFF_PERCENT=$(echo "scale=2; ($DIFF / $BASE_TOTAL) * 100" | bc)
+          fi
+
+          echo "diff=$DIFF" >> $GITHUB_OUTPUT
+          echo "diff_percent=$DIFF_PERCENT" >> $GITHUB_OUTPUT
+
+      - name: Comment on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prTotal = parseFloat('${{ steps.pr_size.outputs.pr_total }}') || 0;
+            const prJs = parseFloat('${{ steps.pr_size.outputs.pr_js }}') || 0;
+            const prCss = parseFloat('${{ steps.pr_size.outputs.pr_css }}') || 0;
+            const baseTotal = parseFloat('${{ steps.base_size.outputs.base_total }}') || 0;
+            const violations = parseInt('${{ steps.pr_size.outputs.violations }}') || 0;
+
+            const formatSize = (kb) => {
+              if (kb >= 1024) return `${(kb / 1024).toFixed(2)} MB`;
+              return `${kb.toFixed(2)} KB`;
+            };
+
+            const formatDiff = (pr, base) => {
+              if (base === 0) return 'N/A (baseline)';
+              const diff = pr - base;
+              const percent = ((diff / base) * 100).toFixed(1);
+              const sign = diff >= 0 ? '+' : '';
+              const emoji = diff > 0 ? '📈' : (diff < 0 ? '📉' : '');
+              return `${sign}${formatSize(diff)} (${sign}${percent}%) ${emoji}`;
+            };
+
+            let status = '✅';
+            let statusText = 'All bundle sizes within thresholds';
+
+            if (violations > 0) {
+              status = '⚠️';
+              statusText = `${violations} threshold violation(s) detected`;
+            }
+
+            // Check for significant increase (>5%)
+            if (baseTotal > 0) {
+              const increase = ((prTotal - baseTotal) / baseTotal) * 100;
+              if (increase > 5) {
+                status = '⚠️';
+                statusText = `Bundle size increased by ${increase.toFixed(1)}%`;
+              }
+            }
+
+            const body = `## ${status} Bundle Size Report
+
+            | Metric | PR | Base | Diff |
+            |--------|---:|-----:|-----:|
+            | **Total** (gzip) | ${formatSize(prTotal)} | ${baseTotal > 0 ? formatSize(baseTotal) : 'N/A'} | ${formatDiff(prTotal, baseTotal)} |
+            | JavaScript (gzip) | ${formatSize(prJs)} | ${baseTotal > 0 ? formatSize(parseFloat('${{ steps.base_size.outputs.base_js }}') || 0) : 'N/A'} | - |
+            | CSS (gzip) | ${formatSize(prCss)} | ${baseTotal > 0 ? formatSize(parseFloat('${{ steps.base_size.outputs.base_css }}') || 0) : 'N/A'} | - |
+
+            **Status:** ${statusText}
+
+            <details>
+            <summary>Thresholds</summary>
+
+            - Main JS: 450 KB gzip
+            - Main CSS: 50 KB gzip
+            - Total: 550 KB gzip
+            - Per chunk: 150 KB gzip
+
+            </details>
+
+            ---
+            <sub>Bundle analysis generated by \`scripts/check-bundle-size.mjs\`. Run \`npm run analyze\` locally to view the interactive treemap.</sub>
+            `;
+
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+
+            const botComment = comments.find(comment =>
+              comment.user.type === 'Bot' &&
+              comment.body.includes('Bundle Size Report')
+            );
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: body,
+              });
+            }
+
+      - name: Fail on violations
+        if: steps.pr_size.outputs.violations != '0'
+        run: |
+          echo "[ERROR] Bundle size threshold violations detected"
+          cat dist/bundle-size-report.json | jq '.violations'
+          exit 1

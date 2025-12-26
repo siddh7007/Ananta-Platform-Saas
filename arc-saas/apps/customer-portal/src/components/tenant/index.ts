@@ -1,0 +1,1 @@
+export { TenantErrorCard } from './TenantErrorCard';

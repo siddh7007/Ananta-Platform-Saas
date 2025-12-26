@@ -1,0 +1,320 @@
+/**
+ * CBP-P3-001: Responsive Touch Targets
+ *
+ * Ensures all interactive elements meet minimum touch target sizes
+ * - 44x44px minimum on touch devices (iOS/Android HIG)
+ * - 48x48px recommended for better usability
+ * - 8px minimum spacing between adjacent targets
+ *
+ * References:
+ * - Apple HIG: 44pt minimum
+ * - Material Design: 48dp minimum
+ * - WCAG 2.5.5 (AAA): 44x44px minimum
+ */
+
+@layer components {
+  /**
+   * Base Touch Target Class
+   * Apply to any interactive element for proper touch sizing
+   */
+  .touch-target {
+    min-height: 44px;
+    min-width: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /**
+   * Expanded Touch Target (Recommended Size)
+   * For primary actions and frequently used controls
+   */
+  .touch-target-expanded {
+    min-height: 48px;
+    min-width: 48px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /**
+   * Touch Target with Expanded Hit Area
+   * Uses pseudo-element to expand clickable area without changing visual size
+   * Useful for small icons that need larger touch targets
+   */
+  .touch-target-overlay {
+    position: relative;
+  }
+
+  .touch-target-overlay::before {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    min-width: 44px;
+    min-height: 44px;
+    width: max(100%, 44px);
+    height: max(100%, 44px);
+  }
+
+  /**
+   * Touch Target Spacing Utilities
+   * Ensures minimum 8px spacing between adjacent touch targets
+   */
+  .touch-spacing {
+    gap: 8px;
+  }
+
+  .touch-spacing-x > * + * {
+    margin-left: 8px;
+  }
+
+  .touch-spacing-y > * + * {
+    margin-top: 8px;
+  }
+
+  /**
+   * Touch-Friendly Form Controls
+   * Enhanced height for inputs, selects, and textareas on touch devices
+   */
+  .touch-input {
+    min-height: 44px;
+    padding: 12px 16px;
+  }
+
+  .touch-select {
+    min-height: 44px;
+    padding: 12px 16px;
+  }
+
+  .touch-textarea {
+    min-height: 88px; /* 2x touch target height */
+    padding: 12px 16px;
+  }
+
+  /**
+   * Icon Button Touch Targets
+   * Ensures icon-only buttons have adequate touch area
+   */
+  .touch-icon-button {
+    min-height: 44px;
+    min-width: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px;
+  }
+
+  .touch-icon-button-lg {
+    min-height: 48px;
+    min-width: 48px;
+    padding: 12px;
+  }
+}
+
+/**
+ * Touch Device Specific Styles
+ * Only applied when pointer: coarse (touch screens)
+ */
+@media (pointer: coarse) {
+  @layer components {
+    /**
+     * Auto-apply touch targets to common interactive elements
+     * Only on touch devices to preserve desktop aesthetics
+     */
+    button,
+    a[role="button"],
+    [role="button"] {
+      min-height: 44px;
+    }
+
+    input[type="button"],
+    input[type="submit"],
+    input[type="reset"] {
+      min-height: 44px;
+    }
+
+    input[type="text"],
+    input[type="email"],
+    input[type="password"],
+    input[type="tel"],
+    input[type="url"],
+    input[type="search"],
+    input[type="number"],
+    input[type="date"],
+    input[type="time"],
+    select,
+    textarea {
+      min-height: 44px;
+      padding-top: 12px;
+      padding-bottom: 12px;
+    }
+
+    textarea {
+      min-height: 88px;
+    }
+
+    /**
+     * Checkbox and Radio Touch Targets
+     * Expand clickable area while keeping visual size
+     */
+    input[type="checkbox"],
+    input[type="radio"] {
+      min-width: 24px;
+      min-height: 24px;
+      cursor: pointer;
+    }
+
+    input[type="checkbox"] + label,
+    input[type="radio"] + label {
+      min-height: 44px;
+      display: inline-flex;
+      align-items: center;
+      padding: 10px 0;
+      cursor: pointer;
+    }
+
+    /**
+     * Link Touch Targets
+     * Ensure adequate spacing and height for touch interaction
+     */
+    a {
+      min-height: 32px;
+      display: inline-flex;
+      align-items: center;
+      padding-top: 6px;
+      padding-bottom: 6px;
+    }
+
+    /**
+     * Dropdown and Select Touch Targets
+     */
+    select {
+      min-height: 44px;
+      padding-right: 32px; /* Space for dropdown arrow */
+    }
+
+    /**
+     * Toggle Switches
+     */
+    [role="switch"] {
+      min-height: 44px;
+      min-width: 44px;
+      display: inline-flex;
+      align-items: center;
+    }
+
+    /**
+     * Tab Navigation
+     */
+    [role="tab"] {
+      min-height: 44px;
+      padding: 12px 16px;
+    }
+
+    /**
+     * Menu Items
+     */
+    [role="menuitem"],
+    [role="menuitemcheckbox"],
+    [role="menuitemradio"] {
+      min-height: 44px;
+      padding: 12px 16px;
+    }
+
+    /**
+     * List Items (when clickable)
+     */
+    li > a,
+    li > button,
+    [role="listitem"]:has(a, button) {
+      min-height: 44px;
+      padding: 12px 16px;
+    }
+  }
+}
+
+/**
+ * Responsive Touch Target Utilities
+ * Progressive enhancement for larger screens
+ */
+@layer utilities {
+  /* Mobile-first: minimum 44px */
+  .min-touch {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  /* Tablet and up: allow smaller targets if needed */
+  @media (min-width: 768px) {
+    .md\:min-touch-sm {
+      min-height: 36px;
+      min-width: 36px;
+    }
+  }
+
+  /* Desktop: can use compact sizes */
+  @media (min-width: 1024px) {
+    .lg\:min-touch-compact {
+      min-height: 32px;
+      min-width: 32px;
+    }
+  }
+
+  /* Touch spacing utilities */
+  .gap-touch {
+    gap: 8px;
+  }
+
+  .gap-touch-lg {
+    gap: 12px;
+  }
+
+  .space-x-touch > * + * {
+    margin-left: 8px;
+  }
+
+  .space-y-touch > * + * {
+    margin-top: 8px;
+  }
+
+  /* Padding utilities for touch-friendly spacing */
+  .p-touch {
+    padding: 12px;
+  }
+
+  .px-touch {
+    padding-left: 16px;
+    padding-right: 16px;
+  }
+
+  .py-touch {
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+}
+
+/**
+ * Touch Target Debugging
+ * Uncomment in development to visualize touch targets
+ */
+/*
+@media (pointer: coarse) {
+  button,
+  a[role="button"],
+  [role="button"],
+  input[type="button"],
+  input[type="submit"],
+  input[type="reset"] {
+    outline: 2px dashed rgba(255, 0, 0, 0.3);
+    outline-offset: 2px;
+  }
+
+  .touch-target,
+  .touch-target-expanded {
+    outline: 2px dashed rgba(0, 255, 0, 0.3);
+    outline-offset: 2px;
+  }
+}
+*/

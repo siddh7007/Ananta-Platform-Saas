@@ -1,0 +1,96 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tenant-management-service.fullname" . }}
+  labels:
+    {{- include "tenant-management-service.labels" . | nindent 4 }}
+spec:
+  {{- if not .Values.autoscaling.enabled }}
+  replicas: {{ .Values.replicaCount }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "tenant-management-service.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+      labels:
+        {{- include "tenant-management-service.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "tenant-management-service.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: {{ .Chart.Name }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.targetPort }}
+              protocol: TCP
+          envFrom:
+            - configMapRef:
+                name: {{ include "tenant-management-service.fullname" . }}
+          env:
+            {{- range $key, $value := .Values.secrets.database.keys }}
+            - name: {{ $value }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secrets.database.name }}
+                  key: {{ $value }}
+            {{- end }}
+            {{- range $key, $value := .Values.secrets.redis.keys }}
+            - name: {{ $value }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secrets.redis.name }}
+                  key: {{ $value }}
+            {{- end }}
+            {{- range $key, $value := .Values.secrets.jwt.keys }}
+            - name: {{ $value }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secrets.jwt.name }}
+                  key: {{ $value }}
+            {{- end }}
+            {{- range $key, $value := .Values.secrets.keycloak.keys }}
+            - name: {{ $value }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $.Values.secrets.keycloak.name }}
+                  key: {{ $value }}
+            {{- end }}
+          livenessProbe:
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

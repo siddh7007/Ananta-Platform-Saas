@@ -1,0 +1,284 @@
+# =============================================================================
+# ARC-SaaS Development Environment Values
+# =============================================================================
+# Cloud-agnostic configuration for development environment.
+# All secrets should be injected via external secret stores.
+# =============================================================================
+
+global:
+  environment: dev
+  cloudProvider: kubernetes  # kubernetes | aws | gcp | oracle
+
+  # Image settings
+  imageRegistry: ""  # Leave empty for local, or set to registry URL
+  imagePullPolicy: IfNotPresent
+
+  # Secrets strategy
+  secrets:
+    provider: kubernetes  # kubernetes | vault | external-secrets
+    # For Vault:
+    # vaultAddress: "http://vault:8200"
+    # vaultRole: "arc-saas-dev"
+    # For External Secrets Operator:
+    # externalSecretsBackend: "aws-secretsmanager"  # aws-secretsmanager | gcp-secretmanager | azure-keyvault | oracle-vault
+
+# -----------------------------------------------------------------------------
+# Tenant Management Service
+# -----------------------------------------------------------------------------
+tenant-management-service:
+  replicaCount: 1
+
+  image:
+    repository: arc-saas/tenant-management-service
+    tag: "latest"
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  autoscaling:
+    enabled: false
+
+  # Environment variables (non-sensitive)
+  env:
+    NODE_ENV: development
+    PORT: "14000"
+    LOG_LEVEL: debug
+
+  # External secrets configuration - NO hardcoded values
+  externalSecrets:
+    enabled: true
+    refreshInterval: 1h
+    secretStoreRef:
+      name: arc-saas-secret-store
+      kind: ClusterSecretStore
+
+  # Kubernetes secrets references (provider-neutral)
+  secrets:
+    database:
+      existingSecret: "arc-saas-database-credentials"
+      keys:
+        host: DB_HOST
+        port: DB_PORT
+        username: DB_USER
+        password: DB_PASSWORD
+        database: DB_DATABASE
+    redis:
+      existingSecret: "arc-saas-redis-credentials"
+      keys:
+        url: REDIS_URL
+    jwt:
+      existingSecret: "arc-saas-jwt-secret"
+      keys:
+        secret: JWT_SECRET
+        issuer: JWT_ISSUER
+    keycloak:
+      existingSecret: "arc-saas-keycloak-credentials"
+      keys:
+        url: KEYCLOAK_URL
+        realm: KEYCLOAK_REALM
+        clientId: KEYCLOAK_CLIENT_ID
+        clientSecret: KEYCLOAK_CLIENT_SECRET
+    novu:
+      existingSecret: "arc-saas-novu-credentials"
+      keys:
+        apiKey: NOVU_API_KEY
+        appId: NOVU_APP_ID
+    stripe:
+      existingSecret: "arc-saas-stripe-credentials"
+      keys:
+        apiKey: STRIPE_API_KEY
+        webhookSecret: STRIPE_WEBHOOK_SECRET
+
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 14000
+
+  # Ingress - development typically uses NodePort or port-forward
+  ingress:
+    enabled: false
+
+  # Health probes
+  livenessProbe:
+    httpGet:
+      path: /ping
+      port: http
+    initialDelaySeconds: 30
+    periodSeconds: 10
+
+  readinessProbe:
+    httpGet:
+      path: /ping
+      port: http
+    initialDelaySeconds: 10
+    periodSeconds: 5
+
+# -----------------------------------------------------------------------------
+# Temporal Worker Service
+# -----------------------------------------------------------------------------
+temporal-worker-service:
+  enabled: true
+  replicaCount: 1
+
+  image:
+    repository: arc-saas/temporal-worker-service
+    tag: "latest"
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  # Temporal connection
+  temporal:
+    address: "temporal:7233"
+    namespace: "arc-saas"
+    taskQueue: "tenant-provisioning"
+
+  # Provider-neutral secrets configuration
+  # All credentials are read from Kubernetes secrets, not hardcoded values
+  secrets:
+    database:
+      existingSecret: "arc-saas-database-credentials"
+      keys:
+        host: DB_HOST
+        port: DB_PORT
+        name: DB_NAME
+        user: DB_USER
+        password: DB_PASSWORD
+    keycloak:
+      existingSecret: "arc-saas-keycloak-credentials"
+      keys:
+        url: KEYCLOAK_URL
+        realm: KEYCLOAK_REALM
+        adminUser: KEYCLOAK_ADMIN_USER
+        adminPassword: KEYCLOAK_ADMIN_PASSWORD
+
+# -----------------------------------------------------------------------------
+# Admin App (React Frontend)
+# -----------------------------------------------------------------------------
+admin-app:
+  replicaCount: 1
+
+  image:
+    repository: arc-saas/admin-app
+    tag: "latest"
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+  # Environment variables (build-time or runtime config)
+  env:
+    VITE_API_URL: "http://localhost:14000"
+    VITE_KEYCLOAK_URL: "http://localhost:8180"
+    VITE_KEYCLOAK_REALM: "arc-saas"
+    VITE_KEYCLOAK_CLIENT_ID: "admin-app"
+
+  service:
+    type: ClusterIP
+    port: 80
+
+  ingress:
+    enabled: false
+
+# -----------------------------------------------------------------------------
+# Keycloak
+# -----------------------------------------------------------------------------
+keycloak:
+  enabled: true
+  replicaCount: 1
+
+  image:
+    repository: quay.io/keycloak/keycloak
+    tag: "23.0"
+
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: 1000m
+      memory: 1024Mi
+
+  # Admin credentials from secret
+  secrets:
+    admin:
+      existingSecret: "arc-saas-keycloak-admin"
+      keys:
+        username: KEYCLOAK_ADMIN
+        password: KEYCLOAK_ADMIN_PASSWORD
+
+  # Database connection from secret
+  database:
+    existingSecret: "arc-saas-keycloak-database"
+    vendor: postgres
+
+# -----------------------------------------------------------------------------
+# Temporal
+# -----------------------------------------------------------------------------
+temporal:
+  enabled: true
+
+  server:
+    replicaCount: 1
+
+  web:
+    enabled: true
+    replicaCount: 1
+
+  # Database for Temporal
+  cassandra:
+    enabled: false
+  postgresql:
+    enabled: true
+    existingSecret: "arc-saas-temporal-database"
+
+# -----------------------------------------------------------------------------
+# PostgreSQL (for development only - use managed DB in cloud)
+# -----------------------------------------------------------------------------
+postgresql:
+  enabled: true
+
+  auth:
+    existingSecret: "arc-saas-postgresql-credentials"
+    secretKeys:
+      adminPasswordKey: postgres-password
+      userPasswordKey: password
+
+  primary:
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+
+# -----------------------------------------------------------------------------
+# Redis (for development only - use managed Redis in cloud)
+# -----------------------------------------------------------------------------
+redis:
+  enabled: true
+
+  auth:
+    existingSecret: "arc-saas-redis-credentials"
+    existingSecretPasswordKey: redis-password
+
+  master:
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+
+  replica:
+    replicaCount: 0

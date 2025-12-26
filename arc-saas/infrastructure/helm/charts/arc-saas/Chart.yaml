@@ -1,0 +1,81 @@
+# =============================================================================
+# ARC-SaaS Umbrella Chart
+# =============================================================================
+# This umbrella chart deploys all ARC-SaaS components together.
+# When using values.dev|staging|prod.yaml with this chart, ALL service
+# configurations will be properly applied.
+#
+# Usage:
+#   helm upgrade --install arc-saas ./infrastructure/helm/charts/arc-saas \
+#     -f ./infrastructure/helm/values/values.dev.yaml \
+#     --namespace arc-saas --create-namespace
+# =============================================================================
+
+apiVersion: v2
+name: arc-saas
+description: ARC-SaaS Platform - Multi-tenant SaaS Control Plane
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+
+keywords:
+  - arc-saas
+  - saas
+  - multi-tenant
+  - control-plane
+  - loopback
+  - temporal
+
+maintainers:
+  - name: ARC-SaaS Team
+
+# -----------------------------------------------------------------------------
+# Sub-chart Dependencies
+# -----------------------------------------------------------------------------
+# All our custom charts are included as file:// dependencies.
+# Third-party charts (postgres, redis, keycloak, temporal) can be added from
+# their official Helm repositories when needed.
+# -----------------------------------------------------------------------------
+dependencies:
+  # Core ARC-SaaS services
+  - name: tenant-management-service
+    version: "1.0.0"
+    repository: "file://../tenant-management-service"
+    condition: tenant-management-service.enabled
+
+  - name: temporal-worker-service
+    version: "1.0.0"
+    repository: "file://../temporal-worker-service"
+    condition: temporal-worker-service.enabled
+
+  - name: admin-app
+    version: "1.0.0"
+    repository: "file://../admin-app"
+    condition: admin-app.enabled
+
+  - name: customer-app
+    version: "1.0.0"
+    repository: "file://../customer-app"
+    condition: customer-app.enabled
+
+  # Optional: Monitoring stack
+  - name: monitoring
+    version: "1.0.0"
+    repository: "file://../monitoring"
+    condition: monitoring.enabled
+
+  # Optional: Third-party dependencies (uncomment when using official charts)
+  # - name: postgresql
+  #   version: "13.x.x"
+  #   repository: "https://charts.bitnami.com/bitnami"
+  #   condition: postgresql.enabled
+  #
+  # - name: redis
+  #   version: "18.x.x"
+  #   repository: "https://charts.bitnami.com/bitnami"
+  #   condition: redis.enabled
+  #
+  # - name: keycloak
+  #   version: "16.x.x"
+  #   repository: "https://charts.bitnami.com/bitnami"
+  #   condition: keycloak.enabled
