@@ -1,0 +1,85 @@
+{
+  "name": "Manual Component Enrichment",
+  "description": "Triggered by Enrich Button in Directus Admin UI",
+  "status": "active",
+  "trigger": "webhook",
+  "accountability": "all",
+  "options": {
+    "method": "POST",
+    "scope": "items.create",
+    "collections": [],
+    "return": "$last"
+  },
+  "operations": [
+    {
+      "name": "Log Enrichment Request",
+      "key": "log_request",
+      "type": "log",
+      "position_x": 3,
+      "position_y": 1,
+      "options": {
+        "message": "Manual enrichment requested for component: {{$trigger.body.component_id}}"
+      }
+    },
+    {
+      "name": "Validate Input",
+      "key": "validate_input",
+      "type": "condition",
+      "position_x": 7,
+      "position_y": 1,
+      "options": {
+        "filter": {
+          "component_id": {
+            "_nnull": true
+          }
+        }
+      },
+      "reject": "error_invalid_input"
+    },
+    {
+      "name": "Enrich Component",
+      "key": "enrich_component",
+      "type": "enrich-component",
+      "position_x": 11,
+      "position_y": 1,
+      "options": {
+        "component_id": "{{$trigger.body.component_id}}",
+        "triggered_by": "{{$accountability.user}}"
+      }
+    },
+    {
+      "name": "Return Success",
+      "key": "return_success",
+      "type": "webhook-response",
+      "position_x": 15,
+      "position_y": 1,
+      "options": {
+        "status": 200,
+        "body": {
+          "success": true,
+          "data": "{{$last}}"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        }
+      }
+    },
+    {
+      "name": "Error: Invalid Input",
+      "key": "error_invalid_input",
+      "type": "webhook-response",
+      "position_x": 7,
+      "position_y": 5,
+      "options": {
+        "status": 400,
+        "body": {
+          "success": false,
+          "error": "component_id is required"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        }
+      }
+    }
+  ]
+}

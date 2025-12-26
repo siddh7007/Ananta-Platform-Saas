@@ -1,0 +1,76 @@
+{
+  "comment": "Example ECS task definition with X-Ray daemon sidecar",
+  "family": "ananta-service-with-xray",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "512",
+  "memory": "1024",
+  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecsTaskRole-with-xray",
+  "containerDefinitions": [
+    {
+      "name": "app",
+      "image": "my-app:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 3000,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "NODE_ENV",
+          "value": "production"
+        },
+        {
+          "name": "AWS_XRAY_DAEMON_ADDRESS",
+          "value": "xray-daemon:2000"
+        },
+        {
+          "name": "OTEL_EXPORTER_OTLP_ENDPOINT",
+          "value": "http://otel-collector:4317"
+        },
+        {
+          "name": "OTEL_SERVICE_NAME",
+          "value": "tenant-management-service"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/aws/ecs/app",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "app"
+        }
+      },
+      "dependsOn": [
+        {
+          "containerName": "xray-daemon",
+          "condition": "START"
+        }
+      ]
+    },
+    {
+      "name": "xray-daemon",
+      "image": "public.ecr.aws/xray/aws-xray-daemon:latest",
+      "cpu": 32,
+      "memory": 256,
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 2000,
+          "protocol": "udp"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/aws/ecs/xray",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "xray-daemon"
+        }
+      }
+    }
+  ]
+}

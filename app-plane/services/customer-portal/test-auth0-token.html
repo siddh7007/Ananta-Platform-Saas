@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Auth0 Token Inspector</title>
+  <script src="https://cdn.auth0.com/js/auth0-spa-js/2.0/auth0-spa-js.production.js"></script>
+</head>
+<body>
+  <h1>Auth0 Token Inspector</h1>
+  <button onclick="login()">Login with Auth0</button>
+  <button onclick="inspectToken()">Inspect Current Token</button>
+  <button onclick="logout()">Force Logout</button>
+  <pre id="output"></pre>
+
+  <script>
+    let auth0Client;
+    const output = document.getElementById('output');
+
+    async function initAuth0() {
+      auth0Client = await auth0.createAuth0Client({
+        domain: 'dev-c8qm3zg2c4mnmm3k.us.auth0.com',
+        clientId: 'GF23e6PmLxLSHCWwEQTJfmW5xsEydYVa',
+        authorizationParams: {
+          redirect_uri: window.location.origin + '/test-auth0-token.html'
+        }
+      });
+
+      // Handle redirect callback
+      const query = window.location.search;
+      if (query.includes('code=') && query.includes('state=')) {
+        await auth0Client.handleRedirectCallback();
+        window.history.replaceState({}, document.title, '/test-auth0-token.html');
+        await inspectToken();
+      }
+    }
+
+    async function login() {
+      await auth0Client.loginWithRedirect();
+    }
+
+    async function logout() {
+      output.textContent = 'Logging out and clearing Auth0 session cache...';
+      await auth0Client.logout({
+        logoutParams: {
+          returnTo: window.location.origin + '/test-auth0-token.html'
+        }
+      });
+    }
+
+    async function inspectToken() {
+      try {
+        const isAuthenticated = await auth0Client.isAuthenticated();
+        if (!isAuthenticated) {
+          output.textContent = 'Not authenticated. Click "Login with Auth0" first.';
+          return;
+        }
+
+        const user = await auth0Client.getUser();
+        const idTokenClaims = await auth0Client.getIdTokenClaims();
+
+        const namespace = 'https://ananta.component.platform';
+        const orgId = user[`${namespace}/org_id`];
+        const orgName = user[`${namespace}/org_name`];
+        const roles = user[`${namespace}/roles`];
+
+        const result = {
+          email: user.email,
+          name: user.name,
+          sub: user.sub,
+          '---CUSTOM CLAIMS---': '---',
+          [`${namespace}/org_id`]: orgId,
+          [`${namespace}/org_name`]: orgName,
+          [`${namespace}/roles`]: roles,
+          '---STATUS---': '---',
+          'Is Platform Admin?': orgId === 'org_oNtVXvVrzXz1ubua' ? '✅ YES' : '❌ NO',
+          'Has Roles?': Array.isArray(roles) && roles.length > 0 ? '✅ YES' : '❌ NO',
+          '---FULL USER OBJECT---': '---',
+          ...user
+        };
+
+        output.textContent = JSON.stringify(result, null, 2);
+
+        // Highlight the result
+        if (orgId === 'org_oNtVXvVrzXz1ubua') {
+          output.style.backgroundColor = '#d4edda';
+          output.style.border = '2px solid #28a745';
+        } else {
+          output.style.backgroundColor = '#f8d7da';
+          output.style.border = '2px solid #dc3545';
+        }
+      } catch (error) {
+        output.textContent = 'Error: ' + error.message;
+        output.style.backgroundColor = '#fff3cd';
+        output.style.border = '2px solid #ffc107';
+      }
+    }
+
+    // Initialize on page load
+    initAuth0();
+  </script>
+
+  <style>
+    body {
+      font-family: monospace;
+      padding: 20px;
+    }
+    button {
+      padding: 10px 20px;
+      margin: 10px 5px;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    #output {
+      margin-top: 20px;
+      padding: 15px;
+      border-radius: 5px;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+    }
+  </style>
+</body>
+</html>

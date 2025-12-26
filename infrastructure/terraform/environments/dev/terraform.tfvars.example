@@ -1,0 +1,190 @@
+# =============================================================================
+# Terraform Variables - Development Environment
+# =============================================================================
+# Example configuration for dev environment deployment
+# Copy to terraform.tfvars and customize values
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# General Configuration
+# -----------------------------------------------------------------------------
+
+project_name = "ananta"
+environment  = "dev"
+aws_region   = "us-east-1"
+
+tags = {
+  Team        = "Platform"
+  CostCenter  = "Engineering"
+  ManagedBy   = "Terraform"
+  Environment = "dev"
+}
+
+# -----------------------------------------------------------------------------
+# Network Configuration
+# -----------------------------------------------------------------------------
+
+vpc_cidr = "10.0.0.0/16"
+
+availability_zones = [
+  "us-east-1a",
+  "us-east-1b",
+  "us-east-1c"
+]
+
+public_subnet_cidrs = [
+  "10.0.1.0/24",
+  "10.0.2.0/24",
+  "10.0.3.0/24"
+]
+
+private_subnet_cidrs = [
+  "10.0.11.0/24",
+  "10.0.12.0/24",
+  "10.0.13.0/24"
+]
+
+database_subnet_cidrs = [
+  "10.0.21.0/24",
+  "10.0.22.0/24",
+  "10.0.23.0/24"
+]
+
+enable_nat_gateway = true
+single_nat_gateway = true  # Cost optimization for dev
+
+# -----------------------------------------------------------------------------
+# Database Configuration
+# -----------------------------------------------------------------------------
+
+# Control Plane Database (arc_saas)
+control_plane_db_instance_class       = "db.t4g.medium"
+control_plane_db_allocated_storage    = 20
+control_plane_db_max_allocated_storage = 100
+control_plane_db_multi_az             = false  # Single AZ for dev
+control_plane_db_backup_retention_period = 7
+control_plane_db_engine_version       = "15.4"
+
+# App Plane Database (Supabase)
+app_plane_db_instance_class       = "db.t4g.medium"
+app_plane_db_allocated_storage    = 20
+app_plane_db_max_allocated_storage = 100
+app_plane_db_multi_az             = false
+
+# Components Database
+components_db_instance_class       = "db.t4g.small"
+components_db_allocated_storage    = 10
+components_db_max_allocated_storage = 50
+
+# -----------------------------------------------------------------------------
+# ElastiCache (Redis) Configuration
+# -----------------------------------------------------------------------------
+
+redis_node_type                  = "cache.t4g.micro"
+redis_num_cache_nodes            = 1
+redis_engine_version             = "7.0"
+redis_parameter_group_family     = "redis7"
+redis_automatic_failover_enabled = false  # Dev environment
+
+# -----------------------------------------------------------------------------
+# ECS Configuration
+# -----------------------------------------------------------------------------
+
+enable_container_insights = true
+ecs_log_retention_days    = 7  # Shorter retention for dev
+
+# Service Discovery (NEW!)
+enable_service_discovery = true  # Enable Cloud Map service discovery
+
+# Control Plane Services
+tenant_mgmt_cpu           = 512
+tenant_mgmt_memory        = 1024
+tenant_mgmt_desired_count = 1  # Dev: single instance
+
+# App Plane Services
+cns_service_cpu           = 512
+cns_service_memory        = 1024
+cns_service_desired_count = 1
+
+# Auto-scaling (minimal for dev)
+enable_autoscaling       = false  # Disable auto-scaling in dev
+autoscaling_min_capacity = 1
+autoscaling_max_capacity = 2
+autoscaling_cpu_target   = 70
+autoscaling_memory_target = 80
+
+# -----------------------------------------------------------------------------
+# Keycloak Configuration
+# -----------------------------------------------------------------------------
+
+keycloak_db_instance_class = "db.t4g.small"
+keycloak_task_cpu          = 512
+keycloak_task_memory       = 1024
+keycloak_desired_count     = 1
+
+# -----------------------------------------------------------------------------
+# Temporal Configuration
+# -----------------------------------------------------------------------------
+
+temporal_db_instance_class = "db.t4g.small"
+temporal_namespace         = "arc-saas"
+
+temporal_server_task_cpu      = 512
+temporal_server_task_memory   = 1024
+temporal_server_desired_count = 1
+
+temporal_ui_task_cpu      = 256
+temporal_ui_task_memory   = 512
+temporal_ui_desired_count = 1
+
+# -----------------------------------------------------------------------------
+# App Plane Services
+# -----------------------------------------------------------------------------
+
+# Amazon MQ (RabbitMQ)
+mq_instance_type   = "mq.t3.micro"
+mq_engine_version  = "3.11.20"
+mq_deployment_mode = "SINGLE_INSTANCE"  # Dev: single broker
+
+# S3 Buckets
+s3_bucket_prefix     = "ananta-dev"
+enable_s3_versioning = false  # Disable versioning in dev
+s3_lifecycle_days    = 30
+
+# -----------------------------------------------------------------------------
+# Secrets Management
+# -----------------------------------------------------------------------------
+
+secrets_manager_prefix  = "/ananta/dev"
+enable_secrets_rotation = false  # Disable rotation in dev
+secrets_rotation_days   = 30
+
+# -----------------------------------------------------------------------------
+# Monitoring Configuration
+# -----------------------------------------------------------------------------
+
+enable_prometheus = false  # Cost optimization for dev
+enable_grafana    = false
+enable_jaeger     = true   # Enable tracing in dev
+
+# -----------------------------------------------------------------------------
+# Service Discovery Usage Examples
+# -----------------------------------------------------------------------------
+# When service discovery is enabled (enable_service_discovery = true),
+# services can communicate using DNS names:
+#
+# Keycloak Internal URL:
+#   http://keycloak.dev-ananta.local:8080
+#
+# Temporal Server Address:
+#   temporal.dev-ananta.local:7233
+#
+# Tenant Management API:
+#   http://tenant-management-service.dev-ananta.local:14000
+#
+# CNS Service API:
+#   http://cns-service.dev-ananta.local:27200
+#
+# These endpoints are automatically configured via Terraform outputs.
+# Update your application environment variables to use these DNS names
+# instead of ALB endpoints for internal service-to-service communication.

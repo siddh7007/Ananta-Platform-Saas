@@ -1,0 +1,239 @@
+# =============================================================================
+# Shared Monitoring Stack - Ananta Platform
+# =============================================================================
+# Prometheus, Grafana, AlertManager, and Blackbox Exporter
+# Monitors both Control Plane (Ananta-SaaS) and App Plane services
+#
+# Usage:
+#   docker-compose up -d
+#
+# Access:
+#   Prometheus:    http://localhost:9090
+#   Grafana:       http://localhost:3001 (admin/admin123)
+#   AlertManager:  http://localhost:9093
+# =============================================================================
+
+version: '3.8'
+
+services:
+  # ===========================================================================
+  # OPENTELEMETRY COLLECTOR - Centralized Telemetry Hub
+  # ===========================================================================
+  otel-collector:
+    build:
+      context: ./otel-collector
+      dockerfile: Dockerfile
+    container_name: shared-otel-collector
+    command: ["--config=/etc/otel-collector-config.yaml"]
+    volumes:
+      - ./otel-collector/otel-collector-config.yaml:/etc/otel-collector-config.yaml:ro
+    ports:
+      - "4317:4317"   # OTLP gRPC
+      - "4318:4318"   # OTLP HTTP
+      - "14250:14250" # Jaeger gRPC
+      - "14268:14268" # Jaeger HTTP
+      - "6831:6831/udp" # Jaeger Thrift Compact
+      - "6832:6832/udp" # Jaeger Thrift Binary
+      - "8889:8889"   # Prometheus metrics exporter
+      - "13133:13133" # Health check
+      - "55679:55679" # zPages (debugging)
+    environment:
+      - AWS_REGION=${AWS_REGION:-us-east-1}
+      - ENVIRONMENT=${ENVIRONMENT:-dev}
+      - SAMPLING_PERCENTAGE=${SAMPLING_PERCENTAGE:-10}
+      - JAEGER_ENDPOINT=jaeger:14250
+      - OTEL_LOG_LEVEL=${OTEL_LOG_LEVEL:-info}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:13133/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - arc-saas
+      - app-plane
+      - monitoring
+    restart: unless-stopped
+
+  # ===========================================================================
+  # JAEGER - Distributed Tracing Backend
+  # ===========================================================================
+  jaeger:
+    image: jaegertracing/all-in-one:1.53
+    container_name: shared-jaeger
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+      SPAN_STORAGE_TYPE: badger
+      BADGER_EPHEMERAL: "false"
+      BADGER_DIRECTORY_VALUE: /badger/data
+      BADGER_DIRECTORY_KEY: /badger/key
+    volumes:
+      - jaeger-data:/badger
+    ports:
+      - "16686:16686"     # Jaeger UI
+      - "14269:14269"     # Admin port
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:14269"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      - arc-saas
+      - app-plane
+      - monitoring
+    restart: unless-stopped
+
+  # ===========================================================================
+  # PROMETHEUS - Metrics Collection
+  # ===========================================================================
+  prometheus:
+    image: prom/prometheus:v2.47.0
+    container_name: shared-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts:/etc/prometheus/alerts:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.enable-lifecycle'
+      - '--web.enable-admin-api'
+    networks:
+      - arc-saas
+      - app-plane
+      - monitoring
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9090/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================================================
+  # GRAFANA - Visualization & Dashboards
+  # ===========================================================================
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: shared-grafana
+    ports:
+      - "3001:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin123
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: "http://localhost:3001"
+      GF_INSTALL_PLUGINS: grafana-clock-panel,grafana-piechart-panel
+      # Alerting
+      GF_ALERTING_ENABLED: "true"
+      GF_UNIFIED_ALERTING_ENABLED: "true"
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+    networks:
+      - arc-saas
+      - app-plane
+      - monitoring
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================================================
+  # ALERTMANAGER - Alert Routing & Notifications
+  # ===========================================================================
+  alertmanager:
+    image: prom/alertmanager:v0.26.0
+    container_name: shared-alertmanager
+    ports:
+      - "9093:9093"
+    environment:
+      # SMTP Configuration (for email notifications)
+      SMTP_HOST: ${SMTP_HOST:-smtp.example.com}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_FROM: ${SMTP_FROM:-alertmanager@ananta.io}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      # Email recipients
+      DEFAULT_EMAIL: ${DEFAULT_EMAIL:-oncall@ananta.io}
+      SLO_TEAM_EMAIL: ${SLO_TEAM_EMAIL:-slo-team@ananta.io}
+      DATABASE_TEAM_EMAIL: ${DATABASE_TEAM_EMAIL:-database-team@ananta.io}
+      CONTROL_PLANE_TEAM_EMAIL: ${CONTROL_PLANE_TEAM_EMAIL:-control-plane@ananta.io}
+      APP_PLANE_TEAM_EMAIL: ${APP_PLANE_TEAM_EMAIL:-app-plane@ananta.io}
+    volumes:
+      - ./alertmanager/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./alertmanager/templates:/etc/alertmanager/templates:ro
+      - ./alertmanager/secrets:/etc/alertmanager/secrets:ro
+      - alertmanager-data:/alertmanager
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager.yml'
+      - '--storage.path=/alertmanager'
+      - '--web.external-url=http://localhost:9093'
+    networks:
+      - arc-saas
+      - app-plane
+      - monitoring
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9093/-/healthy"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # ===========================================================================
+  # BLACKBOX EXPORTER - HTTP/TCP/ICMP Probing
+  # ===========================================================================
+  blackbox-exporter:
+    image: prom/blackbox-exporter:v0.24.0
+    container_name: shared-blackbox
+    ports:
+      - "9115:9115"
+    volumes:
+      - ./blackbox/blackbox.yml:/etc/blackbox_exporter/config.yml:ro
+    command:
+      - '--config.file=/etc/blackbox_exporter/config.yml'
+    networks:
+      - arc-saas
+      - app-plane
+      - monitoring
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9115/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+# =============================================================================
+# VOLUMES
+# =============================================================================
+volumes:
+  jaeger-data:
+    name: shared-jaeger-data
+  prometheus-data:
+    name: shared-prometheus-data
+  grafana-data:
+    name: shared-grafana-data
+  alertmanager-data:
+    name: shared-alertmanager-data
+
+# =============================================================================
+# NETWORKS
+# =============================================================================
+# Connect to existing platform networks to scrape internal services
+networks:
+  arc-saas:
+    external: true
+    name: arc-saas
+  app-plane:
+    external: true
+    name: app-plane
+  monitoring:
+    name: shared-monitoring
+    driver: bridge

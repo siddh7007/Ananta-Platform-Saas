@@ -1,0 +1,123 @@
+# =============================================================================
+# Shared Temporal Infrastructure
+# =============================================================================
+#
+# This file CREATES the shared-temporal-network that both arc-saas and
+# app-plane reference as external.
+#
+# START THIS FIRST:
+#   docker-compose -f docker-compose.shared-temporal.yml up -d
+#
+# THEN start other services:
+#   cd arc-saas && docker-compose up -d
+#   cd app-plane && docker-compose up -d
+#
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Temporal PostgreSQL Database
+  # ---------------------------------------------------------------------------
+  temporal-postgresql:
+    image: postgres:15-alpine
+    container_name: shared-temporal-postgres
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: temporal
+      POSTGRES_DB: temporal
+    volumes:
+      - shared-temporal-postgres-data:/var/lib/postgresql/data
+    ports:
+      - "27030:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal -d temporal"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - shared-temporal-network
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Temporal Server
+  # ---------------------------------------------------------------------------
+  temporal:
+    image: temporalio/auto-setup:1.24.2
+    container_name: shared-temporal
+    depends_on:
+      temporal-postgresql:
+        condition: service_healthy
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=temporal-postgresql
+      - DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+      - ENABLE_ES=false
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CLI_ADDRESS=temporal:7233
+    ports:
+      - "27020:7233"
+    volumes:
+      - ./arc-saas/temporal-config:/etc/temporal/config/dynamicconfig
+    healthcheck:
+      test: ["CMD", "temporal", "workflow", "list", "--namespace", "default"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
+    networks:
+      - shared-temporal-network
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Temporal Web UI
+  # ---------------------------------------------------------------------------
+  temporal-ui:
+    image: temporalio/ui:2.26.2
+    container_name: shared-temporal-ui
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:3000,http://localhost:8080,http://localhost:27555
+      - TEMPORAL_UI_PORT=8080
+      - TEMPORAL_NOTIFY_ON_NEW_VERSION=false
+    ports:
+      - "27021:8080"
+    networks:
+      - shared-temporal-network
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Namespace Init (creates arc-saas and enrichment namespaces)
+  # Uses the auto-setup image which includes tctl
+  # ---------------------------------------------------------------------------
+  temporal-init:
+    image: temporalio/auto-setup:1.24.2
+    container_name: shared-temporal-init
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+    entrypoint: >
+      /bin/sh -c "
+        echo 'Creating arc-saas namespace...';
+        temporal operator namespace create arc-saas --address temporal:7233 2>/dev/null || echo 'arc-saas namespace exists';
+        echo 'Creating enrichment namespace...';
+        temporal operator namespace create enrichment --address temporal:7233 2>/dev/null || echo 'enrichment namespace exists';
+        echo 'Namespaces ready.';
+      "
+    networks:
+      - shared-temporal-network
+
+volumes:
+  shared-temporal-postgres-data:
+
+networks:
+  shared-temporal-network:
+    driver: bridge
+    name: shared-temporal-network

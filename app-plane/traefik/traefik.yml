@@ -1,0 +1,57 @@
+# Traefik Static Configuration
+# App Plane Reverse Proxy
+# Port 27500 (HTTP), 27443 (HTTPS - optional), 27501 (Dashboard)
+
+global:
+  checkNewVersion: false
+  sendAnonymousUsage: false
+
+# API and Dashboard
+api:
+  dashboard: true
+  insecure: true  # Allow dashboard without auth (dev mode)
+
+# Ping endpoint for health checks
+ping:
+  entryPoint: "traefik"
+
+# Entry Points
+entryPoints:
+  web:
+    address: ":27500"  # HTTP entry point
+
+  websecure:
+    address: ":27443"  # HTTPS entry point (optional for production)
+
+  traefik:
+    address: ":27501"  # Traefik Dashboard
+
+# Providers
+providers:
+  # Docker provider for automatic service discovery
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false  # Only expose services with traefik.enable=true
+    network: "app-plane_app-plane-network"
+    watch: true
+
+  # File provider for static routes
+  file:
+    filename: /etc/traefik/dynamic.yml
+    watch: true
+
+# Logging
+log:
+  level: INFO
+  format: common
+
+# Access Logs
+accessLog:
+  format: common
+  bufferingSize: 100
+
+# Metrics (optional - for Prometheus integration)
+metrics:
+  prometheus:
+    addEntryPointsLabels: true
+    addServicesLabels: true

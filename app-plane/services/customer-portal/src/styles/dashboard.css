@@ -1,0 +1,383 @@
+/**
+ * Portfolio Dashboard Styles
+ * Tablet-first responsive design with print support
+ */
+
+/* Widget Card Base Styles */
+.dashboard-widget {
+  @apply bg-white rounded-lg shadow-sm border border-gray-200;
+  @apply transition-shadow duration-200;
+}
+
+.dashboard-widget:hover {
+  @apply shadow-md;
+}
+
+.dashboard-widget-header {
+  @apply flex items-center justify-between px-6 py-4 border-b border-gray-200;
+}
+
+.dashboard-widget-title {
+  @apply text-lg font-semibold text-gray-900;
+}
+
+.dashboard-widget-body {
+  @apply p-6;
+}
+
+/* Chart Container Styles */
+.chart-container {
+  @apply w-full;
+  min-height: 300px;
+}
+
+.chart-legend {
+  @apply flex flex-wrap gap-4 justify-center mt-4;
+}
+
+.chart-legend-item {
+  @apply flex items-center gap-2 cursor-pointer select-none;
+  @apply transition-opacity duration-200;
+  min-height: 48px; /* Touch target */
+  padding: 8px 12px;
+}
+
+.chart-legend-item:hover {
+  @apply opacity-75;
+}
+
+.chart-legend-item.inactive {
+  @apply opacity-40;
+}
+
+.chart-legend-color {
+  @apply w-4 h-4 rounded-full;
+}
+
+/* Metric Card Styles */
+.metric-card {
+  @apply dashboard-widget;
+  @apply flex flex-col;
+  min-height: 160px;
+}
+
+.metric-value {
+  @apply text-4xl font-bold text-gray-900;
+  line-height: 1.2;
+}
+
+.metric-label {
+  @apply text-sm font-medium text-gray-600 uppercase tracking-wide;
+  margin-top: 8px;
+}
+
+.metric-trend {
+  @apply flex items-center gap-2 mt-3;
+}
+
+.metric-trend-icon {
+  @apply w-5 h-5;
+}
+
+.metric-trend-icon.up {
+  @apply text-green-600;
+}
+
+.metric-trend-icon.down {
+  @apply text-red-600;
+}
+
+.metric-trend-icon.flat {
+  @apply text-gray-400;
+}
+
+.metric-trend-text {
+  @apply text-sm text-gray-600;
+}
+
+.metric-comparison {
+  @apply text-xs text-gray-500 mt-1;
+}
+
+/* Alert Card Styles */
+.alert-card {
+  @apply flex items-start gap-4 p-4 rounded-lg;
+  @apply transition-all duration-200;
+  min-height: 72px; /* Touch target */
+}
+
+.alert-card.warning {
+  @apply bg-amber-50 border border-amber-200;
+}
+
+.alert-card.error {
+  @apply bg-red-50 border border-red-200;
+}
+
+.alert-card-icon {
+  @apply flex-shrink-0 w-6 h-6;
+}
+
+.alert-card-icon.warning {
+  @apply text-amber-600;
+}
+
+.alert-card-icon.error {
+  @apply text-red-600;
+}
+
+.alert-card-content {
+  @apply flex-1 min-w-0;
+}
+
+.alert-card-message {
+  @apply text-sm text-gray-900;
+}
+
+.alert-card-action {
+  @apply flex-shrink-0;
+}
+
+/* Activity Feed Styles */
+.activity-item {
+  @apply flex items-start gap-4 py-4;
+  @apply border-b border-gray-100 last:border-b-0;
+  min-height: 64px;
+}
+
+.activity-avatar {
+  @apply flex-shrink-0 w-10 h-10 rounded-full bg-gray-200;
+  @apply flex items-center justify-center text-gray-600 font-medium;
+}
+
+.activity-content {
+  @apply flex-1 min-w-0;
+}
+
+.activity-text {
+  @apply text-sm text-gray-900;
+}
+
+.activity-target {
+  @apply font-medium text-gray-900;
+}
+
+.activity-timestamp {
+  @apply text-xs text-gray-500 mt-1;
+}
+
+.activity-badge {
+  @apply inline-flex items-center px-2 py-1 rounded text-xs font-medium;
+}
+
+.activity-badge.upload {
+  @apply bg-blue-100 text-blue-700;
+}
+
+.activity-badge.compare {
+  @apply bg-purple-100 text-purple-700;
+}
+
+.activity-badge.enrich {
+  @apply bg-green-100 text-green-700;
+}
+
+.activity-badge.approve {
+  @apply bg-teal-100 text-teal-700;
+}
+
+.activity-badge.export {
+  @apply bg-gray-100 text-gray-700;
+}
+
+/* Animation Keyframes */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -1000px 0;
+  }
+  100% {
+    background-position: 1000px 0;
+  }
+}
+
+.fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+.pulse {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+/* Skeleton Loading Styles */
+.skeleton {
+  @apply bg-gray-200 rounded;
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 1000px 100%;
+  animation: shimmer 2s infinite;
+}
+
+.skeleton-text {
+  @apply skeleton h-4;
+}
+
+.skeleton-title {
+  @apply skeleton h-6;
+}
+
+.skeleton-circle {
+  @apply skeleton rounded-full;
+}
+
+/* Responsive Grid */
+.dashboard-grid {
+  @apply grid gap-6;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+/* Tablet Portrait (768px+) */
+@media (min-width: 768px) {
+  .dashboard-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .metric-value {
+    @apply text-5xl;
+  }
+
+  .chart-container {
+    min-height: 350px;
+  }
+}
+
+/* Tablet Landscape (1024px+) */
+@media (min-width: 1024px) {
+  .dashboard-grid {
+    grid-template-columns: repeat(4, 1fr);
+  }
+
+  .dashboard-grid-full {
+    grid-column: 1 / -1;
+  }
+
+  .dashboard-grid-half {
+    grid-column: span 2;
+  }
+
+  .chart-container {
+    min-height: 400px;
+  }
+}
+
+/* Desktop (1280px+) */
+@media (min-width: 1280px) {
+  .metric-value {
+    @apply text-6xl;
+  }
+}
+
+/* Print Styles for PDF Export */
+@media print {
+  body {
+    @apply bg-white;
+  }
+
+  .dashboard-widget {
+    @apply shadow-none border border-gray-300;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .chart-container {
+    min-height: 250px;
+  }
+
+  /* Hide interactive elements */
+  button,
+  .alert-card-action,
+  .export-button {
+    display: none !important;
+  }
+
+  /* Adjust colors for print */
+  .alert-card.warning {
+    @apply border-2 border-amber-600;
+  }
+
+  .alert-card.error {
+    @apply border-2 border-red-600;
+  }
+
+  /* Ensure charts are visible */
+  .recharts-surface {
+    @apply border border-gray-200;
+  }
+}
+
+/* Dark mode support (future enhancement) */
+@media (prefers-color-scheme: dark) {
+  /* Placeholder for dark mode styles */
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* High contrast mode */
+@media (prefers-contrast: high) {
+  .dashboard-widget {
+    @apply border-2 border-gray-900;
+  }
+
+  .alert-card {
+    @apply border-2;
+  }
+}
+
+/* Touch device optimizations */
+@media (hover: none) and (pointer: coarse) {
+  /* Larger touch targets */
+  .chart-legend-item {
+    min-height: 56px;
+    padding: 12px 16px;
+  }
+
+  button {
+    min-height: 48px;
+  }
+
+  /* Remove hover effects */
+  .dashboard-widget:hover {
+    @apply shadow-sm;
+  }
+
+  .chart-legend-item:hover {
+    @apply opacity-100;
+  }
+}

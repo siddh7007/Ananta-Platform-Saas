@@ -1,0 +1,257 @@
+# =============================================================================
+# AlertManager Production Configuration - Ananta Platform
+# =============================================================================
+# PRODUCTION-READY configuration with real notification receivers
+# This file should be used in staging/production environments
+# =============================================================================
+
+global:
+  resolve_timeout: 5m
+
+  # SMTP Configuration (configure for your environment)
+  smtp_smarthost: ${SMTP_HOST}:${SMTP_PORT}
+  smtp_from: ${SMTP_FROM}
+  smtp_auth_username: ${SMTP_USERNAME}
+  smtp_auth_password: ${SMTP_PASSWORD}
+  smtp_require_tls: true
+
+# Templates
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+# Root route - all alerts start here
+route:
+  receiver: 'default-receiver'
+  group_wait: 30s
+  group_interval: 5m
+  repeat_interval: 4h
+  group_by: ['alertname', 'severity', 'plane', 'service']
+
+  # Child routes with specific routing logic
+  routes:
+    # CRITICAL ALERTS - Page immediately
+    - match:
+        severity: critical
+      receiver: 'pagerduty-critical'
+      group_wait: 10s
+      repeat_interval: 1h
+      continue: true  # Also send to other receivers
+
+    # CRITICAL ALERTS - Also send to Slack critical channel
+    - match:
+        severity: critical
+      receiver: 'slack-critical'
+      group_wait: 10s
+      continue: true
+
+    # WARNING ALERTS - Slack only
+    - match:
+        severity: warning
+      receiver: 'slack-warnings'
+      group_wait: 1m
+      repeat_interval: 6h
+
+    # SLO VIOLATIONS - Special handling
+    - match:
+        category: slo
+      receiver: 'slo-team'
+      group_by: ['alertname', 'plane']
+      continue: true
+
+    # DATABASE ALERTS - Database team + Slack
+    - match:
+        category: database
+      receiver: 'database-team'
+      group_by: ['alertname', 'instance']
+      continue: true
+
+    # Control Plane specific
+    - match:
+        plane: control
+      receiver: 'control-plane-team'
+      continue: true
+
+    # App Plane specific
+    - match:
+        plane: app
+      receiver: 'app-plane-team'
+      continue: true
+
+    # Infrastructure alerts
+    - match_re:
+        service: (redis|rabbitmq|minio)
+      receiver: 'infrastructure-team'
+      group_by: ['service', 'alertname']
+
+# Inhibition rules - prevent alert spam
+inhibit_rules:
+  # If critical is firing, suppress warnings for same service
+  - source_match:
+      severity: 'critical'
+    target_match:
+      severity: 'warning'
+    equal: ['alertname', 'service']
+
+  # If service is down, suppress all other alerts for that service
+  - source_match:
+      alertname: 'ServiceDown'
+    target_match_re:
+      alertname: '.*'
+    equal: ['service', 'instance']
+
+  # If multiple services down, suppress individual service alerts
+  - source_match:
+      alertname: 'MultipleServicesDown'
+    target_match_re:
+      alertname: '(ServiceDown|.*Unhealthy|.*Down)'
+
+  # Database down suppresses connection pool alerts
+  - source_match:
+      alertname: 'DatabaseDown'
+    target_match_re:
+      alertname: '(DatabaseConnection.*|DatabaseReplication.*)'
+    equal: ['instance']
+
+# Receiver configurations
+receivers:
+  # ===========================================================================
+  # DEFAULT RECEIVER - Fallback
+  # ===========================================================================
+  - name: 'default-receiver'
+    email_configs:
+      - to: ${DEFAULT_EMAIL}
+        send_resolved: true
+        headers:
+          Subject: '[ANANTA] {{ template "ananta.title" . }}'
+        html: '{{ template "ananta.text" . }}'
+
+  # ===========================================================================
+  # CRITICAL ALERTS - PagerDuty
+  # ===========================================================================
+  - name: 'pagerduty-critical'
+    pagerduty_configs:
+      - routing_key_file: /etc/alertmanager/secrets/pagerduty_key
+        severity: critical
+        description: '{{ .CommonAnnotations.summary }}'
+        details:
+          firing: '{{ .Alerts.Firing | len }}'
+          resolved: '{{ .Alerts.Resolved | len }}'
+          plane: '{{ .CommonLabels.plane }}'
+          service: '{{ .CommonLabels.service }}'
+          description: '{{ .CommonAnnotations.description }}'
+          impact: '{{ .CommonAnnotations.impact }}'
+          action: '{{ .CommonAnnotations.action }}'
+          runbook: '{{ .CommonAnnotations.runbook_url }}'
+
+  # ===========================================================================
+  # CRITICAL ALERTS - Slack
+  # ===========================================================================
+  - name: 'slack-critical'
+    slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/slack_critical_webhook
+        channel: '#critical-alerts'
+        send_resolved: true
+        title: '{{ template "ananta.slack.title" . }}'
+        text: |
+          {{ range .Alerts }}
+          *{{ .Labels.alertname }}* ({{ .Labels.severity }})
+          *Service:* {{ .Labels.service | default "unknown" }} ({{ .Labels.plane | default "unknown" }} plane)
+          *Impact:* {{ .Annotations.impact }}
+          *Action:* {{ .Annotations.action }}
+          {{ if .Annotations.runbook_url }}*Runbook:* {{ .Annotations.runbook_url }}{{ end }}
+          ---
+          {{ end }}
+        color: '{{ if eq .Status "firing" }}danger{{ else }}good{{ end }}'
+        actions:
+          - type: button
+            text: 'View in Prometheus'
+            url: '{{ .ExternalURL }}'
+          - type: button
+            text: 'View in Grafana'
+            url: 'http://localhost:3001/d/platform-overview'
+
+  # ===========================================================================
+  # WARNING ALERTS - Slack
+  # ===========================================================================
+  - name: 'slack-warnings'
+    slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/slack_warnings_webhook
+        channel: '#platform-alerts'
+        send_resolved: true
+        title: '{{ template "ananta.slack.title" . }}'
+        text: '{{ template "ananta.slack.text" . }}'
+        color: '{{ if eq .Status "firing" }}warning{{ else }}good{{ end }}'
+
+  # ===========================================================================
+  # SLO TEAM - Email + Slack
+  # ===========================================================================
+  - name: 'slo-team'
+    email_configs:
+      - to: ${SLO_TEAM_EMAIL}
+        send_resolved: true
+        headers:
+          Subject: '[SLO] {{ template "ananta.title" . }}'
+    slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/slack_slo_webhook
+        channel: '#slo-alerts'
+        send_resolved: true
+        title: '[SLO] {{ .GroupLabels.alertname }}'
+        text: |
+          *Error Budget Alert*
+          {{ range .Alerts }}
+          {{ .Annotations.description }}
+          *Remaining Budget:* {{ .Value | humanizePercentage }}
+          {{ end }}
+
+  # ===========================================================================
+  # DATABASE TEAM - Email + PagerDuty for critical
+  # ===========================================================================
+  - name: 'database-team'
+    email_configs:
+      - to: ${DATABASE_TEAM_EMAIL}
+        send_resolved: true
+        headers:
+          Subject: '[DATABASE] {{ template "ananta.title" . }}'
+    slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/slack_database_webhook
+        channel: '#database-alerts'
+        send_resolved: true
+
+  # ===========================================================================
+  # CONTROL PLANE TEAM - Email + Slack
+  # ===========================================================================
+  - name: 'control-plane-team'
+    email_configs:
+      - to: ${CONTROL_PLANE_TEAM_EMAIL}
+        send_resolved: true
+        headers:
+          Subject: '[CONTROL PLANE] {{ template "ananta.title" . }}'
+    slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/slack_control_plane_webhook
+        channel: '#control-plane-alerts'
+        send_resolved: true
+
+  # ===========================================================================
+  # APP PLANE TEAM - Email + Slack
+  # ===========================================================================
+  - name: 'app-plane-team'
+    email_configs:
+      - to: ${APP_PLANE_TEAM_EMAIL}
+        send_resolved: true
+        headers:
+          Subject: '[APP PLANE] {{ template "ananta.title" . }}'
+    slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/slack_app_plane_webhook
+        channel: '#app-plane-alerts'
+        send_resolved: true
+
+  # ===========================================================================
+  # INFRASTRUCTURE TEAM - Slack
+  # ===========================================================================
+  - name: 'infrastructure-team'
+    slack_configs:
+      - api_url_file: /etc/alertmanager/secrets/slack_infrastructure_webhook
+        channel: '#infrastructure-alerts'
+        send_resolved: true
+        title: '[INFRA] {{ .GroupLabels.service | toUpper }}'
+        text: '{{ template "ananta.slack.text" . }}'

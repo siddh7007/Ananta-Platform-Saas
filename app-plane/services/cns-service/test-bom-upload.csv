@@ -1,0 +1,4 @@
+line_number,manufacturer_part_number,manufacturer,quantity,reference_designator,description
+1,STM32F407VGT6,STMicroelectronics,5,U1,ARM Cortex-M4 MCU
+2,LM358,Texas Instruments,2,U2,Dual Op-Amp
+3,0805-10K,Yageo,10,R1-R10,10K Resistor

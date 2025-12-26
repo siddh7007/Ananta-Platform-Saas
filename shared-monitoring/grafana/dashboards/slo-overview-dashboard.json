@@ -1,0 +1,1300 @@
+{
+  "dashboard": {
+    "annotations": {
+      "list": [
+        {
+          "builtIn": 1,
+          "datasource": "-- Grafana --",
+          "enable": true,
+          "hide": true,
+          "iconColor": "rgba(0, 211, 255, 1)",
+          "name": "Annotations & Alerts",
+          "type": "dashboard"
+        },
+        {
+          "datasource": "Prometheus",
+          "enable": true,
+          "expr": "ALERTS{alertstate=\"firing\",severity=\"critical\"}",
+          "iconColor": "red",
+          "name": "Critical Alerts",
+          "step": "60s",
+          "tagKeys": "service,plane",
+          "textFormat": "{{alertname}}: {{summary}}",
+          "titleFormat": "Critical Alert"
+        }
+      ]
+    },
+    "description": "Comprehensive Service Level Objective (SLO) tracking for Ananta Platform - monitors error budgets, burn rates, and SLO compliance across all services",
+    "editable": true,
+    "gnetId": null,
+    "graphTooltip": 1,
+    "id": null,
+    "links": [
+      {
+        "icon": "doc",
+        "tags": [],
+        "targetBlank": true,
+        "title": "SLO Definitions",
+        "tooltip": "View complete SLO definitions and targets",
+        "type": "link",
+        "url": "https://github.com/your-org/ananta-platform/blob/main/shared-monitoring/docs/SLO-DEFINITIONS.md"
+      },
+      {
+        "icon": "doc",
+        "tags": [],
+        "targetBlank": true,
+        "title": "Error Budget Policy",
+        "tooltip": "Review error budget policy and response procedures",
+        "type": "link",
+        "url": "https://github.com/your-org/ananta-platform/blob/main/shared-monitoring/docs/ERROR-BUDGET-POLICY.md"
+      }
+    ],
+    "panels": [
+      {
+        "datasource": "Prometheus",
+        "description": "Overall platform health - Control Plane and App Plane aggregate SLO compliance",
+        "gridPos": {
+          "h": 2,
+          "w": 24,
+          "x": 0,
+          "y": 0
+        },
+        "id": 1,
+        "options": {
+          "content": "# Ananta Platform SLO Dashboard\n\n**Real-time Service Level Objective monitoring** - Tracks availability, error budgets, and burn rates for all critical services.\n\n**Target**: 99.9% availability for Control Plane | 99.5% for App Plane | Monthly error budget tracking\n\n**Documentation**: [SLO Definitions](../docs/SLO-DEFINITIONS.md) | [Error Budget Policy](../docs/ERROR-BUDGET-POLICY.md)",
+          "mode": "markdown"
+        },
+        "pluginVersion": "8.0.0",
+        "title": "Dashboard Overview",
+        "type": "text"
+      },
+      {
+        "datasource": "Prometheus",
+        "description": "Control Plane error budget remaining (30-day rolling window). Target: 99.9% availability.",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "mappings": [],
+            "max": 1,
+            "min": 0,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "red",
+                  "value": null
+                },
+                {
+                  "color": "orange",
+                  "value": 0.1
+                },
+                {
+                  "color": "yellow",
+                  "value": 0.25
+                },
+                {
+                  "color": "green",
+                  "value": 0.5
+                }
+              ]
+            },
+            "unit": "percentunit"
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 0,
+          "y": 2
+        },
+        "id": 2,
+        "options": {
+          "orientation": "auto",
+          "reduceOptions": {
+            "calcs": [
+              "lastNotNull"
+            ],
+            "fields": "",
+            "values": false
+          },
+          "showThresholdLabels": false,
+          "showThresholdMarkers": true,
+          "text": {}
+        },
+        "pluginVersion": "8.0.0",
+        "targets": [
+          {
+            "expr": "slo:control_plane:error_budget:remaining",
+            "refId": "A"
+          }
+        ],
+        "title": "Control Plane Error Budget",
+        "type": "gauge"
+      },
+      {
+        "datasource": "Prometheus",
+        "description": "App Plane error budget remaining (30-day rolling window). Target: 99.5% availability.",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "mappings": [],
+            "max": 1,
+            "min": 0,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "red",
+                  "value": null
+                },
+                {
+                  "color": "orange",
+                  "value": 0.1
+                },
+                {
+                  "color": "yellow",
+                  "value": 0.25
+                },
+                {
+                  "color": "green",
+                  "value": 0.5
+                }
+              ]
+            },
+            "unit": "percentunit"
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 6,
+          "x": 6,
+          "y": 2
+        },
+        "id": 3,
+        "options": {
+          "orientation": "auto",
+          "reduceOptions": {
+            "calcs": [
+              "lastNotNull"
+            ],
+            "fields": "",
+            "values": false
+          },
+          "showThresholdLabels": false,
+          "showThresholdMarkers": true,
+          "text": {}
+        },
+        "pluginVersion": "8.0.0",
+        "targets": [
+          {
+            "expr": "slo:app_plane:error_budget:remaining",
+            "refId": "A"
+          }
+        ],
+        "title": "App Plane Error Budget",
+        "type": "gauge"
+      },
+      {
+        "datasource": "Prometheus",
+        "description": "30-day availability trend for Control Plane and App Plane",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisLabel": "Availability %",
+              "axisPlacement": "auto",
+              "barAlignment": 0,
+              "drawStyle": "line",
+              "fillOpacity": 10,
+              "gradientMode": "none",
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "viz": false
+              },
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "pointSize": 5,
+              "scaleDistribution": {
+                "type": "linear"
+              },
+              "showPoints": "never",
+              "spanNulls": true
+            },
+            "mappings": [],
+            "max": 1,
+            "min": 0.99,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "red",
+                  "value": 0.999
+                }
+              ]
+            },
+            "unit": "percentunit"
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Control Plane Target (99.9%)"
+              },
+              "properties": [
+                {
+                  "id": "custom.lineStyle",
+                  "value": {
+                    "dash": [10, 10],
+                    "fill": "dash"
+                  }
+                },
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "red",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "App Plane Target (99.5%)"
+              },
+              "properties": [
+                {
+                  "id": "custom.lineStyle",
+                  "value": {
+                    "dash": [10, 10],
+                    "fill": "dash"
+                  }
+                },
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "orange",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 2
+        },
+        "id": 4,
+        "options": {
+          "legend": {
+            "calcs": [
+              "mean",
+              "lastNotNull",
+              "min"
+            ],
+            "displayMode": "table",
+            "placement": "bottom"
+          },
+          "tooltip": {
+            "mode": "multi"
+          }
+        },
+        "pluginVersion": "8.0.0",
+        "targets": [
+          {
+            "expr": "slo:control_plane:availability:ratio_1h",
+            "legendFormat": "Control Plane Actual",
+            "refId": "A"
+          },
+          {
+            "expr": "slo:app_plane:availability:ratio_1h",
+            "legendFormat": "App Plane Actual",
+            "refId": "B"
+          },
+          {
+            "expr": "vector(0.999)",
+            "legendFormat": "Control Plane Target (99.9%)",
+            "refId": "C"
+          },
+          {
+            "expr": "vector(0.995)",
+            "legendFormat": "App Plane Target (99.5%)",
+            "refId": "D"
+          }
+        ],
+        "title": "Platform Availability (30-day trend)",
+        "type": "timeseries"
+      },
+      {
+        "collapsed": false,
+        "datasource": null,
+        "gridPos": {
+          "h": 1,
+          "w": 24,
+          "x": 0,
+          "y": 10
+        },
+        "id": 10,
+        "panels": [],
+        "title": "Per-Service Error Budgets",
+        "type": "row"
+      },
+      {
+        "datasource": "Prometheus",
+        "description": "Error budget remaining for each critical service (30-day rolling window)",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "mappings": [
+              {
+                "options": {
+                  "from": -999,
+                  "result": {
+                    "color": "dark-red",
+                    "index": 0,
+                    "text": "EXHAUSTED"
+                  },
+                  "to": 0
+                },
+                "type": "range"
+              }
+            ],
+            "max": 1,
+            "min": -0.5,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "red",
+                  "value": null
+                },
+                {
+                  "color": "orange",
+                  "value": 0.1
+                },
+                {
+                  "color": "yellow",
+                  "value": 0.25
+                },
+                {
+                  "color": "green",
+                  "value": 0.5
+                }
+              ]
+            },
+            "unit": "percentunit"
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 11
+        },
+        "id": 11,
+        "options": {
+          "displayMode": "gradient",
+          "orientation": "horizontal",
+          "reduceOptions": {
+            "calcs": [
+              "lastNotNull"
+            ],
+            "fields": "",
+            "values": false
+          },
+          "showUnfilled": true,
+          "text": {}
+        },
+        "pluginVersion": "8.0.0",
+        "targets": [
+          {
+            "expr": "slo:tenant_mgmt:error_budget:remaining",
+            "legendFormat": "Tenant Management (99.9%)",
+            "refId": "A"
+          },
+          {
+            "expr": "slo:keycloak:error_budget:remaining",
+            "legendFormat": "Keycloak (99.95%)",
+            "refId": "B"
+          },
+          {
+            "expr": "slo:cns:error_budget:remaining",
+            "legendFormat": "CNS Service (99.5%)",
+            "refId": "C"
+          },
+          {
+            "expr": "slo:postgres_control:error_budget:remaining",
+            "legendFormat": "PostgreSQL Control (99.99%)",
+            "refId": "D"
+          },
+          {
+            "expr": "slo:supabase_db:error_budget:remaining",
+            "legendFormat": "Supabase DB (99.9%)",
+            "refId": "E"
+          },
+          {
+            "expr": "slo:redis:error_budget:remaining",
+            "legendFormat": "Redis (99.5%)",
+            "refId": "F"
+          },
+          {
+            "expr": "slo:rabbitmq:error_budget:remaining",
+            "legendFormat": "RabbitMQ (99.5%)",
+            "refId": "G"
+          },
+          {
+            "expr": "slo:temporal:error_budget:remaining",
+            "legendFormat": "Temporal (99.5%)",
+            "refId": "H"
+          }
+        ],
+        "title": "Error Budget Remaining (by Service)",
+        "type": "bargauge"
+      },
+      {
+        "datasource": "Prometheus",
+        "description": "Burn rate indicates how fast we're consuming error budget. 1x = normal, >1x = consuming faster than allowed.",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisLabel": "Burn Rate (x)",
+              "axisPlacement": "auto",
+              "barAlignment": 0,
+              "drawStyle": "line",
+              "fillOpacity": 10,
+              "gradientMode": "none",
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "viz": false
+              },
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "pointSize": 5,
+              "scaleDistribution": {
+                "type": "linear"
+              },
+              "showPoints": "never",
+              "spanNulls": true
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "yellow",
+                  "value": 3
+                },
+                {
+                  "color": "orange",
+                  "value": 6
+                },
+                {
+                  "color": "red",
+                  "value": 14.4
+                }
+              ]
+            },
+            "unit": "none"
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Critical Threshold (14.4x)"
+              },
+              "properties": [
+                {
+                  "id": "custom.lineStyle",
+                  "value": {
+                    "dash": [10, 10],
+                    "fill": "dash"
+                  }
+                },
+                {
+                  "id": "color",
+                  "value": {
+                    "fixedColor": "red",
+                    "mode": "fixed"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 11
+        },
+        "id": 12,
+        "options": {
+          "legend": {
+            "calcs": [
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom"
+          },
+          "tooltip": {
+            "mode": "multi"
+          }
+        },
+        "pluginVersion": "8.0.0",
+        "targets": [
+          {
+            "expr": "slo:tenant_mgmt:burn_rate:1h",
+            "legendFormat": "Tenant Management",
+            "refId": "A"
+          },
+          {
+            "expr": "slo:cns:burn_rate:1h",
+            "legendFormat": "CNS Service",
+            "refId": "B"
+          },
+          {
+            "expr": "slo:keycloak:burn_rate:1h",
+            "legendFormat": "Keycloak",
+            "refId": "C"
+          },
+          {
+            "expr": "vector(14.4)",
+            "legendFormat": "Critical Threshold (14.4x)",
+            "refId": "D"
+          },
+          {
+            "expr": "vector(6)",
+            "legendFormat": "Medium Threshold (6x)",
+            "refId": "E"
+          }
+        ],
+        "title": "Error Budget Burn Rate (1-hour window)",
+        "type": "timeseries"
+      },
+      {
+        "collapsed": false,
+        "datasource": null,
+        "gridPos": {
+          "h": 1,
+          "w": 24,
+          "x": 0,
+          "y": 19
+        },
+        "id": 20,
+        "panels": [],
+        "title": "Service Availability Metrics",
+        "type": "row"
+      },
+      {
+        "datasource": "Prometheus",
+        "description": "Control Plane service availability over time (5-minute windows)",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisLabel": "Availability %",
+              "axisPlacement": "auto",
+              "barAlignment": 0,
+              "drawStyle": "line",
+              "fillOpacity": 5,
+              "gradientMode": "none",
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "viz": false
+              },
+              "lineInterpolation": "smooth",
+              "lineWidth": 1,
+              "pointSize": 5,
+              "scaleDistribution": {
+                "type": "linear"
+              },
+              "showPoints": "never",
+              "spanNulls": true
+            },
+            "mappings": [],
+            "max": 1,
+            "min": 0.95,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                }
+              ]
+            },
+            "unit": "percentunit"
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 20
+        },
+        "id": 21,
+        "options": {
+          "legend": {
+            "calcs": [
+              "mean",
+              "lastNotNull",
+              "min"
+            ],
+            "displayMode": "table",
+            "placement": "bottom"
+          },
+          "tooltip": {
+            "mode": "multi"
+          }
+        },
+        "pluginVersion": "8.0.0",
+        "targets": [
+          {
+            "expr": "slo:tenant_mgmt:availability:ratio_5m",
+            "legendFormat": "Tenant Management",
+            "refId": "A"
+          },
+          {
+            "expr": "slo:keycloak:availability:ratio_5m",
+            "legendFormat": "Keycloak",
+            "refId": "B"
+          },
+          {
+            "expr": "slo:postgres_control:availability:ratio_5m",
+            "legendFormat": "PostgreSQL",
+            "refId": "C"
+          },
+          {
+            "expr": "slo:temporal:availability:ratio_5m",
+            "legendFormat": "Temporal",
+            "refId": "D"
+          }
+        ],
+        "title": "Control Plane Service Availability",
+        "type": "timeseries"
+      },
+      {
+        "datasource": "Prometheus",
+        "description": "App Plane service availability over time (5-minute windows)",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisLabel": "Availability %",
+              "axisPlacement": "auto",
+              "barAlignment": 0,
+              "drawStyle": "line",
+              "fillOpacity": 5,
+              "gradientMode": "none",
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "viz": false
+              },
+              "lineInterpolation": "smooth",
+              "lineWidth": 1,
+              "pointSize": 5,
+              "scaleDistribution": {
+                "type": "linear"
+              },
+              "showPoints": "never",
+              "spanNulls": true
+            },
+            "mappings": [],
+            "max": 1,
+            "min": 0.95,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                }
+              ]
+            },
+            "unit": "percentunit"
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 20
+        },
+        "id": 22,
+        "options": {
+          "legend": {
+            "calcs": [
+              "mean",
+              "lastNotNull",
+              "min"
+            ],
+            "displayMode": "table",
+            "placement": "bottom"
+          },
+          "tooltip": {
+            "mode": "multi"
+          }
+        },
+        "pluginVersion": "8.0.0",
+        "targets": [
+          {
+            "expr": "slo:cns:availability:ratio_5m",
+            "legendFormat": "CNS Service",
+            "refId": "A"
+          },
+          {
+            "expr": "slo:supabase_db:availability:ratio_5m",
+            "legendFormat": "Supabase DB",
+            "refId": "B"
+          },
+          {
+            "expr": "slo:redis:availability:ratio_5m",
+            "legendFormat": "Redis",
+            "refId": "C"
+          },
+          {
+            "expr": "slo:rabbitmq:availability:ratio_5m",
+            "legendFormat": "RabbitMQ",
+            "refId": "D"
+          }
+        ],
+        "title": "App Plane Service Availability",
+        "type": "timeseries"
+      },
+      {
+        "collapsed": false,
+        "datasource": null,
+        "gridPos": {
+          "h": 1,
+          "w": 24,
+          "x": 0,
+          "y": 28
+        },
+        "id": 30,
+        "panels": [],
+        "title": "Latency SLOs",
+        "type": "row"
+      },
+      {
+        "datasource": "Prometheus",
+        "description": "P95 and P99 latency for key services. Target: P95 < 500ms, P99 < 2s for Tenant Management.",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisLabel": "Latency",
+              "axisPlacement": "auto",
+              "barAlignment": 0,
+              "drawStyle": "line",
+              "fillOpacity": 10,
+              "gradientMode": "none",
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "viz": false
+              },
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "pointSize": 5,
+              "scaleDistribution": {
+                "type": "linear"
+              },
+              "showPoints": "never",
+              "spanNulls": true
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "yellow",
+                  "value": 0.5
+                },
+                {
+                  "color": "red",
+                  "value": 2
+                }
+              ]
+            },
+            "unit": "s"
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byRegexp",
+                "options": ".*Target.*"
+              },
+              "properties": [
+                {
+                  "id": "custom.lineStyle",
+                  "value": {
+                    "dash": [10, 10],
+                    "fill": "dash"
+                  }
+                },
+                {
+                  "id": "custom.fillOpacity",
+                  "value": 0
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 29
+        },
+        "id": 31,
+        "options": {
+          "legend": {
+            "calcs": [
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom"
+          },
+          "tooltip": {
+            "mode": "multi"
+          }
+        },
+        "pluginVersion": "8.0.0",
+        "targets": [
+          {
+            "expr": "slo:tenant_mgmt:latency:p95",
+            "legendFormat": "Tenant Mgmt P95",
+            "refId": "A"
+          },
+          {
+            "expr": "slo:tenant_mgmt:latency:p99",
+            "legendFormat": "Tenant Mgmt P99",
+            "refId": "B"
+          },
+          {
+            "expr": "slo:keycloak:latency:p95",
+            "legendFormat": "Keycloak P95",
+            "refId": "C"
+          },
+          {
+            "expr": "vector(0.5)",
+            "legendFormat": "P95 Target (500ms)",
+            "refId": "D"
+          },
+          {
+            "expr": "vector(2.0)",
+            "legendFormat": "P99 Target (2s)",
+            "refId": "E"
+          }
+        ],
+        "title": "Control Plane Latency (P95/P99)",
+        "type": "timeseries"
+      },
+      {
+        "datasource": "Prometheus",
+        "description": "CNS Service enrichment latency. Target: P95 < 5s for component enrichment.",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisLabel": "Latency",
+              "axisPlacement": "auto",
+              "barAlignment": 0,
+              "drawStyle": "line",
+              "fillOpacity": 10,
+              "gradientMode": "none",
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "viz": false
+              },
+              "lineInterpolation": "smooth",
+              "lineWidth": 2,
+              "pointSize": 5,
+              "scaleDistribution": {
+                "type": "linear"
+              },
+              "showPoints": "never",
+              "spanNulls": true
+            },
+            "mappings": [],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "yellow",
+                  "value": 5
+                },
+                {
+                  "color": "red",
+                  "value": 10
+                }
+              ]
+            },
+            "unit": "s"
+          },
+          "overrides": []
+        },
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 29
+        },
+        "id": 32,
+        "options": {
+          "legend": {
+            "calcs": [
+              "mean",
+              "max"
+            ],
+            "displayMode": "table",
+            "placement": "bottom"
+          },
+          "tooltip": {
+            "mode": "multi"
+          }
+        },
+        "pluginVersion": "8.0.0",
+        "targets": [
+          {
+            "expr": "slo:cns:enrichment_latency:p95",
+            "legendFormat": "Enrichment P95",
+            "refId": "A"
+          },
+          {
+            "expr": "vector(5.0)",
+            "legendFormat": "Target (5s)",
+            "refId": "B"
+          }
+        ],
+        "title": "CNS Enrichment Latency (P95)",
+        "type": "timeseries"
+      },
+      {
+        "collapsed": false,
+        "datasource": null,
+        "gridPos": {
+          "h": 1,
+          "w": 24,
+          "x": 0,
+          "y": 37
+        },
+        "id": 40,
+        "panels": [],
+        "title": "SLO Compliance Summary",
+        "type": "row"
+      },
+      {
+        "datasource": "Prometheus",
+        "description": "Real-time SLO compliance status for all services. Green = meeting SLO, Red = breaching SLO.",
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "custom": {
+              "align": "center",
+              "displayMode": "color-background"
+            },
+            "mappings": [
+              {
+                "options": {
+                  "0": {
+                    "color": "red",
+                    "index": 1,
+                    "text": "BREACHED"
+                  },
+                  "1": {
+                    "color": "green",
+                    "index": 0,
+                    "text": "COMPLIANT"
+                  }
+                },
+                "type": "value"
+              }
+            ],
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                }
+              ]
+            }
+          },
+          "overrides": [
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Service"
+              },
+              "properties": [
+                {
+                  "id": "custom.width",
+                  "value": 250
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Current Availability"
+              },
+              "properties": [
+                {
+                  "id": "unit",
+                  "value": "percentunit"
+                },
+                {
+                  "id": "decimals",
+                  "value": 4
+                },
+                {
+                  "id": "custom.displayMode",
+                  "value": "auto"
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "SLO Target"
+              },
+              "properties": [
+                {
+                  "id": "unit",
+                  "value": "percentunit"
+                },
+                {
+                  "id": "decimals",
+                  "value": 4
+                },
+                {
+                  "id": "custom.displayMode",
+                  "value": "auto"
+                }
+              ]
+            },
+            {
+              "matcher": {
+                "id": "byName",
+                "options": "Error Budget"
+              },
+              "properties": [
+                {
+                  "id": "unit",
+                  "value": "percentunit"
+                },
+                {
+                  "id": "decimals",
+                  "value": 2
+                },
+                {
+                  "id": "custom.displayMode",
+                  "value": "gradient-gauge"
+                },
+                {
+                  "id": "thresholds",
+                  "value": {
+                    "mode": "absolute",
+                    "steps": [
+                      {
+                        "color": "red",
+                        "value": null
+                      },
+                      {
+                        "color": "orange",
+                        "value": 0.1
+                      },
+                      {
+                        "color": "yellow",
+                        "value": 0.25
+                      },
+                      {
+                        "color": "green",
+                        "value": 0.5
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        "gridPos": {
+          "h": 9,
+          "w": 24,
+          "x": 0,
+          "y": 38
+        },
+        "id": 41,
+        "options": {
+          "showHeader": true,
+          "sortBy": [
+            {
+              "desc": false,
+              "displayName": "Error Budget"
+            }
+          ]
+        },
+        "pluginVersion": "8.0.0",
+        "targets": [
+          {
+            "expr": "label_replace(slo:tenant_mgmt:availability:ratio_30d, \"service\", \"Tenant Management\", \"\", \"\")",
+            "format": "table",
+            "instant": true,
+            "legendFormat": "",
+            "refId": "A"
+          },
+          {
+            "expr": "label_replace(slo:keycloak:availability:ratio_30d, \"service\", \"Keycloak\", \"\", \"\")",
+            "format": "table",
+            "instant": true,
+            "refId": "B"
+          },
+          {
+            "expr": "label_replace(slo:cns:availability:ratio_30d, \"service\", \"CNS Service\", \"\", \"\")",
+            "format": "table",
+            "instant": true,
+            "refId": "C"
+          },
+          {
+            "expr": "label_replace(slo:postgres_control:availability:ratio_30d, \"service\", \"PostgreSQL Control\", \"\", \"\")",
+            "format": "table",
+            "instant": true,
+            "refId": "D"
+          },
+          {
+            "expr": "label_replace(slo:supabase_db:availability:ratio_30d, \"service\", \"Supabase DB\", \"\", \"\")",
+            "format": "table",
+            "instant": true,
+            "refId": "E"
+          },
+          {
+            "expr": "label_replace(slo:redis:availability:ratio_30d, \"service\", \"Redis\", \"\", \"\")",
+            "format": "table",
+            "instant": true,
+            "refId": "F"
+          },
+          {
+            "expr": "label_replace(slo:rabbitmq:availability:ratio_30d, \"service\", \"RabbitMQ\", \"\", \"\")",
+            "format": "table",
+            "instant": true,
+            "refId": "G"
+          },
+          {
+            "expr": "label_replace(slo:temporal:availability:ratio_30d, \"service\", \"Temporal\", \"\", \"\")",
+            "format": "table",
+            "instant": true,
+            "refId": "H"
+          }
+        ],
+        "title": "SLO Compliance Summary (30-day)",
+        "transformations": [
+          {
+            "id": "merge",
+            "options": {}
+          },
+          {
+            "id": "organize",
+            "options": {
+              "excludeByName": {
+                "Time": true,
+                "__name__": true
+              },
+              "indexByName": {
+                "Value": 2,
+                "service": 1
+              },
+              "renameByName": {
+                "Value": "Current Availability",
+                "service": "Service"
+              }
+            }
+          }
+        ],
+        "type": "table"
+      }
+    ],
+    "refresh": "30s",
+    "schemaVersion": 27,
+    "style": "dark",
+    "tags": [
+      "slo",
+      "sre",
+      "error-budget",
+      "reliability"
+    ],
+    "templating": {
+      "list": []
+    },
+    "time": {
+      "from": "now-24h",
+      "to": "now"
+    },
+    "timepicker": {
+      "refresh_intervals": [
+        "30s",
+        "1m",
+        "5m",
+        "15m",
+        "30m"
+      ]
+    },
+    "timezone": "",
+    "title": "Ananta Platform - SLO Overview",
+    "uid": "ananta-slo-overview",
+    "version": 1
+  }
+}

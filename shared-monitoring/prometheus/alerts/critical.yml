@@ -1,0 +1,309 @@
+# =============================================================================
+# Critical Alert Rules - Ananta Platform
+# =============================================================================
+# High-priority alerts requiring immediate attention
+# =============================================================================
+
+groups:
+  # ===========================================================================
+  # SERVICE AVAILABILITY - CRITICAL
+  # ===========================================================================
+  - name: critical_service_down
+    rules:
+      # Any service completely down
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: availability
+        annotations:
+          summary: "Service {{ $labels.job }} is down"
+          description: "Service {{ $labels.instance }} in job {{ $labels.job }} has been unreachable for more than 1 minute. This requires immediate investigation."
+          impact: "Service unavailable to users"
+          runbook_url: "https://docs.ananta.io/runbooks/service-down"
+          action: "Check service logs, restart if necessary, escalate to on-call if issue persists"
+
+      # Multiple services down simultaneously (potential infrastructure issue)
+      - alert: MultipleServicesDown
+        expr: count(up == 0) > 2
+        for: 2m
+        labels:
+          severity: critical
+          category: availability
+        annotations:
+          summary: "Multiple services are down"
+          description: "{{ $value }} services are currently unreachable. This may indicate a wider infrastructure problem."
+          impact: "Platform-wide outage"
+          runbook_url: "https://docs.ananta.io/runbooks/multiple-services-down"
+          action: "Check network connectivity, VPC configuration, AWS status dashboard"
+
+  # ===========================================================================
+  # ERROR RATE - CRITICAL
+  # ===========================================================================
+  - name: critical_error_rate
+    rules:
+      # High 5xx error rate (> 1%)
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m])) by (plane, service)
+          /
+          sum(rate(http_requests_total[5m])) by (plane, service)
+          > 0.01
+        for: 5m
+        labels:
+          severity: critical
+          category: reliability
+        annotations:
+          summary: "High error rate on {{ $labels.plane }} plane {{ $labels.service }}"
+          description: "Error rate is {{ $value | humanizePercentage }} (threshold: 1%). This indicates a serious problem affecting users."
+          impact: "Users experiencing frequent errors"
+          runbook_url: "https://docs.ananta.io/runbooks/high-error-rate"
+          action: "Check application logs, database connectivity, downstream service health"
+
+      # Extremely high error rate (> 5%)
+      - alert: CriticalErrorRate
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m])) by (plane, service)
+          /
+          sum(rate(http_requests_total[5m])) by (plane, service)
+          > 0.05
+        for: 2m
+        labels:
+          severity: critical
+          category: reliability
+        annotations:
+          summary: "CRITICAL: Extremely high error rate on {{ $labels.plane }} {{ $labels.service }}"
+          description: "Error rate is {{ $value | humanizePercentage }} (threshold: 5%). Service is severely degraded."
+          impact: "Service effectively unavailable"
+          runbook_url: "https://docs.ananta.io/runbooks/critical-error-rate"
+          action: "IMMEDIATE: Check for deployment issues, rollback recent changes, page on-call"
+
+  # ===========================================================================
+  # DATABASE - CRITICAL
+  # ===========================================================================
+  - name: critical_database
+    rules:
+      # Database connection pool exhausted
+      - alert: DatabaseConnectionPoolExhausted
+        expr: |
+          pg_stat_activity_count
+          /
+          pg_settings_max_connections
+          > 0.9
+        for: 5m
+        labels:
+          severity: critical
+          category: database
+        annotations:
+          summary: "Database connection pool nearly exhausted"
+          description: "Database {{ $labels.instance }} is using {{ $value | humanizePercentage }} of max connections (threshold: 90%). New connections will fail."
+          impact: "Application unable to connect to database"
+          runbook_url: "https://docs.ananta.io/runbooks/db-connection-pool"
+          action: "Check for connection leaks, slow queries, increase max_connections if needed"
+
+      # Database down
+      - alert: DatabaseDown
+        expr: probe_success{job="blackbox-tcp", instance=~".*:5432"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: database
+        annotations:
+          summary: "Database {{ $labels.instance }} is down"
+          description: "Cannot establish TCP connection to PostgreSQL database at {{ $labels.instance }}"
+          impact: "All services using this database are affected"
+          runbook_url: "https://docs.ananta.io/runbooks/database-down"
+          action: "Check RDS status, network connectivity, security groups"
+
+      # Database replication lag high
+      - alert: DatabaseReplicationLagHigh
+        expr: |
+          pg_replication_lag_seconds > 300
+        for: 10m
+        labels:
+          severity: critical
+          category: database
+        annotations:
+          summary: "Database replication lag is high"
+          description: "Replication lag is {{ $value }} seconds (threshold: 300s). Read replicas are stale."
+          impact: "Users may see stale data"
+          runbook_url: "https://docs.ananta.io/runbooks/replication-lag"
+          action: "Check replica health, network connectivity, disk I/O"
+
+  # ===========================================================================
+  # SLO VIOLATIONS - CRITICAL
+  # ===========================================================================
+  - name: critical_slo_violations
+    rules:
+      # Error budget burning too fast (will exhaust in < 6 hours)
+      - alert: ErrorBudgetBurningFast
+        expr: |
+          slo:control_plane:error_budget:burn_rate_1h > 14.4
+          and
+          slo:control_plane:error_budget:burn_rate_6h > 6
+        for: 15m
+        labels:
+          severity: critical
+          category: slo
+        annotations:
+          summary: "Error budget burning fast on Control Plane"
+          description: "Current burn rate will exhaust monthly error budget in < 6 hours. Immediate action required to prevent SLO violation."
+          impact: "SLO breach imminent"
+          runbook_url: "https://docs.ananta.io/runbooks/error-budget-burn"
+          action: "Investigate error rate, stop non-critical deployments, rollback if needed"
+
+      # Error budget critically low (< 10% remaining)
+      - alert: ErrorBudgetCriticallyLow
+        expr: |
+          slo:control_plane:error_budget:remaining < 0.1
+        for: 15m
+        labels:
+          severity: critical
+          category: slo
+        annotations:
+          summary: "Error budget critically low"
+          description: "Only {{ $value | humanizePercentage }} of monthly error budget remains. Any further incidents will violate SLO."
+          impact: "SLO at risk"
+          runbook_url: "https://docs.ananta.io/runbooks/error-budget-low"
+          action: "Freeze non-critical changes, focus on reliability improvements"
+
+  # ===========================================================================
+  # LATENCY - CRITICAL
+  # ===========================================================================
+  - name: critical_latency
+    rules:
+      # P99 latency extremely high (> 5 seconds)
+      - alert: ExtremelyHighLatency
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(http_request_duration_seconds_bucket[5m])) by (le, plane, service)
+          ) > 5
+        for: 10m
+        labels:
+          severity: critical
+          category: performance
+        annotations:
+          summary: "Extremely high P99 latency on {{ $labels.plane }} {{ $labels.service }}"
+          description: "P99 latency is {{ $value }}s (threshold: 5s). Users experiencing severe slowness."
+          impact: "Severe performance degradation"
+          runbook_url: "https://docs.ananta.io/runbooks/high-latency"
+          action: "Check database query performance, CPU/memory usage, downstream services"
+
+  # ===========================================================================
+  # INFRASTRUCTURE - CRITICAL
+  # ===========================================================================
+  - name: critical_infrastructure
+    rules:
+      # Redis down
+      - alert: RedisDown
+        expr: probe_success{job="blackbox-tcp", instance="redis:6379"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: infrastructure
+          service: redis
+        annotations:
+          summary: "Redis is down"
+          description: "Cannot connect to Redis on port 6379. Caching and session management affected."
+          impact: "Performance degradation, possible service disruption"
+          runbook_url: "https://docs.ananta.io/runbooks/redis-down"
+          action: "Check ElastiCache status, network connectivity, restart if necessary"
+
+      # Redis memory critical (> 95%)
+      - alert: RedisMemoryCritical
+        expr: |
+          redis_memory_used_bytes
+          /
+          redis_memory_max_bytes
+          > 0.95
+        for: 5m
+        labels:
+          severity: critical
+          category: infrastructure
+          service: redis
+        annotations:
+          summary: "Redis memory usage critical"
+          description: "Redis is using {{ $value | humanizePercentage }} of max memory (threshold: 95%). Evictions will occur."
+          impact: "Cache evictions, performance degradation"
+          runbook_url: "https://docs.ananta.io/runbooks/redis-memory"
+          action: "Increase memory limit, check for memory leaks, review cache TTLs"
+
+      # RabbitMQ down
+      - alert: RabbitMQDown
+        expr: up{job="app-plane-rabbitmq"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          category: infrastructure
+          service: rabbitmq
+        annotations:
+          summary: "RabbitMQ is down"
+          description: "RabbitMQ message broker is unreachable. Async processing halted."
+          impact: "Background jobs not processing"
+          runbook_url: "https://docs.ananta.io/runbooks/rabbitmq-down"
+          action: "Check Amazon MQ status, restart broker if needed"
+
+      # RabbitMQ queue depth critical (> 10000 messages)
+      - alert: RabbitMQQueueDepthCritical
+        expr: |
+          sum(rabbitmq_queue_messages) > 10000
+        for: 15m
+        labels:
+          severity: critical
+          category: infrastructure
+          service: rabbitmq
+        annotations:
+          summary: "RabbitMQ queue depth critical"
+          description: "Total messages in queues: {{ $value }}. Consumers cannot keep up with producers."
+          impact: "Processing delays, potential message loss"
+          runbook_url: "https://docs.ananta.io/runbooks/rabbitmq-queue-depth"
+          action: "Check consumer health, scale consumers, investigate slow processing"
+
+  # ===========================================================================
+  # DISK & STORAGE - CRITICAL
+  # ===========================================================================
+  - name: critical_disk
+    rules:
+      # Disk space critical (> 90%)
+      - alert: DiskSpaceCritical
+        expr: |
+          (node_filesystem_size_bytes - node_filesystem_avail_bytes)
+          /
+          node_filesystem_size_bytes
+          > 0.9
+        for: 5m
+        labels:
+          severity: critical
+          category: infrastructure
+        annotations:
+          summary: "Disk space critical on {{ $labels.instance }}"
+          description: "Disk usage is {{ $value | humanizePercentage }} on {{ $labels.mountpoint }}"
+          impact: "Service may crash, data loss possible"
+          runbook_url: "https://docs.ananta.io/runbooks/disk-space"
+          action: "IMMEDIATE: Clean up logs, temp files, or expand volume"
+
+  # ===========================================================================
+  # DEPLOYMENT & ROLLOUT - CRITICAL
+  # ===========================================================================
+  - name: critical_deployment
+    rules:
+      # Deployment causing errors
+      - alert: DeploymentCausingErrors
+        expr: |
+          rate(http_requests_total{status=~"5.."}[5m])
+          /
+          rate(http_requests_total[5m])
+          > 0.05
+          and
+          changes(process_start_time_seconds[10m]) > 0
+        for: 5m
+        labels:
+          severity: critical
+          category: deployment
+        annotations:
+          summary: "Recent deployment causing errors"
+          description: "Error rate spiked to {{ $value | humanizePercentage }} after recent restart/deployment"
+          impact: "Service degraded after deployment"
+          runbook_url: "https://docs.ananta.io/runbooks/bad-deployment"
+          action: "ROLLBACK deployment immediately, investigate root cause"

@@ -1,0 +1,28 @@
+{
+  "name": "@directus-extension/interface-enrich-button",
+  "version": "1.0.0",
+  "description": "Custom Directus interface with button to trigger component enrichment from supplier APIs",
+  "type": "module",
+  "directus:extension": {
+    "type": "interface",
+    "path": "dist/index.js",
+    "source": "src/index.js",
+    "host": "^10.0.0"
+  },
+  "scripts": {
+    "build": "directus-extension build",
+    "dev": "directus-extension build -w --no-minify",
+    "link": "directus-extension link"
+  },
+  "keywords": [
+    "directus",
+    "directus-extension",
+    "directus-custom-interface",
+    "supplier-api",
+    "enrichment"
+  ],
+  "devDependencies": {
+    "@directus/extensions-sdk": "^10.0.0",
+    "vue": "^3.3.0"
+  }
+}

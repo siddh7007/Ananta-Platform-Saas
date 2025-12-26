@@ -1,0 +1,44 @@
+# Temporal Development Configuration
+# https://docs.temporal.io/references/dynamic-configuration
+
+# System: Allow large workflows for development
+system.forceSearchAttributesCacheRefreshOnRead:
+  - value: true
+    constraints: {}
+
+# History: Increase limits for development
+history.maximumSignalInfoSize:
+  - value: 32768
+    constraints: {}
+
+history.maximumSignalsPerExecution:
+  - value: 10000
+    constraints: {}
+
+# Frontend: Larger request size
+frontend.maxBadBinaries:
+  - value: 10
+    constraints: {}
+
+# Workflow: Development settings
+limit.blobSize.warn:
+  - value: 2097152
+    constraints: {}
+
+limit.blobSize.error:
+  - value: 4194304
+    constraints: {}
+
+# Visibility: Search attribute settings
+frontend.visibilityMaxPageSize:
+  - value: 1000
+    constraints: {}
+
+# Worker: Development settings
+matching.numTaskqueueReadPartitions:
+  - value: 1
+    constraints: {}
+
+matching.numTaskqueueWritePartitions:
+  - value: 1
+    constraints: {}

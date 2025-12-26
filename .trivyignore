@@ -1,0 +1,54 @@
+# =============================================================================
+# Trivy Ignore File - Known False Positives and Accepted Risks
+# =============================================================================
+# Format: CVE-YYYY-NNNNN [reason]
+# Document each exception with justification
+# Review quarterly and remove resolved CVEs
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Alpine Linux Base Image CVEs (Low Risk)
+# -----------------------------------------------------------------------------
+
+# CVE-2023-12345
+# Reason: Affects only Alpine edge builds, not our pinned 3.18 version
+# Review Date: 2024-01-15
+# Owner: DevOps Team
+
+# -----------------------------------------------------------------------------
+# Node.js CVEs (Mitigated)
+# -----------------------------------------------------------------------------
+
+# CVE-2023-67890
+# Reason: Affects Node.js HTTP/2, we use HTTP/1.1 exclusively
+# Review Date: 2024-01-15
+# Owner: Platform Team
+
+# -----------------------------------------------------------------------------
+# Development Dependencies (Non-Production)
+# -----------------------------------------------------------------------------
+
+# CVE-2024-11111
+# Reason: Affects webpack-dev-server, not included in production build
+# Review Date: 2024-01-20
+# Owner: Frontend Team
+
+# -----------------------------------------------------------------------------
+# Vendor-Specific CVEs (No Fix Available)
+# -----------------------------------------------------------------------------
+
+# CVE-2024-22222
+# Reason: Vendor has not released patch, network policies mitigate risk
+# Mitigation: Network segmentation prevents exploit path
+# Review Date: 2024-02-01
+# Owner: Security Team
+
+# -----------------------------------------------------------------------------
+# Instructions
+# -----------------------------------------------------------------------------
+# 1. Always include reason, review date, and owner
+# 2. Review this file quarterly
+# 3. Remove entries when patches become available
+# 4. For production images, minimize exceptions
+# 5. Use expiration format: CVE-2024-33333 exp:2024-12-31
+# =============================================================================

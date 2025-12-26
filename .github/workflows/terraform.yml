@@ -1,0 +1,682 @@
+# =============================================================================
+# Terraform CI/CD Workflow - Enhanced with Security & Cost Controls
+# =============================================================================
+# Automates Terraform plan on PRs and apply on merge to main
+# Includes: Security scanning, cost estimation, drift detection, rollback
+# =============================================================================
+
+name: Terraform
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'infrastructure/terraform/**'
+      - '.github/workflows/terraform.yml'
+  pull_request:
+    branches:
+      - main
+      - master
+    paths:
+      - 'infrastructure/terraform/**'
+      - '.github/workflows/terraform.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+      action:
+        description: 'Action to perform'
+        required: true
+        default: 'plan'
+        type: choice
+        options:
+          - plan
+          - apply
+          - destroy
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write  # Required for OIDC authentication with AWS
+
+env:
+  TF_VERSION: '1.5.7'
+  TF_WORKING_DIR: 'infrastructure/terraform'
+  AWS_REGION: 'us-east-1'
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Terraform Format Check
+  # ---------------------------------------------------------------------------
+  format:
+    name: Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Format Check
+        id: fmt
+        run: terraform fmt -check -recursive
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        continue-on-error: true
+
+      - name: Post Format Status
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const output = `#### Terraform Format Check 🖌 \`${{ steps.fmt.outcome }}\``;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+  # ---------------------------------------------------------------------------
+  # Terraform Validate
+  # ---------------------------------------------------------------------------
+  validate:
+    name: Validate
+    runs-on: ubuntu-latest
+    needs: format
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init (Validation Only)
+        run: terraform init -backend=false
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      - name: Terraform Validate
+        id: validate
+        run: terraform validate -no-color
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+  # ---------------------------------------------------------------------------
+  # Security Scanning - HARDENED
+  # ---------------------------------------------------------------------------
+  security-scan:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: validate
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run tfsec
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: ${{ env.TF_WORKING_DIR }}
+          # Only allow soft_fail in dev environment, BLOCK in staging/prod
+          soft_fail: ${{ github.event.inputs.environment == 'dev' || github.event_name == 'pull_request' }}
+          additional_args: >-
+            --exclude-path=.tfsec-baseline.json
+            --minimum-severity=MEDIUM
+            --format=json
+            --out=tfsec-results.json
+
+      - name: Upload tfsec Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfsec-results
+          path: ${{ env.TF_WORKING_DIR }}/tfsec-results.json
+
+      - name: Run Checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: ${{ env.TF_WORKING_DIR }}
+          # Only allow soft_fail in dev environment
+          soft_fail: ${{ github.event.inputs.environment == 'dev' || github.event_name == 'pull_request' }}
+          framework: terraform
+          output_format: json
+          output_file_path: checkov-results.json
+          # Exclude known issues documented in baseline
+          baseline: .checkov-baseline.json
+
+      - name: Upload Checkov Results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: checkov-results
+          path: checkov-results.json
+
+      - name: Post Security Summary to PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let summary = '#### Security Scan Results 🔒\n\n';
+
+            // Add tfsec results if available
+            if (fs.existsSync('${{ env.TF_WORKING_DIR }}/tfsec-results.json')) {
+              const tfsec = JSON.parse(fs.readFileSync('${{ env.TF_WORKING_DIR }}/tfsec-results.json', 'utf8'));
+              const issueCount = tfsec.results?.length || 0;
+              summary += `**tfsec**: ${issueCount} issues found\n`;
+            }
+
+            // Add Checkov results if available
+            if (fs.existsSync('checkov-results.json')) {
+              const checkov = JSON.parse(fs.readFileSync('checkov-results.json', 'utf8'));
+              const failed = checkov.summary?.failed || 0;
+              summary += `**Checkov**: ${failed} checks failed\n`;
+            }
+
+            summary += '\n*See artifacts for detailed results*';
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: summary
+            });
+
+  # ---------------------------------------------------------------------------
+  # Cost Estimation with Infracost
+  # ---------------------------------------------------------------------------
+  cost-estimation:
+    name: Cost Estimation
+    runs-on: ubuntu-latest
+    needs: validate
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false  # Required for Infracost
+
+      - name: Setup Infracost
+        uses: infracost/actions/setup@v2
+        with:
+          api-key: ${{ secrets.INFRACOST_API_KEY }}
+
+      - name: Determine Environment
+        id: env
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "environment=${{ github.event.inputs.environment }}" >> $GITHUB_OUTPUT
+          else
+            echo "environment=dev" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate Infracost JSON
+        run: |
+          infracost breakdown --path=${{ env.TF_WORKING_DIR }} \
+            --terraform-var-file=environments/${{ steps.env.outputs.environment }}.tfvars \
+            --format=json \
+            --out-file=/tmp/infracost-base.json
+        env:
+          INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
+
+      - name: Post Cost Estimate to PR
+        if: github.event_name == 'pull_request'
+        run: |
+          infracost comment github --path=/tmp/infracost-base.json \
+            --repo=${{ github.repository }} \
+            --pull-request=${{ github.event.pull_request.number }} \
+            --github-token=${{ secrets.GITHUB_TOKEN }} \
+            --behavior=update
+        env:
+          INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
+
+      - name: Upload Cost Estimate
+        uses: actions/upload-artifact@v4
+        with:
+          name: infracost-estimate-${{ steps.env.outputs.environment }}
+          path: /tmp/infracost-base.json
+
+  # ---------------------------------------------------------------------------
+  # Terraform Plan (Dev)
+  # ---------------------------------------------------------------------------
+  plan-dev:
+    name: Plan (Dev)
+    runs-on: ubuntu-latest
+    needs: [validate, security-scan]
+    if: |
+      (github.event_name == 'pull_request') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev')
+    environment: dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        id: init
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=ananta-platform/dev/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ secrets.TF_LOCK_TABLE }}" \
+            -lock-timeout=300s
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform plan \
+            -var-file="environments/dev.tfvars" \
+            -out=tfplan-dev \
+            -lock-timeout=300s \
+            -no-color 2>&1 | tee plan-output.txt
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        continue-on-error: true
+
+      - name: Upload Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-dev
+          path: ${{ env.TF_WORKING_DIR }}/tfplan-dev
+
+      - name: Post Plan to PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const planOutput = fs.readFileSync('${{ env.TF_WORKING_DIR }}/plan-output.txt', 'utf8');
+            const truncatedOutput = planOutput.length > 60000
+              ? planOutput.substring(0, 60000) + '\n\n... (truncated)'
+              : planOutput;
+
+            const output = `#### Terraform Plan (Dev) 📖
+
+            <details><summary>Show Plan</summary>
+
+            \`\`\`terraform
+            ${truncatedOutput}
+            \`\`\`
+
+            </details>
+
+            *Pushed by: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: output
+            })
+
+      - name: Plan Status
+        if: steps.plan.outcome == 'failure'
+        run: exit 1
+
+  # ---------------------------------------------------------------------------
+  # Terraform Plan (Staging)
+  # ---------------------------------------------------------------------------
+  plan-staging:
+    name: Plan (Staging)
+    runs-on: ubuntu-latest
+    needs: [validate, security-scan]
+    if: |
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')) ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging')
+    environment: staging
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_STAGING }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=ananta-platform/staging/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ secrets.TF_LOCK_TABLE }}" \
+            -lock-timeout=300s
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      - name: Terraform Plan
+        id: plan
+        run: |
+          terraform plan \
+            -var-file="environments/staging.tfvars" \
+            -out=tfplan-staging \
+            -lock-timeout=300s \
+            -no-color
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      - name: Upload Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-staging
+          path: ${{ env.TF_WORKING_DIR }}/tfplan-staging
+
+  # ---------------------------------------------------------------------------
+  # Terraform Plan (Prod)
+  # ---------------------------------------------------------------------------
+  plan-prod:
+    name: Plan (Prod)
+    runs-on: ubuntu-latest
+    needs: [validate, security-scan]
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod'
+    environment: prod
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_PROD }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=ananta-platform/prod/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ secrets.TF_LOCK_TABLE }}" \
+            -lock-timeout=300s
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      - name: Terraform Plan
+        run: |
+          terraform plan \
+            -var-file="environments/prod.tfvars" \
+            -out=tfplan-prod \
+            -lock-timeout=300s \
+            -no-color
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      - name: Upload Plan
+        uses: actions/upload-artifact@v4
+        with:
+          name: tfplan-prod
+          path: ${{ env.TF_WORKING_DIR }}/tfplan-prod
+
+  # ---------------------------------------------------------------------------
+  # Terraform Apply (Dev) - Auto on merge
+  # ---------------------------------------------------------------------------
+  apply-dev:
+    name: Apply (Dev)
+    runs-on: ubuntu-latest
+    needs: plan-dev
+    if: |
+      (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')) ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'dev' && github.event.inputs.action == 'apply')
+    environment: dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      # Backup current state before applying
+      - name: Backup State
+        run: |
+          aws s3 cp \
+            s3://${{ secrets.TF_STATE_BUCKET }}/ananta-platform/dev/terraform.tfstate \
+            s3://${{ secrets.TF_STATE_BUCKET }}/ananta-platform/dev/backups/terraform.tfstate.$(date +%Y%m%d-%H%M%S) \
+            || echo "No existing state to backup"
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=ananta-platform/dev/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ secrets.TF_LOCK_TABLE }}" \
+            -lock-timeout=300s
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      - name: Download Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-dev
+          path: ${{ env.TF_WORKING_DIR }}
+
+      - name: Terraform Apply
+        id: apply
+        run: terraform apply -auto-approve -lock-timeout=300s tfplan-dev
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      - name: Apply Status
+        if: failure()
+        run: |
+          echo "::error::Terraform apply failed. State backup available in S3 backups folder."
+          exit 1
+
+  # ---------------------------------------------------------------------------
+  # Terraform Apply (Staging) - Requires approval
+  # ---------------------------------------------------------------------------
+  apply-staging:
+    name: Apply (Staging)
+    runs-on: ubuntu-latest
+    needs: plan-staging
+    if: |
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'staging' && github.event.inputs.action == 'apply')
+    environment:
+      name: staging
+      # Requires manual approval in GitHub environment settings
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_STAGING }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      # Backup current state before applying
+      - name: Backup State
+        run: |
+          aws s3 cp \
+            s3://${{ secrets.TF_STATE_BUCKET }}/ananta-platform/staging/terraform.tfstate \
+            s3://${{ secrets.TF_STATE_BUCKET }}/ananta-platform/staging/backups/terraform.tfstate.$(date +%Y%m%d-%H%M%S) \
+            || echo "No existing state to backup"
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=ananta-platform/staging/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ secrets.TF_LOCK_TABLE }}" \
+            -lock-timeout=300s
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      - name: Download Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-staging
+          path: ${{ env.TF_WORKING_DIR }}
+
+      - name: Terraform Apply
+        id: apply
+        run: terraform apply -auto-approve -lock-timeout=300s tfplan-staging
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      - name: Apply Status
+        if: failure()
+        run: |
+          echo "::error::Terraform apply failed. State backup available in S3 backups folder."
+          exit 1
+
+  # ---------------------------------------------------------------------------
+  # Terraform Apply (Prod) - Requires approval
+  # ---------------------------------------------------------------------------
+  apply-prod:
+    name: Apply (Prod)
+    runs-on: ubuntu-latest
+    needs: plan-prod
+    if: |
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.environment == 'prod' && github.event.inputs.action == 'apply')
+    environment:
+      name: prod
+      # Requires manual approval in GitHub environment settings
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_PROD }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      # Backup current state before applying
+      - name: Backup State
+        run: |
+          aws s3 cp \
+            s3://${{ secrets.TF_STATE_BUCKET }}/ananta-platform/prod/terraform.tfstate \
+            s3://${{ secrets.TF_STATE_BUCKET }}/ananta-platform/prod/backups/terraform.tfstate.$(date +%Y%m%d-%H%M%S) \
+            || echo "No existing state to backup"
+
+      - name: Terraform Init
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ secrets.TF_STATE_BUCKET }}" \
+            -backend-config="key=ananta-platform/prod/terraform.tfstate" \
+            -backend-config="region=${{ env.AWS_REGION }}" \
+            -backend-config="dynamodb_table=${{ secrets.TF_LOCK_TABLE }}" \
+            -lock-timeout=300s
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      - name: Download Plan
+        uses: actions/download-artifact@v4
+        with:
+          name: tfplan-prod
+          path: ${{ env.TF_WORKING_DIR }}
+
+      - name: Terraform Apply
+        id: apply
+        run: terraform apply -auto-approve -lock-timeout=300s tfplan-prod
+        working-directory: ${{ env.TF_WORKING_DIR }}
+
+      - name: Apply Status
+        if: failure()
+        run: |
+          echo "::error::Terraform apply failed. State backup available in S3 backups folder."
+          exit 1
+
+  # ---------------------------------------------------------------------------
+  # Rollback Job - Triggered on Apply Failure
+  # ---------------------------------------------------------------------------
+  rollback:
+    name: Rollback on Failure
+    runs-on: ubuntu-latest
+    if: |
+      failure() &&
+      github.event.inputs.action == 'apply' &&
+      (needs.apply-dev.result == 'failure' || needs.apply-staging.result == 'failure' || needs.apply-prod.result == 'failure')
+    needs: [apply-dev, apply-staging, apply-prod]
+    steps:
+      - name: Determine Failed Environment
+        id: env
+        run: |
+          if [[ "${{ needs.apply-dev.result }}" == "failure" ]]; then
+            echo "environment=dev" >> $GITHUB_OUTPUT
+          elif [[ "${{ needs.apply-staging.result }}" == "failure" ]]; then
+            echo "environment=staging" >> $GITHUB_OUTPUT
+          elif [[ "${{ needs.apply-prod.result }}" == "failure" ]]; then
+            echo "environment=prod" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets[format('AWS_ROLE_ARN_{0}', steps.env.outputs.environment)] }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: List Available Backups
+        id: backups
+        run: |
+          LATEST_BACKUP=$(aws s3 ls s3://${{ secrets.TF_STATE_BUCKET }}/ananta-platform/${{ steps.env.outputs.environment }}/backups/ | sort | tail -n 1 | awk '{print $4}')
+          echo "latest_backup=$LATEST_BACKUP" >> $GITHUB_OUTPUT
+          echo "Found backup: $LATEST_BACKUP"
+
+      - name: Restore Previous State
+        if: steps.backups.outputs.latest_backup != ''
+        run: |
+          aws s3 cp \
+            s3://${{ secrets.TF_STATE_BUCKET }}/ananta-platform/${{ steps.env.outputs.environment }}/backups/${{ steps.backups.outputs.latest_backup }} \
+            s3://${{ secrets.TF_STATE_BUCKET }}/ananta-platform/${{ steps.env.outputs.environment }}/terraform.tfstate
+
+      - name: Rollback Complete
+        run: |
+          echo "::warning::Rollback completed for ${{ steps.env.outputs.environment }} environment"
+          echo "Restored state from: ${{ steps.backups.outputs.latest_backup }}"

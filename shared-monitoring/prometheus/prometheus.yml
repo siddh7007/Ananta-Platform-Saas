@@ -1,0 +1,205 @@
+# =============================================================================
+# Prometheus Configuration - Ananta Platform Monitoring
+# =============================================================================
+# Scrapes health endpoints from both Control Plane (Ananta-SaaS) and App Plane
+#
+# Access Prometheus UI: http://localhost:9090
+# =============================================================================
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'ananta-platform'
+
+# Alertmanager configuration
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+            - alertmanager:9093
+
+# Load alert rules
+rule_files:
+  - /etc/prometheus/alerts/*.yml
+
+# Scrape configurations
+scrape_configs:
+  # ===========================================================================
+  # CONTROL PLANE (Ananta-SaaS)
+  # ===========================================================================
+  # NOTE: Service names must match Docker Compose service names (not container_name)
+  # arc-saas docker-compose uses: tenant-management-service, redis, etc.
+
+  # Tenant Management Service - Prometheus Metrics
+  # This is the ONLY endpoint that returns Prometheus format metrics
+  - job_name: 'ananta-saas-tenant-mgmt-metrics'
+    static_configs:
+      - targets: ['tenant-management-service:14000']
+        labels:
+          plane: 'control'
+          service: 'tenant-management'
+    metrics_path: /metrics
+    scrape_interval: 15s
+    scrape_timeout: 10s
+
+  # NOTE: Health endpoints (/health, /health/live, /health/ready) return JSON,
+  # NOT Prometheus metrics format. Use blackbox exporter to probe them instead.
+  # See 'blackbox-http' job below for HTTP probes of these endpoints.
+
+  # ===========================================================================
+  # APP PLANE - CNS Service
+  # ===========================================================================
+  # CNS Service exposes Prometheus metrics at /metrics endpoint
+  # Metrics include: BOM processing, enrichment, supplier API calls, etc.
+
+  - job_name: 'app-plane-cns-service'
+    static_configs:
+      - targets: ['cns-service:27200']
+        labels:
+          plane: 'app'
+          service: 'cns-service'
+    metrics_path: /metrics
+    scrape_interval: 15s
+    scrape_timeout: 10s
+
+  # ===========================================================================
+  # APP PLANE - Django Backend
+  # ===========================================================================
+  # NOTE: Django health endpoints also return JSON, NOT Prometheus metrics.
+  # They are monitored via the blackbox-http probe job below.
+  # If Django exposes a /metrics endpoint in the future, add it here.
+
+  # ===========================================================================
+  # INFRASTRUCTURE SERVICES
+  # ===========================================================================
+  # NOTE: Redis and RabbitMQ need exporters for Prometheus metrics
+  # Direct port scraping won't work - using blackbox probes instead
+
+  # Redis - Via Redis Exporter
+  - job_name: 'app-plane-redis'
+    static_configs:
+      - targets: ['redis-exporter:9121']
+        labels:
+          plane: 'app'
+          service: 'redis'
+    scrape_interval: 30s
+    scrape_timeout: 10s
+
+  # RabbitMQ (App Plane) - Requires prometheus plugin enabled
+  # Enable with: rabbitmq-plugins enable rabbitmq_prometheus
+  - job_name: 'app-plane-rabbitmq'
+    static_configs:
+      - targets: ['rabbitmq:15692']
+        labels:
+          plane: 'app'
+          service: 'rabbitmq'
+    scrape_interval: 60s
+    scrape_timeout: 10s
+
+  # MinIO (App Plane) - Native Prometheus metrics
+  - job_name: 'app-plane-minio'
+    static_configs:
+      - targets: ['minio:9000']
+        labels:
+          plane: 'app'
+          service: 'minio'
+    metrics_path: /minio/v2/metrics/cluster
+    scrape_interval: 60s
+    scrape_timeout: 10s
+
+  # ===========================================================================
+  # OBSERVABILITY INFRASTRUCTURE
+  # ===========================================================================
+
+  # OpenTelemetry Collector - Self metrics
+  - job_name: 'otel-collector-internal'
+    static_configs:
+      - targets: ['otel-collector:8888']
+        labels:
+          service: 'otel-collector'
+          type: 'internal'
+    scrape_interval: 30s
+
+  # OpenTelemetry Collector - Exported metrics
+  - job_name: 'otel-collector-metrics'
+    static_configs:
+      - targets: ['otel-collector:8889']
+        labels:
+          service: 'otel-collector'
+          type: 'exported'
+    scrape_interval: 30s
+
+  # Jaeger - Admin metrics
+  - job_name: 'jaeger'
+    static_configs:
+      - targets: ['jaeger:14269']
+        labels:
+          service: 'jaeger'
+    scrape_interval: 30s
+
+  # ===========================================================================
+  # PROMETHEUS SELF-MONITORING
+  # ===========================================================================
+
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+        labels:
+          service: 'prometheus'
+
+  # ===========================================================================
+  # BLACKBOX EXPORTER (HTTP Probes)
+  # ===========================================================================
+
+  - job_name: 'blackbox-http'
+    metrics_path: /probe
+    params:
+      module: [http_2xx]
+    static_configs:
+      - targets:
+          # Control Plane
+          - http://tenant-management-service:14000/health
+          - http://tenant-management-service:14000/health/live
+          - http://tenant-management-service:14000/health/ready
+          # App Plane - CNS
+          - http://cns-service:8000/health/config
+          - http://cns-service:8000/health/config/dual-db
+          - http://cns-service:8000/api/health/
+          # App Plane - Other Services
+          - http://django-backend:8000/health/
+          - http://supabase-api:3000/
+        labels:
+          probe_type: 'http'
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115
+
+  # ===========================================================================
+  # BLACKBOX EXPORTER (TCP Probes - for Redis, Databases)
+  # ===========================================================================
+
+  - job_name: 'blackbox-tcp'
+    metrics_path: /probe
+    params:
+      module: [tcp_connect]
+    static_configs:
+      - targets:
+          # Redis
+          - redis:6379
+          # Databases (optional - comment out if not needed)
+          - supabase-db:5432
+          - components-v2-postgres:5432
+        labels:
+          probe_type: 'tcp'
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: blackbox-exporter:9115

@@ -1,0 +1,31 @@
+[
+  {
+    "feature": "Workspace Role Checks",
+    "status": "IMPLEMENTED",
+    "details": "Both PUT and DELETE endpoints check user_role == 'admin'",
+    "implementation_lines": "workspaces.py:499, 608",
+    "manual_test_required": true
+  },
+  {
+    "feature": "Default Workspace Protection",
+    "status": "PARTIALLY IMPLEMENTED (BROKEN)",
+    "details": "Code checks workspace.is_default but column doesn't exist in DB",
+    "issue": "Missing is_default column in workspaces table",
+    "implementation_lines": "workspaces.py:614",
+    "database_issue": "workspaces table lacks is_default column",
+    "recommendation": "Add is_default BOOLEAN column to workspaces table",
+    "manual_test_required": true
+  },
+  {
+    "feature": "Staff Bypass (is_platform_admin)",
+    "status": "IMPLEMENTED",
+    "details": "Super admin users bypass organization/workspace membership checks",
+    "implementation_locations": [
+      "dependencies.py:496-520 (organization context)",
+      "dependencies.py:713-730 (workspace context)",
+      "workspaces.py:443, 553 (@require_workspace decorator)"
+    ],
+    "granted_role": "admin (for workspaces) or super_admin (for orgs)",
+    "manual_test_required": true
+  }
+]

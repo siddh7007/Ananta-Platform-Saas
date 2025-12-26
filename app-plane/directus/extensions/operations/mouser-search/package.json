@@ -1,0 +1,31 @@
+{
+  "name": "@directus-extension/operation-mouser-search",
+  "version": "1.0.0",
+  "description": "Directus operation to search Mouser Electronics API for component data",
+  "type": "module",
+  "directus:extension": {
+    "type": "operation",
+    "path": "dist/index.js",
+    "source": "src/index.js",
+    "host": "^10.0.0"
+  },
+  "scripts": {
+    "build": "directus-extension build",
+    "dev": "directus-extension build -w --no-minify",
+    "link": "directus-extension link"
+  },
+  "keywords": [
+    "directus",
+    "directus-extension",
+    "directus-custom-operation",
+    "mouser",
+    "electronics",
+    "supplier-api"
+  ],
+  "dependencies": {
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "@directus/extensions-sdk": "^10.0.0"
+  }
+}

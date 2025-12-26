@@ -1,0 +1,68 @@
+# Reference repositories - do not track
+original-arc-saas/
+sourcefuse-references/
+components-platform-v2-ref/
+
+# Nested git repos (have their own separate repos)
+arc-saas/
+arc-docs/
+
+# Dependencies
+node_modules/
+.npm/
+__pycache__/
+*.pyc
+.venv/
+venv/
+env/
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+*.egg-info/
+.next/
+out/
+
+# Environment files (contain secrets)
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+nul
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# Coverage
+coverage/
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+
+# Tokens and secrets (NEVER commit)
+**/token.txt
+**/token.json
+**/access_token.txt
+**/jwt-token*.txt
+**/current_token.txt
+**/kc_token.json
+**/kc_access_token.txt
+**/admin_token.json
+token_response.json
+
+# Misc
+*.bak
+*.tmp

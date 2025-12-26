@@ -1,0 +1,68 @@
+# =============================================================================
+# Hadolint Configuration - Dockerfile Linting Rules
+# =============================================================================
+# Enforces Dockerfile best practices for Ananta Platform services
+# See: https://github.com/hadolint/hadolint
+# =============================================================================
+
+# Ignore specific rules globally (use sparingly)
+ignored:
+  # DL3008: Pin versions in apt-get install (too strict for rapid dev)
+  # - DL3008
+
+  # DL3018: Pin versions in apk add (acceptable for Alpine edge packages)
+  # - DL3018
+
+# Trusted base image registries
+trustedRegistries:
+  - docker.io
+  - gcr.io
+  - public.ecr.aws
+  - ghcr.io
+
+# Override specific rule severities
+override:
+  error:
+    - DL3001  # Avoid sudo
+    - DL3002  # Avoid root user
+    - DL3003  # Use WORKDIR for changing directories
+    - DL3007  # Pin versions for FROM
+    - DL3020  # Use COPY instead of ADD for files
+
+  warning:
+    - DL3008  # Pin versions in apt-get install
+    - DL3013  # Pin versions in pip install
+    - DL3018  # Pin versions in apk add
+    - DL3028  # Pin versions in gem install
+
+  info:
+    - DL3006  # EXPOSE port should be documented
+    - DL3045  # COPY --from should reference a valid stage
+
+  style:
+    - DL3010  # Use ADD for extracting archives
+    - DL3015  # Avoid additional packages
+
+# Strict mode (fail on any violation)
+# Set to false for development, true for CI/CD
+strict: false
+
+# Failure threshold
+# Determines minimum severity to fail the build
+# Options: error, warning, info, style, ignore
+failure-threshold: warning
+
+# Label schema to enforce
+label-schema:
+  # OCI Image Spec labels
+  author: required
+  maintainer: optional
+  version: required
+  description: required
+
+# Inline ignore comments format
+# Use: # hadolint ignore=DL3006,DL3008
+inline-ignore: true
+
+# Maximum line length (default: unlimited)
+# max-line-length: 120

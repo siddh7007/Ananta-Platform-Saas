@@ -1,0 +1,1027 @@
+# =============================================================================
+# App Plane - Single Consolidated Docker Compose
+# =============================================================================
+#
+# IMPORTANT: This is the ONLY docker-compose file for app-plane.
+# All development and production uses this single file.
+#
+# Integrates with Control Plane (arc-saas) via shared networks.
+# Uses Bun for JavaScript/TypeScript services, uvicorn for Python.
+#
+# Quick Start:
+#   docker-compose up -d
+#   docker-compose logs -f
+#   docker-compose down
+#
+# Service URLs:
+#   - CNS Service API:    http://localhost:27200
+#   - CNS Dashboard:      http://localhost:27250
+#   - Customer Portal:    http://localhost:27100
+#   - Backstage Portal:   http://localhost:27150
+#   - Dashboard:          http://localhost:27400
+#   - Django Backend:     http://localhost:27000
+#   - Supabase Studio:    http://localhost:27800
+#   - Supabase API:       http://localhost:27810
+#   - MinIO Console:      http://localhost:27041
+#   - RabbitMQ Mgmt:      http://localhost:27673
+#   - Directus CMS:       http://localhost:27060
+#
+# =============================================================================
+
+services:
+  # ===========================================================================
+  # DATABASES
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # Supabase PostgreSQL - Tenant Business Data (BOMs, Line Items, etc.)
+  # ---------------------------------------------------------------------------
+  supabase-db:
+    image: supabase/postgres:15.1.0.147
+    container_name: app-plane-supabase-db
+    ports:
+      - "${SUPABASE_DB_PORT:-27432}:5432"
+    environment:
+      POSTGRES_PASSWORD: ${SUPABASE_DB_PASSWORD:-postgres}
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+    volumes:
+      - supabase-db-data:/var/lib/postgresql/data
+      - ./supabase/init:/docker-entrypoint-initdb.d
+    networks:
+      - app-plane-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Components V2 PostgreSQL - Central Component Catalog (SSOT)
+  # ---------------------------------------------------------------------------
+  # Single Source of Truth for all component data:
+  # - Full DigiKey category taxonomy (1200+ categories)
+  # - Enriched component catalog
+  # - Manufacturer database (30+ manufacturers)
+  # - Supplier database (8+ suppliers)
+  # - Staff/unified BOM uploads
+  components-v2-postgres:
+    image: postgres:15-alpine
+    container_name: app-plane-components-v2-postgres
+    ports:
+      - "${COMPONENTS_V2_DB_PORT:-27010}:5432"
+    environment:
+      POSTGRES_USER: ${COMPONENTS_V2_DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${COMPONENTS_V2_DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${COMPONENTS_V2_DB_NAME:-components_v2}
+    volumes:
+      - components-v2-postgres-data:/var/lib/postgresql/data
+      - ./database/components-v2-init:/docker-entrypoint-initdb.d
+    networks:
+      - app-plane-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d components_v2"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ===========================================================================
+  # INFRASTRUCTURE SERVICES
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # Redis Cache
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: app-plane-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "${REDIS_PORT:-27012}:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - app-plane-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Redis Exporter (Prometheus metrics for Redis)
+  # ---------------------------------------------------------------------------
+  redis-exporter:
+    image: oliver006/redis_exporter:v1.55.0
+    container_name: app-plane-redis-exporter
+    ports:
+      - "${REDIS_EXPORTER_PORT:-27121}:9121"
+    environment:
+      REDIS_ADDR: redis://redis:6379
+    networks:
+      - app-plane-network
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:9121/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    labels:
+      - "prometheus.scrape=true"
+      - "prometheus.port=9121"
+      - "prometheus.path=/metrics"
+
+  # ---------------------------------------------------------------------------
+  # RabbitMQ Message Broker (with Prometheus metrics enabled)
+  # ---------------------------------------------------------------------------
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    container_name: app-plane-rabbitmq
+    ports:
+      - "${RABBITMQ_PORT:-27672}:5672"
+      - "${RABBITMQ_MGMT_PORT:-27673}:15672"
+      - "${RABBITMQ_PROMETHEUS_PORT:-27692}:15692"  # Prometheus metrics
+      - "${RABBITMQ_STREAM_PORT:-27251}:5552"       # RabbitMQ Streams port
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-admin123}
+      RABBITMQ_DEFAULT_VHOST: /
+      # Enable Prometheus plugin on startup
+      RABBITMQ_PLUGINS: rabbitmq_management,rabbitmq_prometheus,rabbitmq_stream,rabbitmq_stream_management
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+      - ./rabbitmq/enabled_plugins:/etc/rabbitmq/enabled_plugins:ro
+    networks:
+      - app-plane-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    labels:
+      - "prometheus.scrape=true"
+      - "prometheus.port=15692"
+      - "prometheus.path=/metrics"
+
+  # ---------------------------------------------------------------------------
+  # MinIO S3-Compatible Object Storage
+  # ---------------------------------------------------------------------------
+  minio:
+    image: minio/minio:latest
+    container_name: app-plane-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_CORS_ALLOW_ORIGIN: ${MINIO_CORS_ALLOW_ORIGIN:-http://localhost:27500}
+    ports:
+      - "${MINIO_PORT:-27040}:9000"
+      - "${MINIO_CONSOLE_PORT:-27041}:9001"
+    volumes:
+      - minio-data:/data
+    networks:
+      - app-plane-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+          cpus: '0.25'
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # MinIO Client - Bucket Initialization
+  # ---------------------------------------------------------------------------
+  minio-init:
+    image: minio/mc:latest
+    container_name: app-plane-minio-init
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set myminio http://minio:9000 $${MINIO_ROOT_USER:-minioadmin} $${MINIO_ROOT_PASSWORD:-minioadmin};
+      mc mb myminio/$${S3_BUCKET_NAME:-bom-uploads} --ignore-existing;
+      mc mb myminio/$${S3_BUCKET_DOCUMENTS:-documents} --ignore-existing;
+      mc mb myminio/$${S3_BUCKET_EXPORTS:-exports} --ignore-existing;
+      mc mb myminio/$${S3_BUCKET_AVATARS:-avatars} --ignore-existing;
+      mc mb myminio/$${S3_BUCKET_AUDIT:-enrichment-audit} --ignore-existing;
+      mc mb myminio/$${S3_BUCKET_BULK:-bulk-uploads} --ignore-existing;
+      mc anonymous set download myminio/$${S3_BUCKET_AVATARS:-avatars};
+      echo 'MinIO buckets initialized successfully';
+      exit 0;
+      "
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-bom-uploads}
+      S3_BUCKET_DOCUMENTS: ${S3_BUCKET_DOCUMENTS:-documents}
+      S3_BUCKET_EXPORTS: ${S3_BUCKET_EXPORTS:-exports}
+      S3_BUCKET_AVATARS: ${S3_BUCKET_AVATARS:-avatars}
+      S3_BUCKET_AUDIT: ${S3_BUCKET_AUDIT:-enrichment-audit}
+      S3_BUCKET_BULK: ${S3_BUCKET_BULK:-bulk-uploads}
+    networks:
+      - app-plane-network
+
+  # ===========================================================================
+  # SUPABASE SERVICES
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # Supabase PostgREST API
+  # ---------------------------------------------------------------------------
+  supabase-api:
+    image: postgrest/postgrest:v11.2.2
+    container_name: app-plane-supabase-api
+    ports:
+      - "${SUPABASE_API_PORT:-27810}:3000"
+    environment:
+      PGRST_DB_URI: postgres://postgres:${SUPABASE_DB_PASSWORD:-postgres}@supabase-db:5432/postgres
+      PGRST_DB_SCHEMA: public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${SUPABASE_JWT_SECRET:-your-super-secret-jwt-token-with-at-least-32-characters-long}
+      PGRST_DB_EXTRA_SEARCH_PATH: public,extensions
+      # CORS Configuration - PostgREST uses PGRST_SERVER_CORS_ALLOWED_ORIGINS (not an array, just comma-separated string)
+      PGRST_SERVER_CORS_ALLOWED_ORIGINS: "http://localhost:27100,http://localhost:27555"
+    networks:
+      - app-plane-network
+      - arc-saas-network
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.supabase-api.rule=PathPrefix(`/supabase`) || PathPrefix(`/rest`)"
+      - "traefik.http.routers.supabase-api.entrypoints=web"
+      - "traefik.http.routers.supabase-api.middlewares=cors-headers@file"
+      - "traefik.http.services.supabase-api.loadbalancer.server.port=3000"
+
+  # ---------------------------------------------------------------------------
+  # Supabase Studio (Database Admin UI)
+  # ---------------------------------------------------------------------------
+  supabase-studio:
+    image: supabase/studio:latest
+    container_name: app-plane-supabase-studio
+    ports:
+      - "${SUPABASE_STUDIO_PORT:-27800}:3000"
+    environment:
+      STUDIO_PG_META_URL: http://supabase-meta:8080
+      POSTGRES_PASSWORD: ${SUPABASE_DB_PASSWORD:-postgres}
+      SUPABASE_URL: http://supabase-api:3000
+      SUPABASE_REST_URL: http://supabase-api:3000/rest/v1/
+    networks:
+      - app-plane-network
+    depends_on:
+      - supabase-db
+      - supabase-meta
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Supabase Meta (Postgres Metadata API)
+  # ---------------------------------------------------------------------------
+  supabase-meta:
+    image: supabase/postgres-meta:v0.74.0
+    container_name: app-plane-supabase-meta
+    environment:
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: supabase-db
+      PG_META_DB_PORT: 5432
+      PG_META_DB_NAME: postgres
+      PG_META_DB_USER: postgres
+      PG_META_DB_PASSWORD: ${SUPABASE_DB_PASSWORD:-postgres}
+    networks:
+      - app-plane-network
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ===========================================================================
+  # DIRECTUS CMS
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # Directus CMS (Headless CMS for Configuration Management)
+  # ---------------------------------------------------------------------------
+  directus:
+    image: directus/directus:latest
+    container_name: app-plane-directus
+    ports:
+      - "${DIRECTUS_PORT:-27060}:8055"
+    environment:
+      KEY: ${DIRECTUS_KEY:-directus-key-change-in-production}
+      SECRET: ${DIRECTUS_SECRET:-directus-secret-change-in-production}
+      DB_CLIENT: pg
+      DB_HOST: supabase-db
+      DB_PORT: 5432
+      DB_DATABASE: directus
+      DB_USER: postgres
+      DB_PASSWORD: ${SUPABASE_DB_PASSWORD:-postgres}
+      ADMIN_EMAIL: ${DIRECTUS_ADMIN_EMAIL:-admin@example.com}
+      ADMIN_PASSWORD: ${DIRECTUS_ADMIN_PASSWORD:-admin123}
+      PUBLIC_URL: http://localhost:${DIRECTUS_PORT:-27060}
+      CORS_ENABLED: "true"
+      CORS_ORIGIN: "*"
+      CACHE_ENABLED: "true"
+      CACHE_STORE: redis
+      REDIS: redis://redis:6379/4
+    volumes:
+      - directus-uploads:/directus/uploads
+      - ./directus/schemas:/directus/schemas
+      - ./directus/extensions:/directus/extensions
+    networks:
+      - app-plane-network
+      - arc-saas-network
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ===========================================================================
+  # BACKEND SERVICES
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # CNS Service (FastAPI - Component Normalization)
+  # ---------------------------------------------------------------------------
+  cns-service:
+    build:
+      context: ./services/cns-service
+      dockerfile: Dockerfile
+      target: development
+    container_name: app-plane-cns-service
+    ports:
+      - "${CNS_SERVICE_PORT:-27200}:8000"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      CNS_PORT: 8000
+      CNS_HOST: 0.0.0.0
+      LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      # Primary database URL - Components V2 as SSOT
+      DATABASE_URL: postgresql://postgres:${COMPONENTS_V2_DB_PASSWORD:-postgres}@components-v2-postgres:5432/components_v2
+      # Dual Database Configuration
+      SUPABASE_DATABASE_URL: postgresql://postgres:${SUPABASE_DB_PASSWORD:-postgres}@supabase-db:5432/postgres
+      COMPONENTS_V2_DATABASE_URL: postgresql://postgres:${COMPONENTS_V2_DB_PASSWORD:-postgres}@components-v2-postgres:5432/components_v2
+      # Individual DB vars for backwards compatibility
+      DB_HOST: supabase-db
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-postgres}
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${SUPABASE_DB_PASSWORD:-postgres}
+      DATABASE_POOL_SIZE: 20
+      DATABASE_MAX_OVERFLOW: 10
+      # Redis
+      REDIS_URL: redis://redis:6379/2
+      REDIS_CACHE_TTL: 3600
+      # Auth
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-cns-jwt-secret-key-change-in-production-at-least-32-chars}
+      JWT_ALGORITHM: HS256
+      JWT_EXPIRATION: 3600
+      # Keycloak OIDC Configuration (uses Auth0 RS256 validation in auth middleware)
+      AUTH0_ENABLED: ${AUTH0_ENABLED:-true}
+      AUTH0_DOMAIN: ${KEYCLOAK_DOMAIN:-arc-saas-keycloak:8080/realms/ananta-saas}
+      AUTH0_AUDIENCE: ${AUTH0_AUDIENCE:-cbp-frontend,cns-api,account}
+      AUTH0_NAMESPACE: ${AUTH0_NAMESPACE:-https://ananta.component.platform}
+      # Admin API token for CNS Dashboard
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-f3ab7e1b4c9d2e7f1a3b5c7d9e0f1234567890abcdef1234567890abcdef}
+      CNS_ADMIN_API_TOKEN: ${ADMIN_API_TOKEN:-f3ab7e1b4c9d2e7f1a3b5c7d9e0f1234567890abcdef1234567890abcdef}
+      # SECURITY: Enable default dev token (set to false in production)
+      ALLOW_DEV_DEFAULTS: ${ALLOW_DEV_DEFAULTS:-true}
+      # Temporal Workflow Configuration
+      TEMPORAL_ENABLED: ${TEMPORAL_ENABLED:-true}
+      TEMPORAL_HOST: shared-temporal:7233
+      TEMPORAL_URL: shared-temporal:7233
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-enrichment}
+      TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-cns-enrichment}
+      # RabbitMQ Event Bus Configuration
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_STREAM_PORT: 5552  # Stream protocol port (for rstream)
+      RABBITMQ_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_PASS: ${RABBITMQ_PASSWORD:-admin123}
+      RABBITMQ_VHOST: /
+      # AI Providers
+      OLLAMA_ENABLED: ${OLLAMA_ENABLED:-true}
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3:8b}
+      OPENAI_ENABLED: ${OPENAI_ENABLED:-false}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4-turbo}
+      CLAUDE_ENABLED: ${CLAUDE_ENABLED:-false}
+      CLAUDE_API_KEY: ${CLAUDE_API_KEY:-}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-3-sonnet-20240229}
+      PERPLEXITY_ENABLED: ${PERPLEXITY_ENABLED:-false}
+      PERPLEXITY_API_KEY: ${PERPLEXITY_API_KEY:-}
+      # Supplier APIs (Tier 1) - All enabled by default
+      MOUSER_ENABLED: ${MOUSER_ENABLED:-true}
+      MOUSER_API_KEY: ${MOUSER_API_KEY:-}
+      MOUSER_BASE_URL: ${MOUSER_BASE_URL:-https://api.mouser.com/api/v1}
+      DIGIKEY_ENABLED: ${DIGIKEY_ENABLED:-true}
+      DIGIKEY_CLIENT_ID: ${DIGIKEY_CLIENT_ID:-}
+      DIGIKEY_CLIENT_SECRET: ${DIGIKEY_CLIENT_SECRET:-}
+      DIGIKEY_BASE_URL: ${DIGIKEY_BASE_URL:-https://api.digikey.com}
+      ELEMENT14_ENABLED: ${ELEMENT14_ENABLED:-true}
+      ELEMENT14_API_KEY: ${ELEMENT14_API_KEY:-}
+      ELEMENT14_STORE: ${ELEMENT14_STORE:-uk}
+      # Quality Thresholds
+      QUALITY_REJECT_THRESHOLD: ${QUALITY_REJECT_THRESHOLD:-70}
+      QUALITY_STAGING_THRESHOLD: ${QUALITY_STAGING_THRESHOLD:-94}
+      QUALITY_AUTO_APPROVE_THRESHOLD: ${QUALITY_AUTO_APPROVE_THRESHOLD:-95}
+      # MinIO/S3 Storage Configuration
+      MINIO_ENABLED: "true"
+      MINIO_ENDPOINT: ${MINIO_INTERNAL_ENDPOINT:-minio:9000}
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-localhost:27040}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_SECURE: "false"
+      MINIO_BUCKET_UPLOADS: ${S3_BUCKET_NAME:-bom-uploads}
+      MINIO_BUCKET_RESULTS: enriched-results
+      MINIO_BUCKET_ARCHIVE: bulk-uploads-archive
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-bom-uploads}
+      S3_BUCKET_AUDIT: ${S3_BUCKET_AUDIT:-enrichment-audit}
+      S3_BUCKET_BULK: ${S3_BUCKET_BULK:-bulk-uploads}
+      # Feature Flags
+      ENABLE_AI_SUGGESTIONS: ${ENABLE_AI_SUGGESTIONS:-true}
+      ENABLE_WEB_SCRAPING: ${ENABLE_WEB_SCRAPING:-false}
+      ENABLE_TIER2_SUPPLIERS: ${ENABLE_TIER2_SUPPLIERS:-false}
+      ENABLE_TIER3_OEM: ${ENABLE_TIER3_OEM:-false}
+      ENABLE_MULTI_AI_FALLBACK: ${ENABLE_MULTI_AI_FALLBACK:-true}
+      ENABLE_COST_TRACKING: ${ENABLE_COST_TRACKING:-true}
+      # Disable BOM idempotency for testing (allows same file to create new BOMs)
+      BOM_UPLOAD_IDEMPOTENCY_ENABLED: ${BOM_UPLOAD_IDEMPOTENCY_ENABLED:-false}
+      # Directus CMS Integration
+      DIRECTUS_ENABLED: ${DIRECTUS_ENABLED:-true}
+      DIRECTUS_URL: ${DIRECTUS_URL:-http://directus:8055}
+      DIRECTUS_ADMIN_EMAIL: ${DIRECTUS_ADMIN_EMAIL:-admin@example.com}
+      DIRECTUS_ADMIN_PASSWORD: ${DIRECTUS_ADMIN_PASSWORD:-admin123}
+      # Development
+      DEBUG: ${DEBUG:-true}
+      TEST_MODE: ${TEST_MODE:-false}
+      MOCK_SUPPLIER_APIS: ${MOCK_SUPPLIER_APIS:-false}
+      # Admin Token (Backend Only - NEVER expose to frontend)
+      CNS_ADMIN_TOKEN: ${CNS_ADMIN_TOKEN:-f3ab7e1b4c9d2e7f1a3b5c7d9e0f1234567890abcdef1234567890abcdef}
+    volumes:
+      - ./services/cns-service/app:/app/app
+      - ./services/cns-service/tests:/app/tests
+      - ./shared:/app/shared
+    networks:
+      - app-plane-network
+      - arc-saas-network
+      - shared-temporal-network
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+      components-v2-postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      directus:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.cns-service.rule=PathPrefix(`/cns`)"
+      - "traefik.http.routers.cns-service.entrypoints=web"
+      - "traefik.http.routers.cns-service.middlewares=cors-headers@file"
+      - "traefik.http.services.cns-service.loadbalancer.server.port=8000"
+
+  # ---------------------------------------------------------------------------
+  # CNS Temporal Worker (BOM Enrichment)
+  # ---------------------------------------------------------------------------
+  cns-worker:
+    image: app-plane-cns-service
+    container_name: app-plane-cns-worker
+    command: python -m app.workers.bom_worker
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      # Primary database URL - Components V2 as SSOT
+      DATABASE_URL: postgresql://postgres:${COMPONENTS_V2_DB_PASSWORD:-postgres}@components-v2-postgres:5432/components_v2
+      # Dual Database Configuration
+      SUPABASE_DATABASE_URL: postgresql://postgres:${SUPABASE_DB_PASSWORD:-postgres}@supabase-db:5432/postgres
+      COMPONENTS_V2_DATABASE_URL: postgresql://postgres:${COMPONENTS_V2_DB_PASSWORD:-postgres}@components-v2-postgres:5432/components_v2
+      # Individual DB vars for backwards compatibility
+      DB_HOST: supabase-db
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-postgres}
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${SUPABASE_DB_PASSWORD:-postgres}
+      DATABASE_POOL_SIZE: 10
+      DATABASE_MAX_OVERFLOW: 5
+      # Redis
+      REDIS_URL: redis://redis:6379/2
+      REDIS_CACHE_TTL: 3600
+      # Auth (required by config.py)
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:-cns-jwt-secret-key-change-in-production-at-least-32-chars}
+      JWT_ALGORITHM: HS256
+      JWT_EXPIRATION: 3600
+      # Temporal Workflow Configuration
+      TEMPORAL_ENABLED: ${TEMPORAL_ENABLED:-true}
+      TEMPORAL_HOST: shared-temporal:7233
+      TEMPORAL_URL: shared-temporal:7233
+      TEMPORAL_NAMESPACE: ${TEMPORAL_NAMESPACE:-enrichment}
+      TEMPORAL_TASK_QUEUE: ${TEMPORAL_TASK_QUEUE:-cns-enrichment}
+      # RabbitMQ Event Bus Configuration
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_STREAM_PORT: 5552  # Stream protocol port (for rstream)
+      RABBITMQ_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_PASS: ${RABBITMQ_PASSWORD:-admin123}
+      RABBITMQ_VHOST: /
+      # AI Providers
+      OLLAMA_ENABLED: ${OLLAMA_ENABLED:-true}
+      OLLAMA_URL: ${OLLAMA_URL:-http://ollama:11434}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3:8b}
+      OPENAI_ENABLED: ${OPENAI_ENABLED:-false}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4-turbo}
+      CLAUDE_ENABLED: ${CLAUDE_ENABLED:-false}
+      CLAUDE_API_KEY: ${CLAUDE_API_KEY:-}
+      CLAUDE_MODEL: ${CLAUDE_MODEL:-claude-3-sonnet-20240229}
+      PERPLEXITY_ENABLED: ${PERPLEXITY_ENABLED:-false}
+      PERPLEXITY_API_KEY: ${PERPLEXITY_API_KEY:-}
+      # Supplier APIs (Tier 1)
+      MOUSER_ENABLED: ${MOUSER_ENABLED:-true}
+      MOUSER_API_KEY: ${MOUSER_API_KEY:-}
+      MOUSER_BASE_URL: ${MOUSER_BASE_URL:-https://api.mouser.com/api/v1}
+      DIGIKEY_ENABLED: ${DIGIKEY_ENABLED:-true}
+      DIGIKEY_CLIENT_ID: ${DIGIKEY_CLIENT_ID:-}
+      DIGIKEY_CLIENT_SECRET: ${DIGIKEY_CLIENT_SECRET:-}
+      DIGIKEY_BASE_URL: ${DIGIKEY_BASE_URL:-https://api.digikey.com}
+      ELEMENT14_ENABLED: ${ELEMENT14_ENABLED:-true}
+      ELEMENT14_API_KEY: ${ELEMENT14_API_KEY:-}
+      ELEMENT14_STORE: ${ELEMENT14_STORE:-uk}
+      # Quality Thresholds
+      QUALITY_REJECT_THRESHOLD: ${QUALITY_REJECT_THRESHOLD:-70}
+      QUALITY_STAGING_THRESHOLD: ${QUALITY_STAGING_THRESHOLD:-94}
+      QUALITY_AUTO_APPROVE_THRESHOLD: ${QUALITY_AUTO_APPROVE_THRESHOLD:-95}
+      # MinIO/S3 Storage Configuration
+      MINIO_ENABLED: "true"
+      MINIO_ENDPOINT: ${MINIO_INTERNAL_ENDPOINT:-minio:9000}
+      MINIO_PUBLIC_ENDPOINT: ${MINIO_PUBLIC_ENDPOINT:-localhost:27040}
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      MINIO_SECURE: "false"
+      MINIO_BUCKET_UPLOADS: ${S3_BUCKET_NAME:-bom-uploads}
+      MINIO_BUCKET_RESULTS: enriched-results
+      S3_BUCKET_NAME: ${S3_BUCKET_NAME:-bom-uploads}
+      S3_BUCKET_AUDIT: ${S3_BUCKET_AUDIT:-enrichment-audit}
+      # Feature Flags
+      ENABLE_AI_SUGGESTIONS: ${ENABLE_AI_SUGGESTIONS:-true}
+      ENABLE_WEB_SCRAPING: ${ENABLE_WEB_SCRAPING:-false}
+      ENABLE_TIER2_SUPPLIERS: ${ENABLE_TIER2_SUPPLIERS:-false}
+      ENABLE_TIER3_OEM: ${ENABLE_TIER3_OEM:-false}
+      ENABLE_MULTI_AI_FALLBACK: ${ENABLE_MULTI_AI_FALLBACK:-true}
+      ENABLE_COST_TRACKING: ${ENABLE_COST_TRACKING:-true}
+      # Development
+      DEBUG: ${DEBUG:-true}
+      TEST_MODE: ${TEST_MODE:-false}
+      MOCK_SUPPLIER_APIS: ${MOCK_SUPPLIER_APIS:-false}
+    volumes:
+      - ./services/cns-service/app:/app/app
+      - ./services/cns-service/tests:/app/tests
+      - ./shared:/app/shared
+    networks:
+      - app-plane-network
+      - arc-saas-network
+      - shared-temporal-network
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+      components-v2-postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Django Backend API
+  # ---------------------------------------------------------------------------
+  django-backend:
+    build:
+      context: ./services/backend
+      dockerfile: Dockerfile
+    container_name: app-plane-django-backend
+    command: python manage.py runserver 0.0.0.0:8000
+    ports:
+      - "${DJANGO_BACKEND_PORT:-27000}:8000"
+    environment:
+      DEBUG: ${DEBUG:-True}
+      SECRET_KEY: ${DJANGO_SECRET_KEY:-django-insecure-key-change-in-production}
+      DATABASE_URL: postgres://postgres:${SUPABASE_DB_PASSWORD:-postgres}@supabase-db:5432/postgres
+      DB_HOST: supabase-db
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-postgres}
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${SUPABASE_DB_PASSWORD:-postgres}
+      REDIS_URL: redis://redis:6379/1
+      SUPABASE_URL: http://supabase-api:3000
+      SUPABASE_SERVICE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      CONTROL_PLANE_URL: ${CONTROL_PLANE_URL:-http://tenant-management-service:14000}
+      CONTROL_PLANE_API_KEY: ${CONTROL_PLANE_API_KEY}
+      AUTH0_DOMAIN: ${AUTH0_DOMAIN}
+      AUTH0_API_AUDIENCE: ${AUTH0_API_AUDIENCE}
+      # MinIO/S3 Storage Configuration
+      MINIO_ENDPOINT: ${MINIO_INTERNAL_ENDPOINT:-http://minio:9000}
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      S3_BUCKET_UPLOADS: ${S3_BUCKET_NAME:-bom-uploads}
+      S3_BUCKET_DOCUMENTS: ${S3_BUCKET_DOCUMENTS:-documents}
+      S3_BUCKET_EXPORTS: ${S3_BUCKET_EXPORTS:-exports}
+    volumes:
+      - ./services/backend:/app
+      - django-static:/app/staticfiles
+    networks:
+      - app-plane-network
+      - arc-saas-network
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.django-backend.rule=PathPrefix(`/backend`) || PathPrefix(`/api/v1`)"
+      - "traefik.http.routers.django-backend.entrypoints=web"
+      - "traefik.http.routers.django-backend.middlewares=cors-headers@file"
+      - "traefik.http.services.django-backend.loadbalancer.server.port=8000"
+
+  # ---------------------------------------------------------------------------
+  # Middleware API (Flask - Service Orchestration)
+  # ---------------------------------------------------------------------------
+  middleware-api:
+    build:
+      context: ./services/middleware-api
+      dockerfile: Dockerfile
+    container_name: app-plane-middleware-api
+    command: flask run --host=0.0.0.0 --port=5000 --reload
+    ports:
+      - "${MIDDLEWARE_API_PORT:-27300}:5000"
+    environment:
+      FLASK_ENV: ${FLASK_ENV:-development}
+      FLASK_DEBUG: "1"
+      DATABASE_URL: postgres://postgres:${SUPABASE_DB_PASSWORD:-postgres}@supabase-db:5432/postgres
+      DB_HOST: supabase-db
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-postgres}
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${SUPABASE_DB_PASSWORD:-postgres}
+      REDIS_URL: redis://redis:6379/3
+      DJANGO_API_URL: http://django-backend:8000
+      CNS_API_URL: http://cns-service:8000
+      CONTROL_PLANE_URL: ${CONTROL_PLANE_URL:-http://tenant-management-service:14000}
+    volumes:
+      - ./services/middleware-api:/app
+    networks:
+      - app-plane-network
+      - arc-saas-network
+    depends_on:
+      - django-backend
+      - cns-service
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.middleware-api.rule=PathPrefix(`/middleware`)"
+      - "traefik.http.routers.middleware-api.entrypoints=web"
+      - "traefik.http.routers.middleware-api.middlewares=cors-headers@file"
+      - "traefik.http.services.middleware-api.loadbalancer.server.port=5000"
+
+  # ---------------------------------------------------------------------------
+  # Webhook Bridge - Control Plane Integration
+  # ---------------------------------------------------------------------------
+  webhook-bridge:
+    build:
+      context: ./webhook-bridge
+      dockerfile: Dockerfile
+    container_name: app-plane-webhook-bridge
+    ports:
+      - "${WEBHOOK_BRIDGE_PORT:-27600}:27600"
+    environment:
+      WEBHOOK_SECRET: ${APP_PLANE_WEBHOOK_SECRET:-your-webhook-secret}
+      SUPABASE_URL: http://supabase-api:3000
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      FLASK_ENV: ${FLASK_ENV:-development}
+    volumes:
+      - ./webhook-bridge:/app
+    networks:
+      - app-plane-network
+      - arc-saas-network
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.webhook-bridge.rule=PathPrefix(`/webhook`)"
+      - "traefik.http.routers.webhook-bridge.entrypoints=web"
+      - "traefik.http.services.webhook-bridge.loadbalancer.server.port=27600"
+
+  # ===========================================================================
+  # BACKGROUND WORKERS
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # Audit Logger (RabbitMQ Consumer)
+  # ---------------------------------------------------------------------------
+  audit-logger:
+    build:
+      context: .
+      dockerfile: services/audit-logger/Dockerfile
+    container_name: app-plane-audit-logger
+    environment:
+      DATABASE_URL: postgres://postgres:${SUPABASE_DB_PASSWORD:-postgres}@supabase-db:5432/postgres
+      SUPABASE_DB_HOST: supabase-db
+      SUPABASE_DB_PORT: 5432
+      SUPABASE_DB_NAME: ${POSTGRES_DB:-postgres}
+      SUPABASE_DB_USER: ${POSTGRES_USER:-postgres}
+      SUPABASE_DB_PASSWORD: ${SUPABASE_DB_PASSWORD:-postgres}
+      DB_HOST: supabase-db
+      DB_PORT: 5432
+      DB_NAME: ${POSTGRES_DB:-postgres}
+      DB_USER: ${POSTGRES_USER:-postgres}
+      DB_PASSWORD: ${SUPABASE_DB_PASSWORD:-postgres}
+      RABBITMQ_HOST: ${RABBITMQ_HOST:-rabbitmq}
+      RABBITMQ_PORT: ${RABBITMQ_PORT:-5672}
+      RABBITMQ_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_PASS: ${RABBITMQ_PASSWORD:-admin123}
+      LOG_LEVEL: ${LOG_LEVEL:-DEBUG}
+      # Temporal Workflow Configuration
+      TEMPORAL_ENABLED: "true"
+      TEMPORAL_HOST: shared-temporal:7233
+      TEMPORAL_URL: shared-temporal:7233
+      TEMPORAL_NAMESPACE: enrichment
+      TEMPORAL_TASK_QUEUE: cns-enrichment
+    volumes:
+      - ./services/audit-logger/app:/app
+      - ./shared:/app/shared
+    networks:
+      - app-plane-network
+      - arc-saas-network
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Novu Consumer (Notification Consumer)
+  # ---------------------------------------------------------------------------
+  novu-consumer:
+    build:
+      context: ./services/novu-consumer
+      dockerfile: Dockerfile
+    container_name: app-plane-novu-consumer
+    environment:
+      NOVU_API_KEY: ${NOVU_API_KEY}
+      NOVU_URL: ${NOVU_URL:-http://novu-api:3000}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_STREAM_PORT: 5552  # Stream protocol port (for rstream)
+      RABBITMQ_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:-admin123}
+    volumes:
+      - ./services/novu-consumer:/app
+    networks:
+      - app-plane-network
+      - arc-saas-network
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ===========================================================================
+  # FRONTEND APPLICATIONS
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # Customer Portal (React + Vite) - Bun with Hot Reload
+  # ---------------------------------------------------------------------------
+  customer-portal:
+    image: oven/bun:1-alpine
+    container_name: app-plane-customer-portal
+    working_dir: /app
+    command: sh -c "bun install && bun run dev -- --host 0.0.0.0 --port ${CUSTOMER_PORTAL_PORT:-27100}"
+    ports:
+      - "${CUSTOMER_PORTAL_PORT:-27100}:${CUSTOMER_PORTAL_PORT:-27100}"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      # App Name (shown in sidebar)
+      VITE_APP_NAME: ${VITE_APP_NAME:-Component Platform}
+      # Control Plane API (tenant-management-service)
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:14000}
+      # App Plane APIs
+      VITE_CNS_API_URL: ${VITE_CNS_API_URL:-http://localhost:27200/api}
+      VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-http://localhost:27810}
+      # Keycloak Auth
+      VITE_KEYCLOAK_URL: ${VITE_KEYCLOAK_URL:-http://localhost:8180}
+      VITE_KEYCLOAK_REALM: ${VITE_KEYCLOAK_REALM:-ananta-saas}
+      VITE_KEYCLOAK_CLIENT_ID: ${VITE_KEYCLOAK_CLIENT_ID:-cbp-frontend}
+    volumes:
+      - ../arc-saas/apps/customer-portal:/app
+      - customer-portal-node-modules:/app/node_modules
+    networks:
+      - app-plane-network
+      - arc-saas-network
+    depends_on:
+      - django-backend
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.customer-portal.rule=PathPrefix(`/portal`)"
+      - "traefik.http.routers.customer-portal.entrypoints=web"
+      - "traefik.http.routers.customer-portal.middlewares=cors-headers@file"
+      - "traefik.http.services.customer-portal.loadbalancer.server.port=${CUSTOMER_PORTAL_PORT:-27100}"
+
+  # ---------------------------------------------------------------------------
+  # Dashboard (Next.js) - Bun with Hot Reload
+  # ---------------------------------------------------------------------------
+  dashboard:
+    image: oven/bun:1-alpine
+    container_name: app-plane-dashboard
+    working_dir: /app
+    command: sh -c "bun install && bun run dev -- --port ${DASHBOARD_PORT:-27400}"
+    ports:
+      - "${DASHBOARD_PORT:-27400}:${DASHBOARD_PORT:-27400}"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      NEXT_PUBLIC_API_URL: ${VITE_API_URL:-http://localhost:27000}
+      NEXT_PUBLIC_SUPABASE_URL: ${VITE_SUPABASE_URL:-http://localhost:27810}
+      NEXT_PUBLIC_KEYCLOAK_URL: ${VITE_KEYCLOAK_URL:-http://localhost:8180}
+      NEXT_PUBLIC_KEYCLOAK_REALM: ${VITE_KEYCLOAK_REALM:-components-platform}
+      NEXT_PUBLIC_KEYCLOAK_CLIENT_ID: dashboard
+      NEXT_PUBLIC_AUTH_PROVIDER: ${NEXT_PUBLIC_AUTH_PROVIDER:-keycloak}
+    volumes:
+      - ./services/dashboard:/app
+      - dashboard-node-modules:/app/node_modules
+    networks:
+      - app-plane-network
+      - arc-saas-network
+    depends_on:
+      - django-backend
+    restart: unless-stopped
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.dashboard.rule=PathPrefix(`/dashboard`)"
+      - "traefik.http.routers.dashboard.entrypoints=web"
+      - "traefik.http.routers.dashboard.middlewares=cors-headers@file"
+      - "traefik.http.services.dashboard.loadbalancer.server.port=${DASHBOARD_PORT:-27400}"
+
+  # ---------------------------------------------------------------------------
+  # Backstage Portal (React) - Bun with Hot Reload
+  # ---------------------------------------------------------------------------
+  backstage-portal:
+    image: oven/bun:1-alpine
+    container_name: app-plane-backstage-portal
+    working_dir: /app
+    command: sh -c "bun install && bun run dev -- --host 0.0.0.0 --port ${BACKSTAGE_PORTAL_PORT:-27150}"
+    ports:
+      - "${BACKSTAGE_PORTAL_PORT:-27150}:${BACKSTAGE_PORTAL_PORT:-27150}"
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      VITE_API_URL: ${VITE_API_URL:-http://localhost:27000}
+      VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-http://localhost:27810}
+      VITE_KEYCLOAK_URL: ${VITE_KEYCLOAK_URL:-http://localhost:8180}
+      VITE_KEYCLOAK_REALM: ${VITE_KEYCLOAK_REALM:-components-platform}
+      VITE_KEYCLOAK_CLIENT_ID: backstage-portal
+      VITE_AUTH_PROVIDER: ${VITE_AUTH_PROVIDER:-keycloak}
+    volumes:
+      - ./services/backstage-portal:/app
+      - backstage-portal-node-modules:/app/node_modules
+    networks:
+      - app-plane-network
+      - arc-saas-network
+    depends_on:
+      - django-backend
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # CNS Dashboard Portal (React Admin) - PRODUCTION MODE with nginx
+  # ---------------------------------------------------------------------------
+  cns-dashboard:
+    build:
+      context: .
+      dockerfile: services/cns-service/dashboard/Dockerfile
+      args:
+        VITE_CNS_API_URL: ${VITE_CNS_API_URL:-http://localhost:27200}
+        VITE_SUPABASE_URL: ${VITE_SUPABASE_URL:-http://localhost:27810}
+        VITE_SUPABASE_ANON_KEY: ${VITE_SUPABASE_ANON_KEY}
+        VITE_BACKEND_URL: ${VITE_BACKEND_URL:-http://localhost:27000}
+        VITE_KEYCLOAK_URL: ${VITE_KEYCLOAK_URL:-http://localhost:8180}
+        VITE_KEYCLOAK_REALM: ${VITE_KEYCLOAK_REALM:-components-platform}
+        VITE_KEYCLOAK_CLIENT_ID: cns-dashboard
+        VITE_AUTH_PROVIDER: ${VITE_AUTH_PROVIDER:-keycloak}
+        # REMOVED: Admin token should NEVER be in frontend bundle (security vulnerability)
+        # Dashboard should use user's JWT token + backend proxy pattern instead
+    container_name: app-plane-cns-dashboard
+    ports:
+      - "${CNS_DASHBOARD_PORT:-27250}:27810"
+    networks:
+      - app-plane-network
+      - arc-saas-network
+    depends_on:
+      - cns-service
+    restart: unless-stopped
+
+  # ===========================================================================
+  # OPTIONAL: TRAEFIK REVERSE PROXY
+  # ===========================================================================
+
+  # ---------------------------------------------------------------------------
+  # Traefik Reverse Proxy (uncomment if needed)
+  # ---------------------------------------------------------------------------
+  # traefik:
+  #   image: traefik:v2.10
+  #   container_name: app-plane-traefik
+  #   ports:
+  #     - "${TRAEFIK_HTTP_PORT:-27500}:27500"
+  #     - "${TRAEFIK_HTTPS_PORT:-27443}:27443"
+  #     - "${TRAEFIK_DASHBOARD_PORT:-27501}:27501"
+  #   volumes:
+  #     - /var/run/docker.sock:/var/run/docker.sock:ro
+  #     - ./traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+  #     - ./traefik/dynamic.yml:/etc/traefik/dynamic.yml:ro
+  #   networks:
+  #     - app-plane-network
+  #     - arc-saas-network
+  #   healthcheck:
+  #     test: ["CMD", "traefik", "healthcheck", "--ping"]
+  #     interval: 10s
+  #     timeout: 5s
+  #     retries: 3
+  #   restart: unless-stopped
+
+# =============================================================================
+# VOLUMES - Persistent Data Storage
+# =============================================================================
+# IMPORTANT: These volume names are final. Do NOT change them or data will be lost.
+volumes:
+  # Database volumes
+  supabase-db-data:           # Tenant business data (BOMs, line items, etc.)
+  components-v2-postgres-data: # Component catalog SSOT (1200+ categories, manufacturers, suppliers)
+
+  # Infrastructure volumes
+  redis-data:
+  rabbitmq-data:
+  minio-data:
+
+  # Application volumes
+  directus-uploads:
+  django-static:
+
+  # Frontend node_modules (for faster rebuilds)
+  customer-portal-node-modules:
+  dashboard-node-modules:
+  backstage-portal-node-modules:
+  cns-dashboard-node-modules:
+
+# =============================================================================
+# NETWORKS
+# =============================================================================
+networks:
+  # App Plane internal network
+  app-plane-network:
+    driver: bridge
+    name: app-plane
+  # Connect to Control Plane's network for shared services (Temporal, Keycloak, etc.)
+  arc-saas-network:
+    external: true
+    name: arc-saas
+  # Connect to shared Temporal network
+  shared-temporal-network:
+    external: true
+    name: shared-temporal-network

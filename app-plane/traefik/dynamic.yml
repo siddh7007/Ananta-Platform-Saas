@@ -1,0 +1,287 @@
+# Traefik Dynamic Configuration
+# App Plane - Static routing rules and middleware
+
+http:
+  # Middleware Definitions
+  middlewares:
+    # CORS headers - Specific origins for security
+    cors-headers:
+      headers:
+        accessControlAllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - PATCH
+          - OPTIONS
+        accessControlAllowOriginList:
+          - "http://localhost:27500"  # Traefik entry
+          - "http://localhost:27100"  # Customer Portal (direct)
+          - "http://localhost:27400"  # Dashboard (direct)
+          - "http://localhost:27555"  # Control Plane Admin App
+          - "http://localhost:14000"  # Control Plane API
+        accessControlAllowHeaders:
+          - "Content-Type"
+          - "Authorization"
+          - "X-Requested-With"
+          - "Accept"
+          - "Origin"
+          - "apikey"
+          - "x-client-info"
+          - "x-supabase-api-version"
+          - "Prefer"
+          - "accept-profile"
+          - "content-profile"
+          - "X-Lead-Token"
+          - "X-Tenant-Id"
+        accessControlExposeHeaders:
+          - "Content-Length"
+          - "Content-Type"
+          - "X-Request-Id"
+        accessControlAllowCredentials: true
+        accessControlMaxAge: 3600
+        addVaryHeader: true
+
+    # Security headers - Applied to all routes
+    security-headers:
+      headers:
+        frameDeny: false
+        customFrameOptionsValue: SAMEORIGIN
+        browserXssFilter: true
+        contentTypeNosniff: true
+        stsSeconds: 31536000
+        forceSTSHeader: false  # Dev mode - set true in production
+        stsIncludeSubdomains: true
+        stsPreload: true
+
+    # Compression - Applied to all routes
+    compress:
+      compress: true
+
+    # Rate Limiting - Protect APIs from abuse
+    rate-limit:
+      rateLimit:
+        average: 100
+        burst: 50
+        period: 1s
+
+    # Request Buffering - Handle large uploads
+    buffering:
+      buffering:
+        maxRequestBodyBytes: 10485760  # 10MB
+        memRequestBodyBytes: 2097152   # 2MB
+        maxResponseBodyBytes: 10485760
+
+    # Retry - Auto-retry failed requests
+    retry:
+      retry:
+        attempts: 3
+        initialInterval: 100ms
+
+    # Circuit Breaker - Prevent cascading failures
+    circuit-breaker:
+      circuitBreaker:
+        expression: "NetworkErrorRatio() > 0.30"
+
+    # WebSocket Support - Enable for Supabase Realtime
+    websocket-headers:
+      headers:
+        customRequestHeaders:
+          X-Forwarded-Proto: "http"
+        customResponseHeaders:
+          X-Custom-Response-Header: ""
+
+    # Strip prefix for path-based routing
+    strip-backend:
+      stripPrefix:
+        prefixes:
+          - "/backend"
+
+    strip-api:
+      stripPrefix:
+        prefixes:
+          - "/api"
+
+    strip-supabase:
+      stripPrefix:
+        prefixes:
+          - "/supabase"
+
+    strip-customer-portal:
+      stripPrefix:
+        prefixes:
+          - "/portal"
+
+    strip-dashboard:
+      stripPrefix:
+        prefixes:
+          - "/dashboard"
+
+    strip-cns:
+      stripPrefix:
+        prefixes:
+          - "/cns"
+
+    strip-cns-health:
+      stripPrefix:
+        prefixes:
+          - "/cns-health"
+      # Maps /cns-health/config -> /health/config on the CNS service
+
+    strip-middleware:
+      stripPrefix:
+        prefixes:
+          - "/middleware"
+
+    strip-minio:
+      stripPrefix:
+        prefixes:
+          - "/storage"
+
+    strip-webhook:
+      stripPrefix:
+        prefixes:
+          - "/webhook"
+
+  # Router Definitions (for services that need static routes)
+  routers:
+    # Django Backend API
+    django-backend:
+      rule: "PathPrefix(`/backend`) || PathPrefix(`/api/v1`)"
+      service: django-backend
+      entryPoints:
+        - web
+      middlewares:
+        - cors-headers
+        - security-headers
+        - strip-backend
+
+    # Supabase PostgREST API
+    supabase-api:
+      rule: "PathPrefix(`/supabase`) || PathPrefix(`/rest`)"
+      service: supabase-api
+      entryPoints:
+        - web
+      middlewares:
+        - cors-headers
+        - security-headers
+        - strip-supabase
+
+    # Customer Portal (React)
+    customer-portal:
+      rule: "PathPrefix(`/portal`)"
+      service: customer-portal
+      entryPoints:
+        - web
+      middlewares:
+        - cors-headers
+        - security-headers
+        - strip-customer-portal
+
+    # Dashboard (Next.js)
+    dashboard:
+      rule: "PathPrefix(`/dashboard`)"
+      service: dashboard
+      entryPoints:
+        - web
+      middlewares:
+        - cors-headers
+        - security-headers
+        - strip-dashboard
+
+    # CNS Service (FastAPI)
+    cns-service:
+      rule: "PathPrefix(`/cns`)"
+      service: cns-service
+      entryPoints:
+        - web
+      middlewares:
+        - cors-headers
+        - security-headers
+        - strip-cns
+
+    # CNS Health Endpoints (Monitoring - No rate limiting, minimal middleware)
+    # Access via: http://localhost:27500/cns-health/config or /cns-health/config/dual-db
+    # These routes bypass rate-limiting for ops monitoring
+    cns-health:
+      rule: "PathPrefix(`/cns-health`)"
+      service: cns-service
+      entryPoints:
+        - web
+      middlewares:
+        - strip-cns-health
+        - cors-headers
+
+    # Middleware API (Flask)
+    middleware-api:
+      rule: "PathPrefix(`/middleware`)"
+      service: middleware-api
+      entryPoints:
+        - web
+      middlewares:
+        - cors-headers
+        - security-headers
+        - strip-middleware
+
+    # MinIO Storage
+    minio:
+      rule: "PathPrefix(`/storage`)"
+      service: minio
+      entryPoints:
+        - web
+      middlewares:
+        - cors-headers
+        - strip-minio
+
+    # Webhook Bridge
+    webhook-bridge:
+      rule: "PathPrefix(`/webhook`)"
+      service: webhook-bridge
+      entryPoints:
+        - web
+      middlewares:
+        - cors-headers
+        - security-headers
+        - strip-webhook
+
+  # Service Definitions (backend targets)
+  services:
+    django-backend:
+      loadBalancer:
+        servers:
+          - url: "http://django-backend:8000"
+
+    supabase-api:
+      loadBalancer:
+        servers:
+          - url: "http://supabase-api:3000"
+
+    customer-portal:
+      loadBalancer:
+        servers:
+          - url: "http://customer-portal:80"
+
+    dashboard:
+      loadBalancer:
+        servers:
+          - url: "http://dashboard:3000"
+
+    cns-service:
+      loadBalancer:
+        servers:
+          - url: "http://cns-service:8000"
+
+    middleware-api:
+      loadBalancer:
+        servers:
+          - url: "http://middleware-api:8000"
+
+    minio:
+      loadBalancer:
+        servers:
+          - url: "http://minio:9000"
+
+    webhook-bridge:
+      loadBalancer:
+        servers:
+          - url: "http://webhook-bridge:27600"

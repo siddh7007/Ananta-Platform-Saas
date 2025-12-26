@@ -1,0 +1,354 @@
+[
+  {
+    "name": "executiondetails",
+    "type": "collection",
+    "options": {},
+    "info": {
+      "readOnly": false,
+      "uuid": "0cd0ef8d-6521-4c72-96ee-39cdb01c85ca"
+    },
+    "idIndex": {
+      "v": 2,
+      "key": {
+        "_id": 1
+      },
+      "name": "_id_"
+    }
+  },
+  {
+    "name": "controls",
+    "type": "collection",
+    "options": {},
+    "info": {
+      "readOnly": false,
+      "uuid": "0f4762fd-94f8-4112-ac4f-dfd1368cfbe8"
+    },
+    "idIndex": {
+      "v": 2,
+      "key": {
+        "_id": 1
+      },
+      "name": "_id_"
+    }
+  },
+  {
+    "name": "feeds",
+    "type": "collection",
+    "options": {},
+    "info": {
+      "readOnly": false,
+      "uuid": "1144045a-5d33-43b7-9b21-fd945af33de7"
+    },
+    "idIndex": {
+      "v": 2,
+      "key": {
+        "_id": 1
+      },
+      "name": "_id_"
+    }
+  },
+  {
+    "name": "organizations",
+    "type": "collection",
+    "options": {},
+    "info": {
+      "readOnly": false,
+      "uuid": "19f8cb68-fcdf-448b-a54a-5203adb863c1"
+    },
+    "idIndex": {
+      "v": 2,
+      "key": {
+        "_id": 1
+      },
+      "name": "_id_"
+    }
+  },
+  {
+    "name": "environments",
+    "type": "collection",
+    "options": {},
+    "info": {
+      "readOnly": false,
+      "uuid": "248c6f40-0913-481a-bb84-72ead07adb55"
+    },
+    "idIndex": {
+      "v": 2,
+      "key": {
+        "_id": 1
+      },
+      "name": "_id_"
+    }
+  },
+  {
+    "name": "workflowoverrides",
+    "type": "collection",
+    "options": {},
+    "info": {
+      "readOnly": false,
+      "uuid": "293fb631-85aa-4aa3-8445-f5a58afc3881"
+    },
+    "idIndex": {
+      "v": 2,
+      "key": {
+        "_id": 1
+      },
+      "name": "_id_"
+    }
+  },
+  {
+    "name": "topics",
+    "type": "collection",
+    "options": {},
+    "info": {
+      "readOnly": false,
+      "uuid": "409bd65d-9098-446c-9a1e-052ce6618a7f"
+    },
+    "idIndex": {
+      "v": 2,
+      "key": {
+        "_id": 1
+      },
+      "name": "_id_"
+    }
+  },
+  {
+    "name": "members",
+    "type": "collection",
+    "options": {},
+    "info": {
+      "readOnly": false,
+      "uuid": "576834e7-e9ad-4b48-bcc2-b85422e586d2"
+    },
+    "idIndex": {
+      "v": 2,
+      "key": {
+        "_id": 1
+      },
+      "name": "_id_"
+    }
+  },
+  {
+    "name": "preferences",
+    "type": "collection",
+    "options": {},
+    "info": {
+      "readOnly": false,
+      "uuid": "652eb6c7-7060-4087-bd54-a5d486d170ba"
+    },
+    "idIndex": {
+      "v": 2,
+      "key": {
+        "_id": 1
+      },
+      "name": "_id_"
+    }
+  },
+  {
+    "name": "topicsubscribers",
+    "type": "collection",
+    "options": {},
+    "info": {
+      "readOnly": false,
+      "uuid": "66cd9ebd-6dd0-40c3-988a-9fb04a713ddc"
+    },
+    "idIndex": {
+      "v": 2,
+      "key": {
+        "_id": 1
+      },
+      "name": "_id_"
+    }
+  },
+  {
+    "name": "subscribers",
+    "type": "collection",
+    "options": {},
+    "info": {
+      "readOnly": false,
+      "uuid": "6eed183d-7d5c-4144-9628-3bcbb1ca5fa3"
+    },
+    "idIndex": {
+      "v": 2,
+      "key": {
+        "_id": 1
+      },
+      "name": "_id_"
+    }
+  },
+  {
+    "name": "notifications",
+    "type": "collection",
+    "options": {},
+    "info": {
+      "readOnly": false,
+      "uuid": "929cea66-4f06-46c9-b7b9-926ea1e3229c"
+    },
+    "idIndex": {
+      "v": 2,
+      "key": {
+        "_id": 1
+      },
+      "name": "_id_"
+    }
+  },
+  {
+    "name": "tenants",
+    "type": "collection",
+    "options": {},
+    "info": {
+      "readOnly": false,
+      "uuid": "9af40bdb-b67a-44d7-afa2-67b4d4c95ebc"
+    },
+    "idIndex": {
+      "v": 2,
+      "key": {
+        "_id": 1
+      },
+      "name": "_id_"
+    }
+  },
+  {
+    "name": "notificationtemplates",
+    "type": "collection",
+    "options": {},
+    "info": {
+      "readOnly": false,
+      "uuid": "ae34403c-6eaa-4bdb-929c-028f845c5118"
+    },
+    "idIndex": {
+      "v": 2,
+      "key": {
+        "_id": 1
+      },
+      "name": "_id_"
+    }
+  },
+  {
+    "name": "messagetemplates",
+    "type": "collection",
+    "options": {},
+    "info": {
+      "readOnly": false,
+      "uuid": "aeaabc5f-5dc3-400e-ab56-4cf363088cef"
+    },
+    "idIndex": {
+      "v": 2,
+      "key": {
+        "_id": 1
+      },
+      "name": "_id_"
+    }
+  },
+  {
+    "name": "jobs",
+    "type": "collection",
+    "options": {},
+    "info": {
+      "readOnly": false,
+      "uuid": "babab1b0-6e8d-4fa8-8f94-91c989aea1ee"
+    },
+    "idIndex": {
+      "v": 2,
+      "key": {
+        "_id": 1
+      },
+      "name": "_id_"
+    }
+  },
+  {
+    "name": "layouts",
+    "type": "collection",
+    "options": {},
+    "info": {
+      "readOnly": false,
+      "uuid": "ce5a1304-2966-4666-a80d-bc104e10616b"
+    },
+    "idIndex": {
+      "v": 2,
+      "key": {
+        "_id": 1
+      },
+      "name": "_id_"
+    }
+  },
+  {
+    "name": "notificationgroups",
+    "type": "collection",
+    "options": {},
+    "info": {
+      "readOnly": false,
+      "uuid": "d540d3d4-e51b-4df7-af96-2411c55f2b7e"
+    },
+    "idIndex": {
+      "v": 2,
+      "key": {
+        "_id": 1
+      },
+      "name": "_id_"
+    }
+  },
+  {
+    "name": "users",
+    "type": "collection",
+    "options": {},
+    "info": {
+      "readOnly": false,
+      "uuid": "e300da7b-98aa-4c01-a49b-e3e9888555f8"
+    },
+    "idIndex": {
+      "v": 2,
+      "key": {
+        "_id": 1
+      },
+      "name": "_id_"
+    }
+  },
+  {
+    "name": "integrations",
+    "type": "collection",
+    "options": {},
+    "info": {
+      "readOnly": false,
+      "uuid": "e588d5c9-4882-4457-9a18-861ede79c7d2"
+    },
+    "idIndex": {
+      "v": 2,
+      "key": {
+        "_id": 1
+      },
+      "name": "_id_"
+    }
+  },
+  {
+    "name": "changes",
+    "type": "collection",
+    "options": {},
+    "info": {
+      "readOnly": false,
+      "uuid": "eac2a50d-5bab-40a5-98f0-dd1efe502cce"
+    },
+    "idIndex": {
+      "v": 2,
+      "key": {
+        "_id": 1
+      },
+      "name": "_id_"
+    }
+  },
+  {
+    "name": "messages",
+    "type": "collection",
+    "options": {},
+    "info": {
+      "readOnly": false,
+      "uuid": "ef6efd4f-3bc5-4de8-bd53-8134cd9d351d"
+    },
+    "idIndex": {
+      "v": 2,
+      "key": {
+        "_id": 1
+      },
+      "name": "_id_"
+    }
+  }
+]

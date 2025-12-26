@@ -1,0 +1,265 @@
+/**
+ * useEnrichmentProgress Hook
+ *
+ * Poll enrichment progress events from database at regular intervals.
+ * Provides live updates without WebSocket/Realtime dependency.
+ *
+ * POLLING MODE: Checks for new events every 2 seconds
+ */
+
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { supabase } from '../providers/supabaseDataProvider';
+
+export interface EnrichmentState {
+  status: 'enriching' | 'completed' | 'failed' | 'paused' | 'stopped';
+  total_items: number;
+  enriched_items: number;
+  failed_items: number;
+  not_found_items?: number;
+  pending_items: number;
+  percent_complete: number;
+  current_batch?: number;
+  total_batches?: number;
+  started_at?: string;
+  completed_at?: string;
+  failed_at?: string;
+}
+
+export interface EnrichmentEvent {
+  event_id: string;
+  event_type: string;
+  routing_key: string;
+  bom_id: string;
+  tenant_id: string;
+  project_id?: string;
+  user_id?: string;
+  source: 'customer' | 'staff';
+  workflow_id?: string;
+  workflow_run_id?: string;
+  state: EnrichmentState;
+  payload: Record<string, any>;
+  created_at: string;
+}
+
+export interface ComponentEvent {
+  mpn: string;
+  manufacturer: string;
+  line_item_id: string;
+  success: boolean;
+  error?: string;
+  enrichment?: {
+    supplier?: string;
+    price?: number;
+    stock?: number;
+    datasheet_url?: string;
+  };
+}
+
+export interface UseEnrichmentProgressOptions {
+  bomId: string;
+  onStarted?: (event: EnrichmentEvent) => void;
+  onProgress?: (event: EnrichmentEvent) => void;
+  onComponentCompleted?: (component: ComponentEvent) => void;
+  onComponentFailed?: (component: ComponentEvent) => void;
+  onCompleted?: (event: EnrichmentEvent) => void;
+  onFailed?: (event: EnrichmentEvent) => void;
+  onError?: (error: Error) => void;
+}
+
+export interface UseEnrichmentProgressReturn {
+  state: EnrichmentState | null;
+  events: EnrichmentEvent[];
+  componentEvents: ComponentEvent[];
+  isConnected: boolean;
+  error: Error | null;
+  latestEvent: EnrichmentEvent | null;
+}
+
+/**
+ * Hook to subscribe to real-time enrichment progress for a specific BOM
+ */
+export function useEnrichmentProgress(
+  options: UseEnrichmentProgressOptions
+): UseEnrichmentProgressReturn {
+  const {
+    bomId,
+    onStarted,
+    onProgress,
+    onComponentCompleted,
+    onComponentFailed,
+    onCompleted,
+    onFailed,
+    onError,
+  } = options;
+
+  const [state, setState] = useState<EnrichmentState | null>(null);
+  const [events, setEvents] = useState<EnrichmentEvent[]>([]);
+  const [componentEvents, setComponentEvents] = useState<ComponentEvent[]>([]);
+  const [isConnected, setIsConnected] = useState(false);
+  const [error, setError] = useState<Error | null>(null);
+  const [latestEvent, setLatestEvent] = useState<EnrichmentEvent | null>(null);
+
+  const channelRef = useRef<RealtimeChannel | null>(null);
+
+  const handleEvent = useCallback(
+    (payload: any) => {
+      const event = payload.new as EnrichmentEvent;
+
+      console.log('[Enrichment] Event received:', event.event_type, event.state);
+
+      // Update state with latest enrichment state
+      setState(event.state);
+      setLatestEvent(event);
+
+      // Add to events history
+      setEvents(prev => [...prev, event].slice(-100)); // Keep last 100 events
+
+      // Handle specific event types
+      switch (event.event_type) {
+        case 'enrichment.started':
+          onStarted?.(event);
+          break;
+
+        case 'enrichment.progress':
+          onProgress?.(event);
+          break;
+
+        case 'enrichment.component.completed':
+          if (event.payload?.component) {
+            const componentEvent: ComponentEvent = {
+              ...event.payload.component,
+              success: true,
+              enrichment: event.payload.enrichment,
+            };
+            setComponentEvents(prev => [...prev, componentEvent].slice(-200));
+            onComponentCompleted?.(componentEvent);
+          }
+          break;
+
+        case 'enrichment.component.failed':
+          if (event.payload?.component) {
+            const componentEvent: ComponentEvent = {
+              ...event.payload.component,
+              success: false,
+              error: event.payload.error,
+            };
+            setComponentEvents(prev => [...prev, componentEvent].slice(-200));
+            onComponentFailed?.(componentEvent);
+          }
+          break;
+
+        case 'enrichment.completed':
+          onCompleted?.(event);
+          break;
+
+        case 'enrichment.failed':
+          onFailed?.(event);
+          break;
+      }
+    },
+    [onStarted, onProgress, onComponentCompleted, onComponentFailed, onCompleted, onFailed]
+  );
+
+  useEffect(() => {
+    if (!bomId) {
+      return;
+    }
+
+    console.log('[Enrichment] Subscribing to enrichment events for BOM:', bomId);
+
+    // Create channel for this BOM's enrichment events
+    const channel = supabase
+      .channel(`enrichment-${bomId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'enrichment_events',
+          filter: `bom_id=eq.${bomId}`,
+        },
+        (payload) => {
+          console.log('[Enrichment] Realtime event:', payload);
+          handleEvent(payload);
+        }
+      )
+      .subscribe((status) => {
+        console.log('[Enrichment] Subscription status:', status);
+
+        if (status === 'SUBSCRIBED') {
+          setIsConnected(true);
+          setError(null);
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          setIsConnected(false);
+          const err = new Error(`Subscription ${status.toLowerCase()}`);
+          setError(err);
+          onError?.(err);
+        }
+      });
+
+    channelRef.current = channel;
+
+    // Cleanup on unmount or bomId change
+    return () => {
+      console.log('[Enrichment] Unsubscribing from enrichment events');
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+      setIsConnected(false);
+    };
+  }, [bomId, handleEvent, onError]);
+
+  // Fetch initial enrichment state from database
+  useEffect(() => {
+    if (!bomId) {
+      return;
+    }
+
+    const fetchInitialState = async () => {
+      try {
+        console.log('[Enrichment] Fetching initial state for BOM:', bomId);
+
+        // Get the latest enrichment event for this BOM
+        const { data, error: fetchError } = await supabase
+          .from('enrichment_events')
+          .select('*')
+          .eq('bom_id', bomId)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        if (fetchError) {
+          // No events yet - this is okay
+          if (fetchError.code === 'PGRST116') {
+            console.log('[Enrichment] No events found yet for BOM');
+            return;
+          }
+          throw fetchError;
+        }
+
+        if (data) {
+          console.log('[Enrichment] Initial state loaded:', data.state);
+          setState(data.state);
+          setLatestEvent(data as EnrichmentEvent);
+        }
+      } catch (err) {
+        console.error('[Enrichment] Error fetching initial state:', err);
+        const error = err instanceof Error ? err : new Error('Failed to fetch initial state');
+        setError(error);
+        onError?.(error);
+      }
+    };
+
+    fetchInitialState();
+  }, [bomId, onError]);
+
+  return {
+    state,
+    events,
+    componentEvents,
+    isConnected,
+    error,
+    latestEvent,
+  };
+}

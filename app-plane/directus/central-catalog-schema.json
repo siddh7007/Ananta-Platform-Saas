@@ -1,0 +1,776 @@
+{
+  "version": 1,
+  "directus": "10.8.0",
+  "vendor": "postgres",
+  "collections": [
+    {
+      "collection": "catalog_components",
+      "meta": {
+        "accountability": "all",
+        "archive_app_filter": true,
+        "archive_field": "status",
+        "archive_value": "archived",
+        "collapse": "open",
+        "collection": "catalog_components",
+        "display_template": "{{mpn}} - {{manufacturer}}",
+        "group": null,
+        "hidden": false,
+        "icon": "memory",
+        "item_duplication_fields": null,
+        "note": "Central component catalog - master data for all electronic components",
+        "singleton": false,
+        "sort": 1,
+        "sort_field": null,
+        "translations": null,
+        "unarchive_value": "active"
+      },
+      "schema": {
+        "name": "catalog_components"
+      },
+      "fields": [
+        {
+          "field": "id",
+          "type": "integer",
+          "schema": {
+            "is_primary_key": true,
+            "has_auto_increment": true
+          },
+          "meta": {
+            "hidden": true,
+            "interface": "input",
+            "readonly": true
+          }
+        },
+        {
+          "field": "mpn",
+          "type": "string",
+          "schema": {
+            "max_length": 255,
+            "is_nullable": false
+          },
+          "meta": {
+            "interface": "input",
+            "display": "formatted-value",
+            "required": true,
+            "note": "Manufacturer Part Number"
+          }
+        },
+        {
+          "field": "manufacturer",
+          "type": "string",
+          "schema": {
+            "max_length": 255
+          },
+          "meta": {
+            "interface": "input",
+            "display": "formatted-value",
+            "note": "Component manufacturer name"
+          }
+        },
+        {
+          "field": "category",
+          "type": "string",
+          "schema": {
+            "max_length": 255
+          },
+          "meta": {
+            "interface": "input",
+            "display": "formatted-value",
+            "note": "Component category (e.g., Resistors, Capacitors)"
+          }
+        },
+        {
+          "field": "description",
+          "type": "text",
+          "schema": {},
+          "meta": {
+            "interface": "input-multiline",
+            "display": "formatted-value"
+          }
+        },
+        {
+          "field": "datasheet_url",
+          "type": "string",
+          "schema": {
+            "max_length": 1024
+          },
+          "meta": {
+            "interface": "input",
+            "display": "formatted-value",
+            "display_options": {
+              "format": true
+            }
+          }
+        },
+        {
+          "field": "image_url",
+          "type": "string",
+          "schema": {
+            "max_length": 1024
+          },
+          "meta": {
+            "interface": "input",
+            "display": "image"
+          }
+        },
+        {
+          "field": "lifecycle_status",
+          "type": "string",
+          "schema": {
+            "max_length": 50,
+            "default_value": "Active"
+          },
+          "meta": {
+            "interface": "select-dropdown",
+            "display": "labels",
+            "display_options": {
+              "choices": [
+                { "text": "Active", "value": "Active" },
+                { "text": "NRND", "value": "NRND" },
+                { "text": "EOL", "value": "EOL" },
+                { "text": "Obsolete", "value": "Obsolete" }
+              ]
+            },
+            "options": {
+              "choices": [
+                { "text": "Active", "value": "Active" },
+                { "text": "NRND (Not Recommended for New Designs)", "value": "NRND" },
+                { "text": "EOL (End of Life)", "value": "EOL" },
+                { "text": "Obsolete", "value": "Obsolete" }
+              ]
+            }
+          }
+        },
+        {
+          "field": "specifications",
+          "type": "json",
+          "schema": {},
+          "meta": {
+            "interface": "input-code",
+            "display": "raw",
+            "options": {
+              "language": "json"
+            },
+            "note": "Component specifications as JSON"
+          }
+        },
+        {
+          "field": "created_at",
+          "type": "timestamp",
+          "schema": {
+            "default_value": "CURRENT_TIMESTAMP",
+            "is_nullable": false
+          },
+          "meta": {
+            "interface": "datetime",
+            "display": "datetime",
+            "readonly": true,
+            "hidden": false,
+            "special": ["date-created"]
+          }
+        },
+        {
+          "field": "updated_at",
+          "type": "timestamp",
+          "schema": {},
+          "meta": {
+            "interface": "datetime",
+            "display": "datetime",
+            "readonly": true,
+            "hidden": false,
+            "special": ["date-updated"]
+          }
+        }
+      ]
+    },
+    {
+      "collection": "catalog_manufacturers",
+      "meta": {
+        "collection": "catalog_manufacturers",
+        "icon": "business",
+        "note": "Component manufacturers",
+        "display_template": "{{name}}",
+        "hidden": false,
+        "singleton": false,
+        "sort": 2
+      },
+      "schema": {
+        "name": "catalog_manufacturers"
+      },
+      "fields": [
+        {
+          "field": "id",
+          "type": "integer",
+          "schema": {
+            "is_primary_key": true,
+            "has_auto_increment": true
+          }
+        },
+        {
+          "field": "name",
+          "type": "string",
+          "schema": {
+            "max_length": 255,
+            "is_nullable": false,
+            "is_unique": true
+          },
+          "meta": {
+            "interface": "input",
+            "required": true
+          }
+        },
+        {
+          "field": "website",
+          "type": "string",
+          "schema": {
+            "max_length": 512
+          },
+          "meta": {
+            "interface": "input",
+            "display": "formatted-value"
+          }
+        },
+        {
+          "field": "created_at",
+          "type": "timestamp",
+          "schema": {
+            "default_value": "CURRENT_TIMESTAMP"
+          },
+          "meta": {
+            "interface": "datetime",
+            "readonly": true,
+            "special": ["date-created"]
+          }
+        }
+      ]
+    },
+    {
+      "collection": "catalog_suppliers",
+      "meta": {
+        "collection": "catalog_suppliers",
+        "icon": "local_shipping",
+        "note": "Component suppliers (DigiKey, Mouser, etc.)",
+        "display_template": "{{name}}",
+        "hidden": false,
+        "singleton": false,
+        "sort": 3
+      },
+      "schema": {
+        "name": "catalog_suppliers"
+      },
+      "fields": [
+        {
+          "field": "id",
+          "type": "integer",
+          "schema": {
+            "is_primary_key": true,
+            "has_auto_increment": true
+          }
+        },
+        {
+          "field": "name",
+          "type": "string",
+          "schema": {
+            "max_length": 255,
+            "is_nullable": false,
+            "is_unique": true
+          },
+          "meta": {
+            "interface": "input",
+            "required": true
+          }
+        },
+        {
+          "field": "website",
+          "type": "string",
+          "schema": {
+            "max_length": 512
+          },
+          "meta": {
+            "interface": "input"
+          }
+        },
+        {
+          "field": "api_enabled",
+          "type": "boolean",
+          "schema": {
+            "default_value": false
+          },
+          "meta": {
+            "interface": "boolean",
+            "note": "Whether API integration is enabled for this supplier"
+          }
+        },
+        {
+          "field": "created_at",
+          "type": "timestamp",
+          "schema": {
+            "default_value": "CURRENT_TIMESTAMP"
+          },
+          "meta": {
+            "interface": "datetime",
+            "readonly": true,
+            "special": ["date-created"]
+          }
+        }
+      ]
+    },
+    {
+      "collection": "catalog_component_pricing",
+      "meta": {
+        "collection": "catalog_component_pricing",
+        "icon": "attach_money",
+        "note": "Component pricing from suppliers",
+        "display_template": "{{supplier}} - {{price}} {{currency}}",
+        "hidden": false,
+        "singleton": false,
+        "sort": 4
+      },
+      "schema": {
+        "name": "catalog_component_pricing"
+      },
+      "fields": [
+        {
+          "field": "id",
+          "type": "integer",
+          "schema": {
+            "is_primary_key": true,
+            "has_auto_increment": true
+          }
+        },
+        {
+          "field": "component_id",
+          "type": "integer",
+          "schema": {
+            "is_nullable": false,
+            "foreign_key_table": "catalog_components",
+            "foreign_key_column": "id"
+          },
+          "meta": {
+            "interface": "select-dropdown-m2o",
+            "display": "related-values",
+            "required": true
+          }
+        },
+        {
+          "field": "supplier",
+          "type": "string",
+          "schema": {
+            "max_length": 255
+          },
+          "meta": {
+            "interface": "input",
+            "required": true
+          }
+        },
+        {
+          "field": "price",
+          "type": "decimal",
+          "schema": {
+            "numeric_precision": 10,
+            "numeric_scale": 4
+          },
+          "meta": {
+            "interface": "input",
+            "display": "formatted-value"
+          }
+        },
+        {
+          "field": "quantity_break",
+          "type": "integer",
+          "schema": {},
+          "meta": {
+            "interface": "input",
+            "note": "Minimum quantity for this price"
+          }
+        },
+        {
+          "field": "currency",
+          "type": "string",
+          "schema": {
+            "max_length": 3,
+            "default_value": "USD"
+          },
+          "meta": {
+            "interface": "select-dropdown",
+            "options": {
+              "choices": [
+                { "text": "USD", "value": "USD" },
+                { "text": "EUR", "value": "EUR" },
+                { "text": "GBP", "value": "GBP" }
+              ]
+            }
+          }
+        },
+        {
+          "field": "updated_at",
+          "type": "timestamp",
+          "schema": {},
+          "meta": {
+            "interface": "datetime",
+            "readonly": true,
+            "special": ["date-updated"]
+          }
+        }
+      ]
+    },
+    {
+      "collection": "catalog_component_compliance",
+      "meta": {
+        "collection": "catalog_component_compliance",
+        "icon": "verified",
+        "note": "Component compliance information (RoHS, REACH, etc.)",
+        "display_template": "{{component_id}} - RoHS: {{rohs_compliant}}, REACH: {{reach_compliant}}",
+        "hidden": false,
+        "singleton": false,
+        "sort": 5
+      },
+      "schema": {
+        "name": "catalog_component_compliance"
+      },
+      "fields": [
+        {
+          "field": "id",
+          "type": "integer",
+          "schema": {
+            "is_primary_key": true,
+            "has_auto_increment": true
+          }
+        },
+        {
+          "field": "component_id",
+          "type": "integer",
+          "schema": {
+            "is_nullable": false,
+            "is_unique": true,
+            "foreign_key_table": "catalog_components",
+            "foreign_key_column": "id"
+          },
+          "meta": {
+            "interface": "select-dropdown-m2o",
+            "display": "related-values",
+            "required": true
+          }
+        },
+        {
+          "field": "rohs_compliant",
+          "type": "boolean",
+          "schema": {},
+          "meta": {
+            "interface": "boolean",
+            "note": "RoHS compliance status"
+          }
+        },
+        {
+          "field": "reach_compliant",
+          "type": "boolean",
+          "schema": {},
+          "meta": {
+            "interface": "boolean",
+            "note": "REACH compliance status"
+          }
+        },
+        {
+          "field": "reach_svhc_count",
+          "type": "integer",
+          "schema": {},
+          "meta": {
+            "interface": "input",
+            "note": "Number of REACH SVHC substances"
+          }
+        },
+        {
+          "field": "eccn_code",
+          "type": "string",
+          "schema": {
+            "max_length": 50
+          },
+          "meta": {
+            "interface": "input",
+            "note": "Export Control Classification Number"
+          }
+        },
+        {
+          "field": "hts_code",
+          "type": "string",
+          "schema": {
+            "max_length": 50
+          },
+          "meta": {
+            "interface": "input",
+            "note": "Harmonized Tariff Schedule code"
+          }
+        },
+        {
+          "field": "country_of_origin",
+          "type": "string",
+          "schema": {
+            "max_length": 2
+          },
+          "meta": {
+            "interface": "input",
+            "note": "ISO 3166-1 alpha-2 country code"
+          }
+        },
+        {
+          "field": "updated_at",
+          "type": "timestamp",
+          "schema": {},
+          "meta": {
+            "interface": "datetime",
+            "readonly": true,
+            "special": ["date-updated"]
+          }
+        }
+      ]
+    },
+    {
+      "collection": "catalog_categories",
+      "meta": {
+        "collection": "catalog_categories",
+        "icon": "category",
+        "note": "Component categories and taxonomy",
+        "display_template": "{{name}} ({{path}})",
+        "hidden": false,
+        "singleton": false,
+        "sort": 6
+      },
+      "schema": {
+        "name": "catalog_categories"
+      },
+      "fields": [
+        {
+          "field": "id",
+          "type": "integer",
+          "schema": {
+            "is_primary_key": true,
+            "has_auto_increment": true
+          }
+        },
+        {
+          "field": "name",
+          "type": "string",
+          "schema": {
+            "max_length": 255,
+            "is_nullable": false
+          },
+          "meta": {
+            "interface": "input",
+            "required": true
+          }
+        },
+        {
+          "field": "path",
+          "type": "string",
+          "schema": {
+            "max_length": 1024
+          },
+          "meta": {
+            "interface": "input",
+            "note": "Category path (e.g., Electronics > Passive Components > Resistors)"
+          }
+        },
+        {
+          "field": "parent_id",
+          "type": "integer",
+          "schema": {
+            "foreign_key_table": "catalog_categories",
+            "foreign_key_column": "id"
+          },
+          "meta": {
+            "interface": "select-dropdown-m2o",
+            "note": "Parent category for hierarchy"
+          }
+        },
+        {
+          "field": "created_at",
+          "type": "timestamp",
+          "schema": {
+            "default_value": "CURRENT_TIMESTAMP"
+          },
+          "meta": {
+            "interface": "datetime",
+            "readonly": true,
+            "special": ["date-created"]
+          }
+        }
+      ]
+    },
+    {
+      "collection": "supplier_enrichment_responses",
+      "meta": {
+        "accountability": "all",
+        "collection": "supplier_enrichment_responses",
+        "icon": "compare_arrows",
+        "display_template": "{{mpn}} • {{vendor}}",
+        "sort": 7
+      },
+      "schema": {
+        "name": "supplier_enrichment_responses"
+      },
+      "fields": [
+        {
+          "field": "id",
+          "type": "uuid",
+          "schema": {
+            "is_primary_key": true,
+            "has_auto_increment": false
+          },
+          "meta": {
+            "interface": "input",
+            "hidden": true,
+            "readonly": true
+          }
+        },
+        {
+          "field": "job_id",
+          "type": "uuid",
+          "meta": {
+            "interface": "input",
+            "note": "BOM job identifier"
+          }
+        },
+        {
+          "field": "line_id",
+          "type": "uuid",
+          "meta": {
+            "interface": "input",
+            "note": "BOM line identifier"
+          }
+        },
+        {
+          "field": "mpn",
+          "type": "string",
+          "schema": {
+            "max_length": 255
+          },
+          "meta": {
+            "interface": "input",
+            "required": true
+          }
+        },
+        {
+          "field": "manufacturer",
+          "type": "string",
+          "schema": {
+            "max_length": 255
+          },
+          "meta": {
+            "interface": "input"
+          }
+        },
+        {
+          "field": "vendor",
+          "type": "string",
+          "schema": {
+            "max_length": 255
+          },
+          "meta": {
+            "interface": "input"
+          }
+        },
+        {
+          "field": "payload",
+          "type": "json",
+          "meta": {
+            "interface": "input-code",
+            "options": {
+              "language": "json"
+            },
+            "note": "Raw supplier response"
+          }
+        },
+        {
+          "field": "normalized",
+          "type": "json",
+          "meta": {
+            "interface": "input-code",
+            "options": {
+              "language": "json"
+            },
+            "note": "Normalized enrichment snapshot"
+          }
+        },
+        {
+          "field": "created_at",
+          "type": "timestamp",
+          "schema": {
+            "default_value": "CURRENT_TIMESTAMP"
+          },
+          "meta": {
+            "interface": "datetime",
+            "readonly": true,
+            "special": ["date-created"],
+            "note": "When this supplier payload was captured"
+          }
+        }
+      ]
+    },
+    {
+      "collection": "directus_files",
+      "meta": {
+        "collection": "directus_files",
+        "icon": "folder_shared",
+        "display_template": "{{data.title}}",
+        "note": "File Library entry. CNS automatically registers raw uploads (metadata.artifact_kind = raw) and parsed snapshots (artifact_kind = parsed) so staff can download BOM artifacts directly from Directus.",
+        "sort": 8
+      },
+      "schema": {
+        "name": "directus_files"
+      },
+      "fields": [
+        {
+          "field": "metadata",
+          "type": "json",
+          "meta": {
+            "interface": "input-code",
+            "options": {
+              "language": "json"
+            },
+            "note": "Metadata now includes bom_id, organization_id, project_id, artifact_kind, and uploaded_by set by CNS uploads."
+          }
+        }
+      ]
+    }
+  ],
+  "relations": [
+    {
+      "collection": "catalog_component_pricing",
+      "field": "component_id",
+      "related_collection": "catalog_components",
+      "meta": {
+        "many_collection": "catalog_component_pricing",
+        "many_field": "component_id",
+        "one_collection": "catalog_components",
+        "one_field": null,
+        "one_collection_field": null,
+        "one_allowed_collections": null,
+        "junction_field": null,
+        "sort_field": null,
+        "one_deselect_action": "nullify"
+      },
+      "schema": {
+        "on_delete": "CASCADE"
+      }
+    },
+    {
+      "collection": "catalog_component_compliance",
+      "field": "component_id",
+      "related_collection": "catalog_components",
+      "meta": {
+        "many_collection": "catalog_component_compliance",
+        "many_field": "component_id",
+        "one_collection": "catalog_components",
+        "one_field": null,
+        "one_collection_field": null,
+        "one_allowed_collections": null,
+        "junction_field": null,
+        "sort_field": null,
+        "one_deselect_action": "nullify"
+      },
+      "schema": {
+        "on_delete": "CASCADE"
+      }
+    }
+  ]
+}

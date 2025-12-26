@@ -1,0 +1,513 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SSE Enrichment Stream Test</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            padding: 20px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 28px;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 14px;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: #333;
+        }
+
+        input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 6px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        button {
+            flex: 1;
+            padding: 12px 24px;
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: #5568d3;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-secondary {
+            background: #e0e0e0;
+            color: #333;
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            background: #d0d0d0;
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .status {
+            padding: 12px;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            font-weight: 500;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .status.disconnected {
+            background: #fee;
+            color: #c00;
+            border: 1px solid #fcc;
+        }
+
+        .status.connecting {
+            background: #fef3e0;
+            color: #c77700;
+            border: 1px solid #fde5b8;
+        }
+
+        .status.connected {
+            background: #e8f5e9;
+            color: #2e7d32;
+            border: 1px solid #c8e6c9;
+        }
+
+        .status.error {
+            background: #fee;
+            color: #c00;
+            border: 1px solid #fcc;
+        }
+
+        .progress-container {
+            margin-bottom: 20px;
+            padding: 20px;
+            background: #f5f5f5;
+            border-radius: 6px;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 30px;
+            background: #e0e0e0;
+            border-radius: 15px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            transition: width 0.5s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .progress-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+            font-size: 14px;
+        }
+
+        .stat {
+            background: white;
+            padding: 10px;
+            border-radius: 6px;
+            text-align: center;
+        }
+
+        .stat-label {
+            color: #666;
+            font-size: 12px;
+            margin-bottom: 4px;
+        }
+
+        .stat-value {
+            font-size: 20px;
+            font-weight: 700;
+            color: #667eea;
+        }
+
+        .events-log {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 20px;
+            border-radius: 6px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .event-entry {
+            margin-bottom: 10px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #333;
+        }
+
+        .event-entry:last-child {
+            border-bottom: none;
+        }
+
+        .event-time {
+            color: #888;
+            font-size: 11px;
+        }
+
+        .event-type {
+            color: #4fc3f7;
+            font-weight: 600;
+        }
+
+        .event-data {
+            margin-top: 4px;
+            color: #ce9178;
+        }
+
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #c77700;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>SSE Enrichment Stream Test</h1>
+            <p>Real-time BOM enrichment progress monitoring</p>
+        </div>
+
+        <div class="content">
+            <div class="form-group">
+                <label for="apiUrl">CNS API URL</label>
+                <input type="text" id="apiUrl" value="http://localhost:27200" placeholder="http://localhost:27200">
+            </div>
+
+            <div class="form-group">
+                <label for="bomId">BOM ID</label>
+                <input type="text" id="bomId" placeholder="Enter BOM ID (UUID)">
+            </div>
+
+            <div class="form-group">
+                <label for="token">Authentication Token (JWT or Admin Token)</label>
+                <input type="password" id="token" placeholder="Enter token (optional for testing)">
+            </div>
+
+            <div class="button-group">
+                <button class="btn-primary" id="connectBtn" onclick="connect()">Connect</button>
+                <button class="btn-secondary" id="disconnectBtn" onclick="disconnect()" disabled>Disconnect</button>
+                <button class="btn-secondary" onclick="clearLog()">Clear Log</button>
+            </div>
+
+            <div class="status disconnected" id="status">
+                <span>Status:</span>
+                <span id="statusText">Disconnected</span>
+            </div>
+
+            <div class="progress-container" id="progressContainer" style="display: none;">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progressFill" style="width: 0%">
+                        <span id="progressText">0%</span>
+                    </div>
+                </div>
+
+                <div class="progress-stats">
+                    <div class="stat">
+                        <div class="stat-label">Total Items</div>
+                        <div class="stat-value" id="totalItems">0</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-label">Enriched</div>
+                        <div class="stat-value" id="enrichedItems">0</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-label">Failed</div>
+                        <div class="stat-value" id="failedItems">0</div>
+                    </div>
+                    <div class="stat">
+                        <div class="stat-label">Pending</div>
+                        <div class="stat-value" id="pendingItems">0</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="events-log" id="eventsLog">
+                <div style="color: #888; text-align: center;">No events yet. Click "Connect" to start streaming.</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let eventSource = null;
+        let eventCount = 0;
+
+        function updateStatus(status, text) {
+            const statusEl = document.getElementById('status');
+            const statusTextEl = document.getElementById('statusText');
+
+            statusEl.className = 'status ' + status;
+            statusTextEl.textContent = text;
+        }
+
+        function logEvent(eventType, data) {
+            eventCount++;
+            const logEl = document.getElementById('eventsLog');
+
+            if (eventCount === 1) {
+                logEl.innerHTML = '';
+            }
+
+            const time = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = 'event-entry';
+
+            let dataStr = '';
+            try {
+                if (typeof data === 'object') {
+                    dataStr = JSON.stringify(data, null, 2);
+                } else {
+                    dataStr = data;
+                }
+            } catch (e) {
+                dataStr = String(data);
+            }
+
+            entry.innerHTML = `
+                <div class="event-time">${time}</div>
+                <div class="event-type">${eventType}</div>
+                <div class="event-data">${dataStr}</div>
+            `;
+
+            logEl.appendChild(entry);
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        function updateProgress(state) {
+            const progressContainer = document.getElementById('progressContainer');
+            const progressFill = document.getElementById('progressFill');
+            const progressText = document.getElementById('progressText');
+
+            const totalItems = document.getElementById('totalItems');
+            const enrichedItems = document.getElementById('enrichedItems');
+            const failedItems = document.getElementById('failedItems');
+            const pendingItems = document.getElementById('pendingItems');
+
+            progressContainer.style.display = 'block';
+
+            const percent = state.percent_complete || 0;
+            progressFill.style.width = percent + '%';
+            progressText.textContent = percent.toFixed(1) + '%';
+
+            totalItems.textContent = state.total_items || 0;
+            enrichedItems.textContent = state.enriched_items || 0;
+            failedItems.textContent = state.failed_items || 0;
+            pendingItems.textContent = state.pending_items || 0;
+        }
+
+        function connect() {
+            const apiUrl = document.getElementById('apiUrl').value;
+            const bomId = document.getElementById('bomId').value;
+            const token = document.getElementById('token').value;
+
+            if (!bomId) {
+                alert('Please enter a BOM ID');
+                return;
+            }
+
+            disconnect();
+
+            let streamUrl = `${apiUrl}/api/enrichment/stream/${bomId}`;
+            if (token) {
+                streamUrl += `?token=${encodeURIComponent(token)}`;
+            }
+
+            updateStatus('connecting', 'Connecting...');
+            document.getElementById('connectBtn').disabled = true;
+            document.getElementById('disconnectBtn').disabled = false;
+
+            try {
+                eventSource = new EventSource(streamUrl);
+
+                eventSource.onopen = () => {
+                    updateStatus('connected', 'Connected');
+                    logEvent('CONNECTION', 'Connected to SSE stream');
+                };
+
+                eventSource.addEventListener('connected', (e) => {
+                    const data = JSON.parse(e.data);
+                    logEvent('connected', data);
+                });
+
+                eventSource.addEventListener('enrichment.started', (e) => {
+                    const data = JSON.parse(e.data);
+                    logEvent('enrichment.started', data);
+                    if (data.state) {
+                        updateProgress(data.state);
+                    }
+                });
+
+                eventSource.addEventListener('progress', (e) => {
+                    const data = JSON.parse(e.data);
+                    logEvent('progress', data);
+                    if (data.state) {
+                        updateProgress(data.state);
+                    }
+                });
+
+                eventSource.addEventListener('enrichment.completed', (e) => {
+                    const data = JSON.parse(e.data);
+                    logEvent('enrichment.completed', data);
+                    if (data.state) {
+                        updateProgress(data.state);
+                    }
+                    updateStatus('connected', 'Enrichment Completed!');
+                });
+
+                eventSource.addEventListener('enrichment.failed', (e) => {
+                    const data = JSON.parse(e.data);
+                    logEvent('enrichment.failed', data);
+                    updateStatus('error', 'Enrichment Failed: ' + (data.error || 'Unknown error'));
+                });
+
+                eventSource.addEventListener('stream_end', (e) => {
+                    const data = JSON.parse(e.data);
+                    logEvent('stream_end', data);
+                    disconnect();
+                });
+
+                eventSource.addEventListener('error', (e) => {
+                    if (e instanceof MessageEvent && e.data) {
+                        const data = JSON.parse(e.data);
+                        logEvent('ERROR', data);
+                    }
+                });
+
+                eventSource.onerror = (err) => {
+                    console.error('EventSource error:', err);
+
+                    if (eventSource.readyState === EventSource.CLOSED) {
+                        updateStatus('disconnected', 'Connection closed');
+                        logEvent('ERROR', 'Connection closed by server');
+                        disconnect();
+                    } else {
+                        updateStatus('error', 'Connection error');
+                        logEvent('ERROR', 'Connection error - check console');
+                    }
+                };
+
+            } catch (err) {
+                updateStatus('error', 'Failed to connect: ' + err.message);
+                logEvent('ERROR', err.message);
+                document.getElementById('connectBtn').disabled = false;
+                document.getElementById('disconnectBtn').disabled = true;
+            }
+        }
+
+        function disconnect() {
+            if (eventSource) {
+                eventSource.close();
+                eventSource = null;
+                logEvent('CONNECTION', 'Disconnected from SSE stream');
+            }
+
+            updateStatus('disconnected', 'Disconnected');
+            document.getElementById('connectBtn').disabled = false;
+            document.getElementById('disconnectBtn').disabled = true;
+        }
+
+        function clearLog() {
+            eventCount = 0;
+            document.getElementById('eventsLog').innerHTML = '<div style="color: #888; text-align: center;">Log cleared. Click "Connect" to start streaming.</div>';
+            document.getElementById('progressContainer').style.display = 'none';
+        }
+
+        // Auto-disconnect on page unload
+        window.addEventListener('beforeunload', disconnect);
+    </script>
+</body>
+</html>

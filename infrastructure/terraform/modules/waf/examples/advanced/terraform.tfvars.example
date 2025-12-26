@@ -1,0 +1,21 @@
+# Advanced WAF Example - Configuration Template
+# Copy this file to terraform.tfvars and fill in your values
+
+aws_region      = "us-east-1"
+name_prefix     = "myapp-prod"
+certificate_arn = "arn:aws:acm:us-east-1:123456789012:certificate/12345678-1234-1234-1234-123456789012"
+alert_email     = "security@example.com"
+
+# Optional: Block specific IPs
+blocked_ip_addresses = [
+  # "192.0.2.0/24",      # Example: Block entire subnet
+  # "198.51.100.42/32",  # Example: Block single IP
+]
+
+tags = {
+  Environment = "production"
+  Application = "web-app"
+  ManagedBy   = "terraform"
+  CostCenter  = "security"
+  Compliance  = "pci-dss"
+}

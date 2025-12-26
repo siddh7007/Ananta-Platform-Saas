@@ -1,0 +1,442 @@
+/**
+ * Tablet-Optimized Styles for iPad
+ * Target: iPad Mini (768px), iPad Pro 11" (1024px), iPad Pro 12.9" (1280px)
+ */
+
+/* ============================
+   Touch-Friendly Interactions
+   ============================ */
+
+/* Smooth scrolling with momentum */
+.tablet-scroll {
+  -webkit-overflow-scrolling: touch;
+  scroll-behavior: smooth;
+}
+
+/* Prevent text selection on interactive elements */
+.tablet-no-select {
+  -webkit-user-select: none;
+  -moz-user-select: none;
+  -ms-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Touch target sizing */
+.touch-target-sm {
+  min-height: 44px;
+  min-width: 44px;
+}
+
+.touch-target {
+  min-height: 48px;
+  min-width: 48px;
+}
+
+.touch-target-lg {
+  min-height: 56px;
+  min-width: 56px;
+}
+
+/* ============================
+   Safe Area Insets (Notch Support)
+   ============================ */
+
+.safe-area-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.safe-area-left {
+  padding-left: env(safe-area-inset-left);
+}
+
+.safe-area-right {
+  padding-right: env(safe-area-inset-right);
+}
+
+.safe-area-all {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+/* ============================
+   Tablet Layout Utilities
+   ============================ */
+
+/* Container with tablet-specific max-width */
+.tablet-container {
+  width: 100%;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  /* iPad Portrait */
+  .tablet-container {
+    max-width: 728px;
+    padding: 0 20px;
+  }
+}
+
+@media (min-width: 1024px) and (max-width: 1279px) {
+  /* iPad Landscape */
+  .tablet-container {
+    max-width: 984px;
+    padding: 0 20px;
+  }
+}
+
+/* ============================
+   Card Grid Layouts
+   ============================ */
+
+/* Responsive grid for cards */
+.tablet-card-grid {
+  display: grid;
+  gap: 16px;
+  width: 100%;
+}
+
+/* Mobile: 1 column */
+@media (max-width: 767px) {
+  .tablet-card-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Tablet Portrait: 1 column (narrower) */
+@media (min-width: 768px) and (max-width: 1023px) and (orientation: portrait) {
+  .tablet-card-grid {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+}
+
+/* Tablet Landscape: 2 columns */
+@media (min-width: 768px) and (max-width: 1279px) and (orientation: landscape) {
+  .tablet-card-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+  }
+}
+
+/* Desktop: 3 columns */
+@media (min-width: 1280px) {
+  .tablet-card-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 24px;
+  }
+}
+
+/* ============================
+   Swipe Gesture Support
+   ============================ */
+
+.swipeable-card {
+  position: relative;
+  transition: transform 0.2s ease-out;
+  touch-action: pan-y;
+}
+
+.swipeable-card.swiping {
+  transition: none;
+}
+
+.swipeable-card.swiped-left {
+  transform: translateX(-80px);
+}
+
+.swipeable-card.swiped-right {
+  transform: translateX(80px);
+}
+
+/* Swipe action buttons container */
+.swipe-actions {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+}
+
+.swipe-actions-left {
+  left: 0;
+  transform: translateX(-100%);
+}
+
+.swipe-actions-right {
+  right: 0;
+  transform: translateX(100%);
+}
+
+/* ============================
+   Orientation-Specific Styles
+   ============================ */
+
+/* Portrait mode adjustments */
+@media (orientation: portrait) {
+  .hide-portrait {
+    display: none !important;
+  }
+
+  .full-width-portrait {
+    width: 100% !important;
+  }
+}
+
+/* Landscape mode adjustments */
+@media (orientation: landscape) {
+  .hide-landscape {
+    display: none !important;
+  }
+
+  .sidebar-landscape {
+    display: block !important;
+  }
+}
+
+/* ============================
+   Navigation Styles
+   ============================ */
+
+/* Tablet navigation - collapsible sidebar */
+.tablet-nav {
+  transition: width 0.3s ease, transform 0.3s ease;
+}
+
+@media (min-width: 768px) and (max-width: 1023px) and (orientation: portrait) {
+  /* Portrait: Overlay sidebar */
+  .tablet-nav {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 280px;
+    transform: translateX(-100%);
+    z-index: 50;
+    background: white;
+    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
+  }
+
+  .tablet-nav.open {
+    transform: translateX(0);
+  }
+}
+
+@media (min-width: 1024px) and (orientation: landscape) {
+  /* Landscape: Slim sidebar */
+  .tablet-nav {
+    position: fixed;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 72px;
+    background: white;
+    border-right: 1px solid #e5e7eb;
+  }
+
+  .tablet-nav:hover,
+  .tablet-nav.expanded {
+    width: 240px;
+  }
+}
+
+/* ============================
+   Table to Card Transform
+   ============================ */
+
+/* Hide table on tablet, show card view */
+@media (max-width: 1279px) {
+  .desktop-table {
+    display: none;
+  }
+
+  .tablet-card-view {
+    display: block;
+  }
+}
+
+@media (min-width: 1280px) {
+  .desktop-table {
+    display: table;
+  }
+
+  .tablet-card-view {
+    display: none;
+  }
+}
+
+/* ============================
+   Accessibility & Motion
+   ============================ */
+
+/* Respect reduced motion preferences */
+@media (prefers-reduced-motion: reduce) {
+  .swipeable-card,
+  .tablet-nav,
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Focus visible for keyboard navigation */
+.touch-target:focus-visible,
+.swipeable-card:focus-visible {
+  outline: 2px solid #3b82f6;
+  outline-offset: 2px;
+}
+
+/* ============================
+   Scroll Containers
+   ============================ */
+
+.tablet-scroll-container {
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+/* Hide scrollbar on tablets for cleaner look */
+@media (min-width: 768px) and (max-width: 1279px) {
+  .tablet-scroll-container::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .tablet-scroll-container::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .tablet-scroll-container::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.2);
+    border-radius: 3px;
+  }
+
+  .tablet-scroll-container::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.3);
+  }
+}
+
+/* ============================
+   Touch Feedback
+   ============================ */
+
+.touch-feedback {
+  position: relative;
+  overflow: hidden;
+}
+
+.touch-feedback::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 0;
+  height: 0;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.1);
+  transform: translate(-50%, -50%);
+  transition: width 0.3s, height 0.3s;
+}
+
+.touch-feedback:active::after {
+  width: 100%;
+  height: 100%;
+}
+
+/* ============================
+   Hover States for iPad with Trackpad
+   ============================ */
+
+@media (hover: hover) and (pointer: fine) {
+  .touch-target:hover {
+    background-color: rgba(0, 0, 0, 0.04);
+  }
+
+  .swipeable-card:hover {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  }
+}
+
+/* ============================
+   iPad Pro Specific
+   ============================ */
+
+/* iPad Pro 11" (1024x768) */
+@media (min-width: 1024px) and (max-width: 1194px) {
+  .ipad-pro-11 {
+    /* Specific styles for iPad Pro 11" */
+  }
+}
+
+/* iPad Pro 12.9" (1280x1024) */
+@media (min-width: 1280px) and (max-width: 1366px) {
+  .ipad-pro-12 {
+    /* Specific styles for iPad Pro 12.9" */
+  }
+}
+
+/* ============================
+   Loading & Skeleton States
+   ============================ */
+
+.tablet-skeleton {
+  background: linear-gradient(
+    90deg,
+    #f0f0f0 25%,
+    #e0e0e0 50%,
+    #f0f0f0 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-loading 1.5s ease-in-out infinite;
+}
+
+@keyframes skeleton-loading {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+/* ============================
+   Utility Classes
+   ============================ */
+
+/* Prevent horizontal scroll */
+.no-horizontal-scroll {
+  overflow-x: hidden;
+  max-width: 100%;
+}
+
+/* Truncate text with ellipsis */
+.tablet-truncate {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Multi-line truncate */
+.tablet-line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.tablet-line-clamp-3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}

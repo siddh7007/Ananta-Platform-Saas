@@ -1,0 +1,695 @@
+# =============================================================================
+# Service Level Objectives (SLOs) - Ananta Platform
+# =============================================================================
+# Comprehensive SLO recording rules for all services in Control and App Planes
+# Reference: shared-monitoring/docs/SLO-DEFINITIONS.md
+# =============================================================================
+
+groups:
+  # ===========================================================================
+  # TENANT MANAGEMENT SERVICE SLOs (Control Plane)
+  # ===========================================================================
+  # SLO: 99.9% availability, P95 < 500ms, P99 < 2s
+  - name: slo_tenant_management
+    interval: 30s
+    rules:
+      # Availability - 99.9% target
+      - record: slo:tenant_mgmt:availability:ratio_5m
+        expr: |
+          sum(rate(http_requests_total{service="tenant-management-service",status!~"5.."}[5m]))
+          /
+          sum(rate(http_requests_total{service="tenant-management-service"}[5m]))
+
+      - record: slo:tenant_mgmt:availability:ratio_1h
+        expr: |
+          sum(rate(http_requests_total{service="tenant-management-service",status!~"5.."}[1h]))
+          /
+          sum(rate(http_requests_total{service="tenant-management-service"}[1h]))
+
+      - record: slo:tenant_mgmt:availability:ratio_6h
+        expr: |
+          sum(rate(http_requests_total{service="tenant-management-service",status!~"5.."}[6h]))
+          /
+          sum(rate(http_requests_total{service="tenant-management-service"}[6h]))
+
+      - record: slo:tenant_mgmt:availability:ratio_1d
+        expr: |
+          sum(rate(http_requests_total{service="tenant-management-service",status!~"5.."}[1d]))
+          /
+          sum(rate(http_requests_total{service="tenant-management-service"}[1d]))
+
+      - record: slo:tenant_mgmt:availability:ratio_30d
+        expr: |
+          avg_over_time(slo:tenant_mgmt:availability:ratio_1h[30d])
+
+      # Latency - P95 < 500ms, P99 < 2s
+      - record: slo:tenant_mgmt:latency:p95
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(http_request_duration_seconds_bucket{service="tenant-management-service"}[5m])) by (le)
+          )
+
+      - record: slo:tenant_mgmt:latency:p99
+        expr: |
+          histogram_quantile(0.99,
+            sum(rate(http_request_duration_seconds_bucket{service="tenant-management-service"}[5m])) by (le)
+          )
+
+      # Latency SLO compliance (percentage of requests under threshold)
+      - record: slo:tenant_mgmt:latency:good_ratio_5m
+        expr: |
+          sum(rate(http_request_duration_seconds_bucket{service="tenant-management-service",le="0.5"}[5m]))
+          /
+          sum(rate(http_request_duration_seconds_count{service="tenant-management-service"}[5m]))
+
+      # Error rate
+      - record: slo:tenant_mgmt:error_rate:5m
+        expr: |
+          sum(rate(http_requests_total{service="tenant-management-service",status=~"5.."}[5m]))
+          /
+          sum(rate(http_requests_total{service="tenant-management-service"}[5m]))
+
+  # ===========================================================================
+  # KEYCLOAK SLOs (Authentication)
+  # ===========================================================================
+  # SLO: 99.95% availability, P95 < 200ms
+  - name: slo_keycloak
+    interval: 30s
+    rules:
+      # Availability - 99.95% target (probe-based)
+      - record: slo:keycloak:availability:ratio_5m
+        expr: |
+          avg_over_time(probe_success{instance=~".*keycloak.*:8080"}[5m])
+
+      - record: slo:keycloak:availability:ratio_1h
+        expr: |
+          avg_over_time(probe_success{instance=~".*keycloak.*:8080"}[1h])
+
+      - record: slo:keycloak:availability:ratio_6h
+        expr: |
+          avg_over_time(probe_success{instance=~".*keycloak.*:8080"}[6h])
+
+      - record: slo:keycloak:availability:ratio_1d
+        expr: |
+          avg_over_time(probe_success{instance=~".*keycloak.*:8080"}[1d])
+
+      - record: slo:keycloak:availability:ratio_30d
+        expr: |
+          avg_over_time(slo:keycloak:availability:ratio_1h[30d])
+
+      # Latency - P95 < 200ms (probe-based)
+      - record: slo:keycloak:latency:p95
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(probe_http_duration_seconds_bucket{instance=~".*keycloak.*"}[5m])) by (le)
+          )
+
+  # ===========================================================================
+  # CNS SERVICE SLOs (App Plane)
+  # ===========================================================================
+  # SLO: 99.5% availability, P95 < 5s, match rate > 85%
+  - name: slo_cns_service
+    interval: 30s
+    rules:
+      # Availability - 99.5% target
+      - record: slo:cns:availability:ratio_5m
+        expr: |
+          sum(rate(http_requests_total{service="cns-service",status!~"5.."}[5m]))
+          /
+          sum(rate(http_requests_total{service="cns-service"}[5m]))
+
+      - record: slo:cns:availability:ratio_1h
+        expr: |
+          sum(rate(http_requests_total{service="cns-service",status!~"5.."}[1h]))
+          /
+          sum(rate(http_requests_total{service="cns-service"}[1h]))
+
+      - record: slo:cns:availability:ratio_6h
+        expr: |
+          sum(rate(http_requests_total{service="cns-service",status!~"5.."}[6h]))
+          /
+          sum(rate(http_requests_total{service="cns-service"}[6h]))
+
+      - record: slo:cns:availability:ratio_1d
+        expr: |
+          sum(rate(http_requests_total{service="cns-service",status!~"5.."}[1d]))
+          /
+          sum(rate(http_requests_total{service="cns-service"}[1d]))
+
+      - record: slo:cns:availability:ratio_30d
+        expr: |
+          avg_over_time(slo:cns:availability:ratio_1h[30d])
+
+      # Enrichment latency - P95 < 5s (custom metric)
+      - record: slo:cns:enrichment_latency:p95
+        expr: |
+          histogram_quantile(0.95,
+            sum(rate(enrichment_duration_seconds_bucket[5m])) by (le)
+          )
+
+      # Enrichment latency SLO compliance
+      - record: slo:cns:enrichment_latency:good_ratio_5m
+        expr: |
+          sum(rate(enrichment_duration_seconds_bucket{le="5"}[5m]))
+          /
+          sum(rate(enrichment_duration_seconds_count[5m]))
+
+      # Match rate - > 85% target (daily measurement)
+      - record: slo:cns:match_rate:ratio_1d
+        expr: |
+          sum(increase(enrichment_matches_total{status="matched"}[1d]))
+          /
+          sum(increase(enrichment_matches_total[1d]))
+
+      # Supplier API success rate - > 95%
+      - record: slo:cns:supplier_api:success_rate_5m
+        expr: |
+          sum(rate(supplier_api_calls_total{status="success"}[5m]))
+          /
+          sum(rate(supplier_api_calls_total[5m]))
+
+  # ===========================================================================
+  # TEMPORAL WORKFLOW SLOs
+  # ===========================================================================
+  # SLO: 99.5% availability, workflow success > 99%
+  - name: slo_temporal
+    interval: 30s
+    rules:
+      # Availability - 99.5% target (gRPC health probe)
+      - record: slo:temporal:availability:ratio_5m
+        expr: |
+          avg_over_time(probe_success{instance=~".*temporal.*:7233"}[5m])
+
+      - record: slo:temporal:availability:ratio_1h
+        expr: |
+          avg_over_time(probe_success{instance=~".*temporal.*:7233"}[1h])
+
+      - record: slo:temporal:availability:ratio_1d
+        expr: |
+          avg_over_time(probe_success{instance=~".*temporal.*:7233"}[1d])
+
+      - record: slo:temporal:availability:ratio_30d
+        expr: |
+          avg_over_time(slo:temporal:availability:ratio_1h[30d])
+
+      # Workflow success rate - > 99% (requires custom metrics)
+      # Uncomment when temporal_workflow_completed_total metric is available
+      # - record: slo:temporal:workflow_success:ratio_1h
+      #   expr: |
+      #     sum(rate(temporal_workflow_completed_total{status="success"}[1h]))
+      #     /
+      #     sum(rate(temporal_workflow_completed_total[1h]))
+
+  # ===========================================================================
+  # DATABASE SLOs (PostgreSQL)
+  # ===========================================================================
+  # SLO: 99.99% availability, connection success > 99.9%
+  - name: slo_database
+    interval: 30s
+    rules:
+      # Control Plane DB Availability - 99.99% target
+      - record: slo:postgres_control:availability:ratio_5m
+        expr: |
+          avg_over_time(probe_success{instance=~".*postgres.*:5432"}[5m])
+
+      - record: slo:postgres_control:availability:ratio_1h
+        expr: |
+          avg_over_time(probe_success{instance=~".*postgres.*:5432"}[1h])
+
+      - record: slo:postgres_control:availability:ratio_1d
+        expr: |
+          avg_over_time(probe_success{instance=~".*postgres.*:5432"}[1d])
+
+      - record: slo:postgres_control:availability:ratio_30d
+        expr: |
+          avg_over_time(slo:postgres_control:availability:ratio_1h[30d])
+
+      # App Plane Supabase DB Availability
+      - record: slo:supabase_db:availability:ratio_5m
+        expr: |
+          avg_over_time(probe_success{instance="supabase-db:27432"}[5m])
+
+      - record: slo:supabase_db:availability:ratio_1h
+        expr: |
+          avg_over_time(probe_success{instance="supabase-db:27432"}[1h])
+
+      - record: slo:supabase_db:availability:ratio_1d
+        expr: |
+          avg_over_time(probe_success{instance="supabase-db:27432"}[1d])
+
+      - record: slo:supabase_db:availability:ratio_30d
+        expr: |
+          avg_over_time(slo:supabase_db:availability:ratio_1h[30d])
+
+      # Connection pool utilization (health indicator, not SLO)
+      - record: slo:database:connection_pool:utilization
+        expr: |
+          pg_stat_activity_count
+          /
+          pg_settings_max_connections
+
+  # ===========================================================================
+  # REDIS CACHE SLOs
+  # ===========================================================================
+  # SLO: 99.5% availability, P95 < 10ms
+  - name: slo_redis
+    interval: 30s
+    rules:
+      # Availability - 99.5% target
+      - record: slo:redis:availability:ratio_5m
+        expr: |
+          avg_over_time(probe_success{instance=~".*redis.*:6379"}[5m])
+
+      - record: slo:redis:availability:ratio_1h
+        expr: |
+          avg_over_time(probe_success{instance=~".*redis.*:6379"}[1h])
+
+      - record: slo:redis:availability:ratio_1d
+        expr: |
+          avg_over_time(probe_success{instance=~".*redis.*:6379"}[1d])
+
+      - record: slo:redis:availability:ratio_30d
+        expr: |
+          avg_over_time(slo:redis:availability:ratio_1h[30d])
+
+      # Hit rate - > 80% target
+      - record: slo:redis:hit_rate:ratio_5m
+        expr: |
+          rate(redis_keyspace_hits_total[5m])
+          /
+          (rate(redis_keyspace_hits_total[5m]) + rate(redis_keyspace_misses_total[5m]))
+
+      # Memory utilization (health indicator)
+      - record: slo:redis:memory:utilization
+        expr: |
+          redis_memory_used_bytes
+          /
+          redis_memory_max_bytes
+
+  # ===========================================================================
+  # RABBITMQ MESSAGE BROKER SLOs
+  # ===========================================================================
+  # SLO: 99.5% availability, message loss < 0.01%
+  - name: slo_rabbitmq
+    interval: 30s
+    rules:
+      # Availability - 99.5% target
+      - record: slo:rabbitmq:availability:ratio_5m
+        expr: |
+          avg_over_time(probe_success{instance=~".*rabbitmq.*:5672"}[5m])
+
+      - record: slo:rabbitmq:availability:ratio_1h
+        expr: |
+          avg_over_time(probe_success{instance=~".*rabbitmq.*:5672"}[1h])
+
+      - record: slo:rabbitmq:availability:ratio_1d
+        expr: |
+          avg_over_time(probe_success{instance=~".*rabbitmq.*:5672"}[1d])
+
+      - record: slo:rabbitmq:availability:ratio_30d
+        expr: |
+          avg_over_time(slo:rabbitmq:availability:ratio_1h[30d])
+
+      # Queue depth (health indicator)
+      - record: slo:rabbitmq:queue_depth:total
+        expr: |
+          sum(rabbitmq_queue_messages)
+
+      # Message processing rate
+      - record: slo:rabbitmq:message_rate:5m
+        expr: |
+          rate(rabbitmq_queue_messages_delivered_total[5m])
+
+  # ===========================================================================
+  # ERROR BUDGET CALCULATION
+  # ===========================================================================
+  # Error budget remaining = 1 - ((1 - actual) / (1 - target))
+  - name: slo_error_budget
+    interval: 1m
+    rules:
+      # Tenant Management Service - 99.9% SLO (0.1% error budget)
+      - record: slo:tenant_mgmt:error_budget:remaining
+        expr: |
+          1 - (
+            (1 - slo:tenant_mgmt:availability:ratio_30d)
+            / 0.001
+          )
+
+      # Keycloak - 99.95% SLO (0.05% error budget)
+      - record: slo:keycloak:error_budget:remaining
+        expr: |
+          1 - (
+            (1 - slo:keycloak:availability:ratio_30d)
+            / 0.0005
+          )
+
+      # CNS Service - 99.5% SLO (0.5% error budget)
+      - record: slo:cns:error_budget:remaining
+        expr: |
+          1 - (
+            (1 - slo:cns:availability:ratio_30d)
+            / 0.005
+          )
+
+      # Temporal - 99.5% SLO (0.5% error budget)
+      - record: slo:temporal:error_budget:remaining
+        expr: |
+          1 - (
+            (1 - slo:temporal:availability:ratio_30d)
+            / 0.005
+          )
+
+      # PostgreSQL Control - 99.99% SLO (0.01% error budget)
+      - record: slo:postgres_control:error_budget:remaining
+        expr: |
+          1 - (
+            (1 - slo:postgres_control:availability:ratio_30d)
+            / 0.0001
+          )
+
+      # Supabase DB - 99.9% SLO (0.1% error budget)
+      - record: slo:supabase_db:error_budget:remaining
+        expr: |
+          1 - (
+            (1 - slo:supabase_db:availability:ratio_30d)
+            / 0.001
+          )
+
+      # Redis - 99.5% SLO (0.5% error budget)
+      - record: slo:redis:error_budget:remaining
+        expr: |
+          1 - (
+            (1 - slo:redis:availability:ratio_30d)
+            / 0.005
+          )
+
+      # RabbitMQ - 99.5% SLO (0.5% error budget)
+      - record: slo:rabbitmq:error_budget:remaining
+        expr: |
+          1 - (
+            (1 - slo:rabbitmq:availability:ratio_30d)
+            / 0.005
+          )
+
+  # ===========================================================================
+  # BURN RATE CALCULATION (Multi-Window)
+  # ===========================================================================
+  # Burn rate = (1 - actual_availability) / (1 - slo_target)
+  # Used for fast/medium/slow burn alerts
+  - name: slo_burn_rate
+    interval: 1m
+    rules:
+      # ========== Tenant Management Service ==========
+      - record: slo:tenant_mgmt:burn_rate:5m
+        expr: |
+          (1 - slo:tenant_mgmt:availability:ratio_5m) / 0.001
+
+      - record: slo:tenant_mgmt:burn_rate:1h
+        expr: |
+          (1 - slo:tenant_mgmt:availability:ratio_1h) / 0.001
+
+      - record: slo:tenant_mgmt:burn_rate:6h
+        expr: |
+          (1 - slo:tenant_mgmt:availability:ratio_6h) / 0.001
+
+      - record: slo:tenant_mgmt:burn_rate:1d
+        expr: |
+          (1 - slo:tenant_mgmt:availability:ratio_1d) / 0.001
+
+      # ========== CNS Service ==========
+      - record: slo:cns:burn_rate:5m
+        expr: |
+          (1 - slo:cns:availability:ratio_5m) / 0.005
+
+      - record: slo:cns:burn_rate:1h
+        expr: |
+          (1 - slo:cns:availability:ratio_1h) / 0.005
+
+      - record: slo:cns:burn_rate:6h
+        expr: |
+          (1 - slo:cns:availability:ratio_6h) / 0.005
+
+      - record: slo:cns:burn_rate:1d
+        expr: |
+          (1 - slo:cns:availability:ratio_1d) / 0.005
+
+      # ========== Keycloak ==========
+      - record: slo:keycloak:burn_rate:5m
+        expr: |
+          (1 - slo:keycloak:availability:ratio_5m) / 0.0005
+
+      - record: slo:keycloak:burn_rate:1h
+        expr: |
+          (1 - slo:keycloak:availability:ratio_1h) / 0.0005
+
+      - record: slo:keycloak:burn_rate:6h
+        expr: |
+          (1 - slo:keycloak:availability:ratio_6h) / 0.0005
+
+      - record: slo:keycloak:burn_rate:1d
+        expr: |
+          (1 - slo:keycloak:availability:ratio_1d) / 0.0005
+
+      # ========== PostgreSQL Control ==========
+      - record: slo:postgres_control:burn_rate:5m
+        expr: |
+          (1 - slo:postgres_control:availability:ratio_5m) / 0.0001
+
+      - record: slo:postgres_control:burn_rate:1h
+        expr: |
+          (1 - slo:postgres_control:availability:ratio_1h) / 0.0001
+
+      - record: slo:postgres_control:burn_rate:1d
+        expr: |
+          (1 - slo:postgres_control:availability:ratio_1d) / 0.0001
+
+  # ===========================================================================
+  # AGGREGATED PLANE-LEVEL SLOs
+  # ===========================================================================
+  # Overall Control Plane and App Plane availability
+  - name: slo_plane_level
+    interval: 30s
+    rules:
+      # Control Plane Overall (weighted average of critical services)
+      - record: slo:control_plane:availability:ratio_5m
+        expr: |
+          (
+            slo:tenant_mgmt:availability:ratio_5m * 0.6 +
+            slo:keycloak:availability:ratio_5m * 0.3 +
+            slo:postgres_control:availability:ratio_5m * 0.1
+          )
+
+      - record: slo:control_plane:availability:ratio_1h
+        expr: |
+          (
+            slo:tenant_mgmt:availability:ratio_1h * 0.6 +
+            slo:keycloak:availability:ratio_1h * 0.3 +
+            slo:postgres_control:availability:ratio_1h * 0.1
+          )
+
+      - record: slo:control_plane:availability:ratio_30d
+        expr: |
+          avg_over_time(slo:control_plane:availability:ratio_1h[30d])
+
+      # App Plane Overall (weighted average of critical services)
+      - record: slo:app_plane:availability:ratio_5m
+        expr: |
+          (
+            slo:cns:availability:ratio_5m * 0.5 +
+            slo:supabase_db:availability:ratio_5m * 0.3 +
+            slo:rabbitmq:availability:ratio_5m * 0.2
+          )
+
+      - record: slo:app_plane:availability:ratio_1h
+        expr: |
+          (
+            slo:cns:availability:ratio_1h * 0.5 +
+            slo:supabase_db:availability:ratio_1h * 0.3 +
+            slo:rabbitmq:availability:ratio_1h * 0.2
+          )
+
+      - record: slo:app_plane:availability:ratio_30d
+        expr: |
+          avg_over_time(slo:app_plane:availability:ratio_1h[30d])
+
+      # Control Plane Error Budget
+      - record: slo:control_plane:error_budget:remaining
+        expr: |
+          1 - (
+            (1 - slo:control_plane:availability:ratio_30d)
+            / 0.001
+          )
+
+      # App Plane Error Budget
+      - record: slo:app_plane:error_budget:remaining
+        expr: |
+          1 - (
+            (1 - slo:app_plane:availability:ratio_30d)
+            / 0.005
+          )
+
+  # ===========================================================================
+  # SLO VIOLATION ALERTS
+  # ===========================================================================
+  - name: slo_violation_alerts
+    rules:
+      # ========== Fast Burn Alerts (Critical - Page Immediately) ==========
+      # Budget will be exhausted in < 2 days at current rate
+
+      - alert: TenantManagementFastBurn
+        expr: |
+          slo:tenant_mgmt:burn_rate:1h > 14.4
+          and
+          slo:tenant_mgmt:burn_rate:5m > 14.4
+        for: 2m
+        labels:
+          severity: critical
+          service: tenant-management
+          slo_type: availability
+          plane: control
+        annotations:
+          summary: "Tenant Management SLO budget burning fast"
+          description: "Burn rate {{ $value | humanize }}x - will exhaust monthly error budget in {{ printf \"%.1f\" (div 100 $value) }} hours. Immediate action required."
+          runbook_url: "https://ananta.io/runbooks/slo-fast-burn"
+
+      - alert: CNSServiceFastBurn
+        expr: |
+          slo:cns:burn_rate:1h > 14.4
+          and
+          slo:cns:burn_rate:5m > 14.4
+        for: 2m
+        labels:
+          severity: critical
+          service: cns-service
+          slo_type: availability
+          plane: app
+        annotations:
+          summary: "CNS Service SLO budget burning fast"
+          description: "Burn rate {{ $value | humanize }}x - will exhaust monthly error budget in {{ printf \"%.1f\" (div 100 $value) }} hours"
+
+      - alert: KeycloakFastBurn
+        expr: |
+          slo:keycloak:burn_rate:1h > 14.4
+          and
+          slo:keycloak:burn_rate:5m > 14.4
+        for: 2m
+        labels:
+          severity: critical
+          service: keycloak
+          slo_type: availability
+          plane: control
+        annotations:
+          summary: "Keycloak SLO budget burning fast"
+          description: "Auth service burn rate {{ $value | humanize }}x - authentication may be impacted"
+
+      # ========== Medium Burn Alerts (High - Review within 1 hour) ==========
+      # Budget will be exhausted in < 5 days
+
+      - alert: TenantManagementMediumBurn
+        expr: |
+          slo:tenant_mgmt:burn_rate:6h > 6
+          and
+          slo:tenant_mgmt:burn_rate:1h > 6
+        for: 15m
+        labels:
+          severity: warning
+          service: tenant-management
+          slo_type: availability
+          plane: control
+        annotations:
+          summary: "Tenant Management SLO budget burning at medium rate"
+          description: "Burn rate {{ $value | humanize }}x - budget will exhaust in ~{{ printf \"%.1f\" (div 100 $value) }} days"
+
+      - alert: CNSServiceMediumBurn
+        expr: |
+          slo:cns:burn_rate:6h > 6
+          and
+          slo:cns:burn_rate:1h > 6
+        for: 15m
+        labels:
+          severity: warning
+          service: cns-service
+          slo_type: availability
+          plane: app
+        annotations:
+          summary: "CNS Service SLO budget burning at medium rate"
+          description: "Burn rate {{ $value | humanize }}x - review enrichment service health"
+
+      # ========== Error Budget Exhausted Alerts ==========
+
+      - alert: TenantManagementBudgetExhausted
+        expr: slo:tenant_mgmt:error_budget:remaining < 0
+        for: 5m
+        labels:
+          severity: critical
+          service: tenant-management
+          plane: control
+        annotations:
+          summary: "Tenant Management error budget EXHAUSTED"
+          description: "Monthly SLO budget exceeded by {{ $value | humanize }}%. Deployment freeze in effect per error budget policy."
+
+      - alert: CNSServiceBudgetExhausted
+        expr: slo:cns:error_budget:remaining < 0
+        for: 5m
+        labels:
+          severity: critical
+          service: cns-service
+          plane: app
+        annotations:
+          summary: "CNS Service error budget EXHAUSTED"
+          description: "Monthly SLO budget exceeded. Focus on reliability improvements."
+
+      # ========== Low Error Budget Warnings ==========
+
+      - alert: ErrorBudgetLow
+        expr: |
+          (
+            slo:tenant_mgmt:error_budget:remaining < 0.25 and slo:tenant_mgmt:error_budget:remaining > 0
+          ) or (
+            slo:cns:error_budget:remaining < 0.25 and slo:cns:error_budget:remaining > 0
+          ) or (
+            slo:keycloak:error_budget:remaining < 0.25 and slo:keycloak:error_budget:remaining > 0
+          )
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Error budget below 25% for {{ $labels.service }}"
+          description: "Only {{ $value | humanizePercentage }} error budget remaining. Review deployment freeze criteria."
+
+      # ========== Latency SLO Violations ==========
+
+      - alert: TenantManagementHighLatency
+        expr: slo:tenant_mgmt:latency:p95 > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          service: tenant-management
+          slo_type: latency
+        annotations:
+          summary: "Tenant Management P95 latency exceeds 500ms"
+          description: "Current P95 latency: {{ $value | humanizeDuration }}. Target: 500ms. Check database queries and service health."
+
+      - alert: CNSEnrichmentSlowLatency
+        expr: slo:cns:enrichment_latency:p95 > 5
+        for: 10m
+        labels:
+          severity: warning
+          service: cns-service
+          slo_type: latency
+        annotations:
+          summary: "CNS enrichment P95 latency exceeds 5s"
+          description: "Enrichment taking {{ $value | humanizeDuration }} at P95. Check supplier API health and database performance."
+
+      # ========== Match Rate SLO Violation (CNS Service) ==========
+
+      - alert: CNSLowMatchRate
+        expr: slo:cns:match_rate:ratio_1d < 0.85
+        for: 1h
+        labels:
+          severity: warning
+          service: cns-service
+          slo_type: match_rate
+        annotations:
+          summary: "CNS component match rate below 85%"
+          description: "Match rate {{ $value | humanizePercentage }} is below 85% target. Review component catalog quality and supplier API availability."

@@ -1,0 +1,271 @@
+# =============================================================================
+# Prometheus Alert Rules - Ananta Platform
+# =============================================================================
+# Alerts for both Control Plane (Ananta-SaaS) and App Plane services
+# =============================================================================
+
+groups:
+  # ===========================================================================
+  # CONTROL PLANE (Ananta-SaaS) ALERTS
+  # ===========================================================================
+  - name: ananta-saas-control-plane
+    rules:
+      # Tenant Management Service Down
+      - alert: TenantManagementServiceDown
+        expr: up{job="ananta-saas-tenant-mgmt"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          plane: control
+          service: tenant-management
+        annotations:
+          summary: "Tenant Management Service is down"
+          description: "Ananta-SaaS Tenant Management Service has been unreachable for more than 1 minute"
+          runbook_url: "https://docs.ananta.io/runbooks/tenant-mgmt-down"
+
+      # Tenant Management Not Ready
+      - alert: TenantManagementNotReady
+        expr: up{job="ananta-saas-tenant-mgmt-ready"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          plane: control
+          service: tenant-management
+        annotations:
+          summary: "Tenant Management Service not ready"
+          description: "Service is running but readiness probe failed for 2 minutes"
+
+      # Tenant Management Liveness Failed
+      - alert: TenantManagementLivenessFailed
+        expr: up{job="ananta-saas-tenant-mgmt-live"} == 0
+        for: 30s
+        labels:
+          severity: critical
+          plane: control
+          service: tenant-management
+        annotations:
+          summary: "Tenant Management liveness check failed"
+          description: "Liveness probe failed - service may need restart"
+
+  # ===========================================================================
+  # APP PLANE - CNS SERVICE ALERTS
+  # ===========================================================================
+  - name: app-plane-cns
+    rules:
+      # CNS Service Down
+      - alert: CNSServiceDown
+        expr: up{job="app-plane-cns-health"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          plane: app
+          service: cns-service
+        annotations:
+          summary: "CNS Service is down"
+          description: "CNS Service has been unreachable for more than 1 minute"
+          runbook_url: "https://docs.ananta.io/runbooks/cns-down"
+
+      # CNS Config Health Degraded
+      - alert: CNSConfigUnhealthy
+        expr: up{job="app-plane-cns-config"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          plane: app
+          service: cns-service
+        annotations:
+          summary: "CNS configuration health check failed"
+          description: "CNS /health/config endpoint is not responding"
+
+      # CNS Dual Database Unhealthy
+      - alert: CNSDualDatabaseUnhealthy
+        expr: up{job="app-plane-cns-dual-db"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          plane: app
+          service: cns-service
+          check: dual-database
+        annotations:
+          summary: "CNS Dual Database routing broken"
+          description: "Both databases are unreachable or misconfigured - data routing will fail"
+          runbook_url: "https://docs.ananta.io/runbooks/cns-dual-db"
+
+      # CNS Detailed Health Failed
+      - alert: CNSDetailedHealthFailed
+        expr: up{job="app-plane-cns-detailed"} == 0
+        for: 5m
+        labels:
+          severity: warning
+          plane: app
+          service: cns-service
+        annotations:
+          summary: "CNS detailed health check failed"
+          description: "CNS /api/health/detailed endpoint returning errors"
+
+  # ===========================================================================
+  # APP PLANE - DJANGO BACKEND ALERTS
+  # ===========================================================================
+  - name: app-plane-django
+    rules:
+      - alert: DjangoBackendDown
+        expr: up{job="app-plane-django"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          plane: app
+          service: django-backend
+        annotations:
+          summary: "Django Backend is down"
+          description: "Django backend service has been unreachable for more than 1 minute"
+
+  # ===========================================================================
+  # INFRASTRUCTURE ALERTS
+  # ===========================================================================
+  - name: infrastructure
+    rules:
+      # RabbitMQ Down (requires rabbitmq_prometheus plugin enabled)
+      - alert: RabbitMQDown
+        expr: up{job="app-plane-rabbitmq"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          plane: app
+          service: rabbitmq
+        annotations:
+          summary: "RabbitMQ is down"
+          description: "RabbitMQ message broker is unreachable or prometheus plugin not enabled"
+
+      # MinIO Down
+      - alert: MinIODown
+        expr: up{job="app-plane-minio"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          plane: app
+          service: minio
+        annotations:
+          summary: "MinIO is down"
+          description: "MinIO object storage is unreachable"
+
+  # ===========================================================================
+  # BLACKBOX PROBE ALERTS (HTTP & TCP Endpoint Monitoring)
+  # ===========================================================================
+  - name: blackbox-probes
+    rules:
+      # Any HTTP probe failing
+      - alert: HTTPEndpointDown
+        expr: probe_success{job="blackbox-http"} == 0
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "HTTP endpoint {{ $labels.instance }} is down"
+          description: "Blackbox HTTP probe to {{ $labels.instance }} has been failing for 2 minutes"
+
+      # Slow HTTP response
+      - alert: HTTPEndpointSlowResponse
+        expr: probe_http_duration_seconds{job="blackbox-http"} > 5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Slow response from {{ $labels.instance }}"
+          description: "HTTP response time exceeds 5 seconds for 5 minutes"
+
+      # TCP probe failing (Redis, Databases)
+      - alert: TCPEndpointDown
+        expr: probe_success{job="blackbox-tcp"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "TCP endpoint {{ $labels.instance }} is down"
+          description: "Cannot establish TCP connection to {{ $labels.instance }} - service may be down"
+
+      # Redis specific (via TCP probe)
+      - alert: RedisDown
+        expr: probe_success{job="blackbox-tcp", instance="redis:6379"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          plane: app
+          service: redis
+        annotations:
+          summary: "Redis is down"
+          description: "Cannot connect to Redis on port 6379"
+
+  # ===========================================================================
+  # REDIS EXPORTER ALERTS
+  # ===========================================================================
+  - name: redis-exporter
+    rules:
+      # Redis Exporter Down
+      - alert: RedisExporterDown
+        expr: up{job="app-plane-redis"} == 0
+        for: 2m
+        labels:
+          severity: warning
+          plane: app
+          service: redis
+        annotations:
+          summary: "Redis Exporter is down"
+          description: "Redis Exporter metrics endpoint is unreachable"
+
+      # Redis Memory Usage High
+      - alert: RedisMemoryHigh
+        expr: redis_memory_used_bytes / redis_memory_max_bytes > 0.85
+        for: 5m
+        labels:
+          severity: warning
+          plane: app
+          service: redis
+        annotations:
+          summary: "Redis memory usage above 85%"
+          description: "Redis is using {{ $value | humanizePercentage }} of max memory"
+
+      # Redis Connected Clients High
+      - alert: RedisConnectedClientsHigh
+        expr: redis_connected_clients > 100
+        for: 5m
+        labels:
+          severity: warning
+          plane: app
+          service: redis
+        annotations:
+          summary: "High number of Redis clients"
+          description: "Redis has {{ $value }} connected clients"
+
+      # Database connectivity (via TCP probe)
+      - alert: DatabaseDown
+        expr: probe_success{job="blackbox-tcp", instance=~".*:5432"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          plane: app
+        annotations:
+          summary: "Database {{ $labels.instance }} is down"
+          description: "Cannot connect to PostgreSQL database at {{ $labels.instance }}"
+
+  # ===========================================================================
+  # PROMETHEUS SELF-MONITORING
+  # ===========================================================================
+  - name: prometheus-self
+    rules:
+      - alert: PrometheusTargetMissing
+        expr: up == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prometheus target {{ $labels.job }} is missing"
+          description: "Target {{ $labels.instance }} in job {{ $labels.job }} has been down for 5 minutes"
+
+      - alert: PrometheusConfigReloadFailed
+        expr: prometheus_config_last_reload_successful == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Prometheus config reload failed"
+          description: "Prometheus configuration reload has been failing"

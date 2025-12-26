@@ -1,0 +1,113 @@
+{
+  "name": "Batch Component Enrichment",
+  "description": "Enrich multiple components in batch (triggered by n8n or admin)",
+  "status": "active",
+  "trigger": "webhook",
+  "accountability": "all",
+  "options": {
+    "method": "POST",
+    "scope": "items.create",
+    "collections": [],
+    "return": "$last"
+  },
+  "operations": [
+    {
+      "name": "Log Batch Start",
+      "key": "log_batch_start",
+      "type": "log",
+      "position_x": 3,
+      "position_y": 1,
+      "options": {
+        "message": "Batch enrichment started. Limit: {{$trigger.body.limit || 100}}"
+      }
+    },
+    {
+      "name": "Read Components Needing Enrichment",
+      "key": "read_components",
+      "type": "item-read",
+      "position_x": 7,
+      "position_y": 1,
+      "options": {
+        "collection": "components_needing_enrichment",
+        "query": {
+          "limit": "{{$trigger.body.limit || 100}}",
+          "sort": "last_enriched_at"
+        }
+      }
+    },
+    {
+      "name": "Loop Through Components",
+      "key": "loop_components",
+      "type": "transform",
+      "position_x": 11,
+      "position_y": 1,
+      "options": {
+        "json": "{{$last}}"
+      }
+    },
+    {
+      "name": "Enrich Each Component",
+      "key": "enrich_each",
+      "type": "enrich-component",
+      "position_x": 15,
+      "position_y": 1,
+      "options": {
+        "component_id": "{{$loop_components.id}}",
+        "triggered_by": "{{$accountability.user || 'batch'}}"
+      }
+    },
+    {
+      "name": "Wait Between Enrichments",
+      "key": "wait_between",
+      "type": "sleep",
+      "position_x": 19,
+      "position_y": 1,
+      "options": {
+        "milliseconds": 2000
+      }
+    },
+    {
+      "name": "Aggregate Results",
+      "key": "aggregate_results",
+      "type": "transform",
+      "position_x": 23,
+      "position_y": 1,
+      "options": {
+        "json": {
+          "total": "{{$loop_components.length}}",
+          "completed": "{{$loop_components.filter(r => r.status === 'completed').length}}",
+          "needs_review": "{{$loop_components.filter(r => r.status === 'needs_review').length}}",
+          "rejected": "{{$loop_components.filter(r => r.status === 'rejected').length}}",
+          "errors": "{{$loop_components.filter(r => r.status === 'error').length}}"
+        }
+      }
+    },
+    {
+      "name": "Log Batch Complete",
+      "key": "log_batch_complete",
+      "type": "log",
+      "position_x": 27,
+      "position_y": 1,
+      "options": {
+        "message": "Batch enrichment complete. Total: {{$last.total}}, Completed: {{$last.completed}}, Review: {{$last.needs_review}}, Rejected: {{$last.rejected}}"
+      }
+    },
+    {
+      "name": "Return Results",
+      "key": "return_results",
+      "type": "webhook-response",
+      "position_x": 31,
+      "position_y": 1,
+      "options": {
+        "status": 200,
+        "body": {
+          "success": true,
+          "data": "{{$aggregate_results}}"
+        },
+        "headers": {
+          "Content-Type": "application/json"
+        }
+      }
+    }
+  ]
+}

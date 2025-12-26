@@ -1,0 +1,182 @@
+# =============================================================================
+# OpenTelemetry Collector Configuration
+# =============================================================================
+# Unified collector for traces and metrics with multiple exporters:
+# - AWS X-Ray (production)
+# - Jaeger (local development)
+# - Prometheus (metrics)
+# =============================================================================
+
+receivers:
+  # OTLP receiver (gRPC and HTTP)
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+        cors:
+          allowed_origins:
+            - "http://localhost:*"
+            - "https://*"
+
+  # Jaeger receiver (for backward compatibility)
+  jaeger:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:14250
+      thrift_http:
+        endpoint: 0.0.0.0:14268
+      thrift_compact:
+        endpoint: 0.0.0.0:6831
+      thrift_binary:
+        endpoint: 0.0.0.0:6832
+
+  # Prometheus scraper for self-monitoring
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: 'otel-collector'
+          scrape_interval: 30s
+          static_configs:
+            - targets: ['localhost:8888']
+
+processors:
+  # Batch processor (reduces API calls)
+  batch:
+    timeout: 10s
+    send_batch_size: 1024
+    send_batch_max_size: 2048
+
+  # Memory limiter (prevent OOM)
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 512
+    spike_limit_mib: 128
+
+  # Resource processor (add environment metadata)
+  resource:
+    attributes:
+      - key: deployment.environment
+        value: ${env:ENVIRONMENT}
+        action: upsert
+      - key: service.namespace
+        value: ananta-platform
+        action: upsert
+      - key: cloud.provider
+        value: aws
+        action: upsert
+      - key: cloud.region
+        value: ${env:AWS_REGION}
+        action: upsert
+
+  # Attributes processor (enrich spans)
+  attributes:
+    actions:
+      - key: aws.trace.id
+        action: insert
+        from_attribute: trace_id
+      - key: http.client_ip
+        action: delete
+
+  # Probabilistic sampler (reduce volume in production)
+  probabilistic_sampler:
+    sampling_percentage: ${env:SAMPLING_PERCENTAGE:-10}
+
+  # Span processor (filter sensitive data)
+  span:
+    name:
+      # Rename generic spans
+      from_attributes: ["http.method", "http.route"]
+      separator: " "
+    attributes:
+      # Remove sensitive headers
+      - key: http.request.header.authorization
+        action: delete
+      - key: http.request.header.cookie
+        action: delete
+      - key: db.statement
+        action: delete
+
+exporters:
+  # AWS X-Ray exporter (production)
+  awsxray:
+    region: ${env:AWS_REGION}
+    # index_all_attributes: true
+    # indexed_attributes:
+    #   - "tenant.id"
+    #   - "user.id"
+    #   - "workflow.id"
+
+  # Jaeger exporter (local development)
+  jaeger:
+    endpoint: ${env:JAEGER_ENDPOINT:-jaeger:14250}
+    tls:
+      insecure: true
+
+  # OTLP exporter (for chaining collectors)
+  otlp:
+    endpoint: ${env:OTLP_ENDPOINT:-otel-collector:4317}
+    tls:
+      insecure: true
+
+  # Prometheus exporter (metrics)
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    namespace: "ananta"
+    const_labels:
+      environment: ${env:ENVIRONMENT}
+
+  # Logging exporter (debugging)
+  logging:
+    loglevel: ${env:OTEL_LOG_LEVEL:-info}
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+  # Debug exporter (verbose output)
+  debug:
+    verbosity: ${env:OTEL_DEBUG_VERBOSITY:-normal}
+    sampling_initial: 5
+    sampling_thereafter: 200
+
+extensions:
+  # Health check extension
+  health_check:
+    endpoint: 0.0.0.0:13133
+    path: /health
+
+  # PPROFextension for profiling
+  pprof:
+    endpoint: 0.0.0.0:1777
+
+  # zPages extension for debugging
+  zpages:
+    endpoint: 0.0.0.0:55679
+
+service:
+  extensions: [health_check, pprof, zpages]
+
+  pipelines:
+    # Traces pipeline
+    traces:
+      receivers: [otlp, jaeger]
+      processors: [memory_limiter, resource, attributes, span, batch]
+      exporters:
+        - awsxray
+        - jaeger
+        - logging
+
+    # Metrics pipeline
+    metrics:
+      receivers: [otlp, prometheus]
+      processors: [memory_limiter, resource, batch]
+      exporters:
+        - prometheus
+        - logging
+
+  telemetry:
+    logs:
+      level: ${env:OTEL_LOG_LEVEL:-info}
+    metrics:
+      level: detailed
+      address: 0.0.0.0:8888

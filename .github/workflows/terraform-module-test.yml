@@ -1,0 +1,318 @@
+# =============================================================================
+# Terraform Module Testing Workflow
+# =============================================================================
+# Validates Terraform modules on PR changes using automated tests
+# Ensures module quality before integration
+# =============================================================================
+
+name: Terraform Module Tests
+
+on:
+  pull_request:
+    paths:
+      - 'infrastructure/terraform/modules/**'
+      - 'infrastructure/terraform/test/**'
+      - '.github/workflows/terraform-module-test.yml'
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'infrastructure/terraform/modules/**'
+      - 'infrastructure/terraform/test/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+env:
+  TF_VERSION: '1.5.7'
+  GO_VERSION: '1.21'
+  AWS_REGION: 'us-east-1'
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Module Validation
+  # ---------------------------------------------------------------------------
+  validate-modules:
+    name: Validate Modules
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Find Changed Modules
+        id: changed-modules
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            MODULES=$(git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.sha }} | \
+              grep '^infrastructure/terraform/modules/' | \
+              cut -d'/' -f1-4 | sort -u)
+          else
+            MODULES=$(find infrastructure/terraform/modules -mindepth 1 -maxdepth 1 -type d)
+          fi
+
+          echo "Changed modules:"
+          echo "$MODULES"
+
+          # Save to file for matrix
+          echo "$MODULES" | jq -R -s -c 'split("\n") | map(select(length > 0))' > modules.json
+          cat modules.json
+
+      - name: Upload Module List
+        uses: actions/upload-artifact@v4
+        with:
+          name: changed-modules
+          path: modules.json
+
+      - name: Validate Each Module
+        run: |
+          EXIT_CODE=0
+          for module_path in infrastructure/terraform/modules/*/; do
+            module=$(basename "$module_path")
+            echo "Validating module: $module"
+
+            cd "$module_path"
+            terraform init -backend=false
+
+            if ! terraform validate -no-color; then
+              echo "ERROR: Module $module failed validation"
+              EXIT_CODE=1
+            fi
+
+            cd - > /dev/null
+          done
+
+          exit $EXIT_CODE
+
+      - name: Check Module Documentation
+        run: |
+          EXIT_CODE=0
+          for module_path in infrastructure/terraform/modules/*/; do
+            module=$(basename "$module_path")
+
+            if [ ! -f "$module_path/README.md" ]; then
+              echo "ERROR: Module $module missing README.md"
+              EXIT_CODE=1
+            fi
+
+            if [ ! -f "$module_path/variables.tf" ]; then
+              echo "ERROR: Module $module missing variables.tf"
+              EXIT_CODE=1
+            fi
+
+            if [ ! -f "$module_path/outputs.tf" ]; then
+              echo "ERROR: Module $module missing outputs.tf"
+              EXIT_CODE=1
+            fi
+          done
+
+          exit $EXIT_CODE
+
+  # ---------------------------------------------------------------------------
+  # Module Security Scan
+  # ---------------------------------------------------------------------------
+  scan-modules:
+    name: Security Scan Modules
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run tfsec on Modules
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          working_directory: infrastructure/terraform/modules
+          soft_fail: false
+          additional_args: --minimum-severity=HIGH
+
+      - name: Run Checkov on Modules
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: infrastructure/terraform/modules
+          soft_fail: false
+          framework: terraform
+
+  # ---------------------------------------------------------------------------
+  # Terratest (Go-based Integration Tests)
+  # ---------------------------------------------------------------------------
+  terratest:
+    name: Terratest Integration Tests
+    runs-on: ubuntu-latest
+    needs: validate-modules
+    if: github.event_name == 'pull_request' || github.event_name == 'workflow_dispatch'
+    environment: dev
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+          terraform_wrapper: false
+
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Check if Tests Exist
+        id: check-tests
+        run: |
+          if [ -d "infrastructure/terraform/test" ] && [ -n "$(ls -A infrastructure/terraform/test/*.go 2>/dev/null)" ]; then
+            echo "tests_exist=true" >> $GITHUB_OUTPUT
+          else
+            echo "tests_exist=false" >> $GITHUB_OUTPUT
+            echo "No Terratest files found. Skipping tests."
+          fi
+
+      - name: Run Terratest
+        if: steps.check-tests.outputs.tests_exist == 'true'
+        run: |
+          cd infrastructure/terraform/test
+          go mod init terraform-tests || true
+          go mod tidy
+          go test -v -timeout 30m -parallel 4
+        env:
+          AWS_DEFAULT_REGION: ${{ env.AWS_REGION }}
+
+      - name: Upload Test Results
+        if: always() && steps.check-tests.outputs.tests_exist == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: terratest-results
+          path: infrastructure/terraform/test/*.log
+
+  # ---------------------------------------------------------------------------
+  # Terraform Docs Generation
+  # ---------------------------------------------------------------------------
+  terraform-docs:
+    name: Generate Module Documentation
+    runs-on: ubuntu-latest
+    needs: validate-modules
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate Terraform Docs
+        uses: terraform-docs/gh-actions@v1.0.0
+        with:
+          working-dir: infrastructure/terraform/modules
+          recursive: true
+          recursive-path: .
+          output-file: README.md
+          output-method: inject
+          git-push: false
+
+      - name: Check for Documentation Changes
+        id: docs-check
+        run: |
+          if git diff --quiet; then
+            echo "docs_changed=false" >> $GITHUB_OUTPUT
+          else
+            echo "docs_changed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Comment on PR if Docs Need Update
+        if: steps.docs-check.outputs.docs_changed == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `## Module Documentation Update Required
+
+The module documentation is out of date. Please run:
+
+\`\`\`bash
+terraform-docs markdown table --output-file README.md infrastructure/terraform/modules/*
+\`\`\`
+
+Or allow this workflow to commit the changes automatically by enabling auto-commits.
+`
+            });
+
+  # ---------------------------------------------------------------------------
+  # Module Complexity Analysis
+  # ---------------------------------------------------------------------------
+  complexity-analysis:
+    name: Module Complexity Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Analyze Module Complexity
+        run: |
+          echo "# Module Complexity Report" > complexity-report.md
+          echo "" >> complexity-report.md
+
+          for module_path in infrastructure/terraform/modules/*/; do
+            module=$(basename "$module_path")
+            echo "## Module: $module" >> complexity-report.md
+
+            # Count resources
+            resources=$(grep -r "^resource" "$module_path" | wc -l || echo "0")
+            echo "- Resources: $resources" >> complexity-report.md
+
+            # Count data sources
+            data_sources=$(grep -r "^data" "$module_path" | wc -l || echo "0")
+            echo "- Data Sources: $data_sources" >> complexity-report.md
+
+            # Count variables
+            variables=$(grep -r "^variable" "$module_path" | wc -l || echo "0")
+            echo "- Variables: $variables" >> complexity-report.md
+
+            # Count outputs
+            outputs=$(grep -r "^output" "$module_path" | wc -l || echo "0")
+            echo "- Outputs: $outputs" >> complexity-report.md
+
+            # Count lines of code
+            loc=$(find "$module_path" -name "*.tf" -exec wc -l {} + | tail -1 | awk '{print $1}')
+            echo "- Lines of Code: $loc" >> complexity-report.md
+
+            echo "" >> complexity-report.md
+          done
+
+          cat complexity-report.md
+
+      - name: Upload Complexity Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: complexity-report
+          path: complexity-report.md
+
+      - name: Post Complexity Report to PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const report = fs.readFileSync('complexity-report.md', 'utf8');
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: report
+            });

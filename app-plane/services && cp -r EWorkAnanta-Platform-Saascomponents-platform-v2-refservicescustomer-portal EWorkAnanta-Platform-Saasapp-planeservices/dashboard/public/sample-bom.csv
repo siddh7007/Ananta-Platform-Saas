@@ -1,0 +1,21 @@
+MPN,Manufacturer,Quantity,Reference Designators,Description
+STM32F407VGT6,STMicroelectronics,5,U1 U2 U3 U4 U5,ARM Cortex-M4 MCU 1MB Flash 192KB RAM
+LM358,Texas Instruments,10,U10 U11 U12 U13 U14 U15 U16 U17 U18 U19,Dual Op-Amp
+TL072,Texas Instruments,8,U20 U21 U22 U23 U24 U25 U26 U27,Low-Noise JFET Dual Op-Amp
+NE555,Texas Instruments,3,U30 U31 U32,Precision Timer IC
+74HC595,Texas Instruments,6,U40 U41 U42 U43 U44 U45,8-bit Shift Register
+LM7805,STMicroelectronics,2,VR1 VR2,5V 1.5A Voltage Regulator
+1N4148,Vishay,20,D1 D2 D3 D4 D5 D6 D7 D8 D9 D10 D11 D12 D13 D14 D15 D16 D17 D18 D19 D20,Fast Switching Diode 100V 300mA
+BC547,ON Semiconductor,15,Q1 Q2 Q3 Q4 Q5 Q6 Q7 Q8 Q9 Q10 Q11 Q12 Q13 Q14 Q15,NPN General Purpose Transistor
+2N7000,ON Semiconductor,12,Q20 Q21 Q22 Q23 Q24 Q25 Q26 Q27 Q28 Q29 Q30 Q31,N-Channel MOSFET 60V 200mA
+ATMEGA328P-PU,Microchip,4,U50 U51 U52 U53,8-bit AVR MCU 32KB Flash
+ESP32-WROOM-32,Espressif,3,U60 U61 U62,WiFi+BT SoC Module
+MAX232,Maxim Integrated,2,U70 U71,RS-232 Line Driver/Receiver
+CD4051,Texas Instruments,4,U80 U81 U82 U83,8-Channel Analog Multiplexer
+ULN2003A,STMicroelectronics,3,U90 U91 U92,Darlington Transistor Array
+IRFZ44N,Infineon,6,Q40 Q41 Q42 Q43 Q44 Q45,N-Channel Power MOSFET 55V 49A
+L7812CV,STMicroelectronics,2,VR10 VR11,12V 1.5A Voltage Regulator
+LM317,Texas Instruments,3,VR20 VR21 VR22,Adjustable Voltage Regulator 1.2V-37V
+AD8307,Analog Devices,2,U100 U101,Logarithmic Amplifier
+LM35,Texas Instruments,4,U110 U111 U112 U113,Precision Temperature Sensor
+MCP3208,Microchip,2,U120 U121,12-bit 8-Channel ADC

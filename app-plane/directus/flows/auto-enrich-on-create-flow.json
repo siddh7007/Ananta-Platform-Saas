@@ -1,0 +1,84 @@
+{
+  "name": "Auto-Enrich on Component Create",
+  "description": "Automatically enrich new components when they are created",
+  "status": "active",
+  "trigger": "event",
+  "accountability": "all",
+  "options": {
+    "type": "action",
+    "scope": ["items.create"],
+    "collections": ["catalog_components"]
+  },
+  "operations": [
+    {
+      "name": "Check if MPN exists",
+      "key": "check_mpn",
+      "type": "condition",
+      "position_x": 3,
+      "position_y": 1,
+      "options": {
+        "filter": {
+          "$trigger": {
+            "payload": {
+              "mpn": {
+                "_nnull": true
+              }
+            }
+          }
+        }
+      },
+      "reject": "skip_enrichment"
+    },
+    {
+      "name": "Wait 5 seconds",
+      "key": "wait",
+      "type": "sleep",
+      "position_x": 7,
+      "position_y": 1,
+      "options": {
+        "milliseconds": 5000
+      }
+    },
+    {
+      "name": "Log Auto-Enrichment",
+      "key": "log_auto_enrich",
+      "type": "log",
+      "position_x": 11,
+      "position_y": 1,
+      "options": {
+        "message": "Auto-enriching component: {{$trigger.payload.mpn}} (ID: {{$trigger.key}})"
+      }
+    },
+    {
+      "name": "Enrich Component",
+      "key": "enrich_component",
+      "type": "enrich-component",
+      "position_x": 15,
+      "position_y": 1,
+      "options": {
+        "component_id": "{{$trigger.key}}",
+        "triggered_by": "system"
+      }
+    },
+    {
+      "name": "Log Success",
+      "key": "log_success",
+      "type": "log",
+      "position_x": 19,
+      "position_y": 1,
+      "options": {
+        "message": "Auto-enrichment complete for {{$trigger.payload.mpn}}: Quality {{$last.quality_score}}%"
+      }
+    },
+    {
+      "name": "Skip Enrichment",
+      "key": "skip_enrichment",
+      "type": "log",
+      "position_x": 3,
+      "position_y": 5,
+      "options": {
+        "message": "Skipping auto-enrichment: No MPN provided"
+      }
+    }
+  ]
+}

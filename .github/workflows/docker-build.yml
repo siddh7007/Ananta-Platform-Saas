@@ -1,0 +1,577 @@
+# =============================================================================
+# Docker Build and Security Scan Workflow
+# =============================================================================
+# Builds container images, performs security scanning, and pushes to ECR
+# Tools: Trivy, Grype, Hadolint, SBOM generation
+# =============================================================================
+
+name: Docker Build and Security Scan
+
+on:
+  push:
+    branches: [main, master]
+    paths:
+      - 'arc-saas/services/**'
+      - 'arc-saas/apps/**'
+      - 'app-plane/services/**'
+      - '**/Dockerfile'
+      - '.github/workflows/docker-build.yml'
+  pull_request:
+    branches: [main, master]
+    paths:
+      - 'arc-saas/services/**'
+      - 'arc-saas/apps/**'
+      - 'app-plane/services/**'
+      - '**/Dockerfile'
+      - '.github/workflows/docker-build.yml'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+  id-token: write  # Required for OIDC with AWS
+
+env:
+  AWS_REGION: us-east-1
+  DOCKERFILE_LINTER_VERSION: '2.12.0'
+
+# =============================================================================
+# Jobs
+# =============================================================================
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Detect Changed Services
+  # ---------------------------------------------------------------------------
+  detect-changes:
+    name: Detect Service Changes
+    runs-on: ubuntu-latest
+    outputs:
+      control-plane-services: ${{ steps.filter-control.outputs.services }}
+      app-plane-services: ${{ steps.filter-app.outputs.services }}
+      has-changes: ${{ steps.check.outputs.has_changes }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Filter Control Plane changes
+        id: filter-control
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            tenant-management-service:
+              - 'arc-saas/services/tenant-management-service/**'
+            temporal-worker-service:
+              - 'arc-saas/services/temporal-worker-service/**'
+            subscription-service:
+              - 'arc-saas/services/subscription-service/**'
+            admin-app:
+              - 'arc-saas/apps/admin-app/**'
+            customer-portal:
+              - 'arc-saas/apps/customer-portal/**'
+
+      - name: Filter App Plane changes
+        id: filter-app
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            cns-service:
+              - 'app-plane/services/cns-service/**'
+            cns-dashboard:
+              - 'app-plane/services/cns-service/dashboard/**'
+            backend:
+              - 'app-plane/services/backend/**'
+            customer-portal-app:
+              - 'app-plane/services/customer-portal/**'
+            backstage-portal:
+              - 'app-plane/services/backstage-portal/**'
+            dashboard:
+              - 'app-plane/services/dashboard/**'
+            audit-logger:
+              - 'app-plane/services/audit-logger/**'
+            middleware-api:
+              - 'app-plane/services/middleware-api/**'
+            novu-consumer:
+              - 'app-plane/services/novu-consumer/**'
+
+      - name: Check if any services changed
+        id: check
+        run: |
+          CONTROL_SERVICES='${{ steps.filter-control.outputs.changes }}'
+          APP_SERVICES='${{ steps.filter-app.outputs.changes }}'
+
+          if [ "$CONTROL_SERVICES" != "[]" ] || [ "$APP_SERVICES" != "[]" ]; then
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "Changed services detected"
+            echo "Control Plane: $CONTROL_SERVICES"
+            echo "App Plane: $APP_SERVICES"
+          else
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            echo "No service changes detected"
+          fi
+
+  # ---------------------------------------------------------------------------
+  # Build and Scan Control Plane Services
+  # ---------------------------------------------------------------------------
+  build-control-plane:
+    name: Build Control Plane
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has-changes == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - tenant-management-service
+          - temporal-worker-service
+          - subscription-service
+          - admin-app
+          - customer-portal
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: |
+            image=moby/buildkit:latest
+            network=host
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Determine service path and type
+        id: service-info
+        run: |
+          SERVICE="${{ matrix.service }}"
+
+          if [[ "$SERVICE" == "admin-app" ]] || [[ "$SERVICE" == "customer-portal" ]]; then
+            echo "path=arc-saas/apps/$SERVICE" >> $GITHUB_OUTPUT
+            echo "type=frontend" >> $GITHUB_OUTPUT
+          else
+            echo "path=arc-saas/services/$SERVICE" >> $GITHUB_OUTPUT
+            echo "type=backend" >> $GITHUB_OUTPUT
+          fi
+
+          echo "Service: $SERVICE"
+          echo "Type: $(cat $GITHUB_OUTPUT | grep type | cut -d= -f2)"
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ steps.login-ecr.outputs.registry }}/ananta-control-plane-${{ matrix.service }}
+          tags: |
+            type=sha,prefix=
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+
+      - name: Build image
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ steps.service-info.outputs.path }}
+          push: false
+          load: true
+          tags: |
+            ${{ matrix.service }}:${{ github.sha }}
+            ${{ matrix.service }}:latest
+          cache-from: type=gha,scope=${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          build-args: |
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+            VERSION=${{ github.ref_name }}
+
+      # -------------------------------------------------------------------------
+      # Security Scanning
+      # -------------------------------------------------------------------------
+
+      - name: Run Hadolint (Dockerfile linting)
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: ${{ steps.service-info.outputs.path }}/Dockerfile
+          failure-threshold: warning
+          format: sarif
+          output-file: hadolint-results.sarif
+
+      - name: Upload Hadolint results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: hadolint-results.sarif
+          category: hadolint-${{ matrix.service }}
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ matrix.service }}:${{ github.sha }}'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          ignore-unfixed: true
+          vuln-type: 'os,library'
+          timeout: '10m'
+
+      - name: Upload Trivy scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-results.sarif'
+          category: trivy-${{ matrix.service }}
+
+      - name: Run Grype vulnerability scanner
+        uses: anchore/scan-action@v3
+        id: grype
+        with:
+          image: '${{ matrix.service }}:${{ github.sha }}'
+          fail-build: false
+          severity-cutoff: high
+          output-format: sarif
+
+      - name: Upload Grype scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: ${{ steps.grype.outputs.sarif }}
+          category: grype-${{ matrix.service }}
+
+      - name: Generate vulnerability report
+        if: always()
+        run: |
+          echo "## Security Scan Results - ${{ matrix.service }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            aquasec/trivy image \
+            --format table \
+            --severity CRITICAL,HIGH \
+            ${{ matrix.service }}:${{ github.sha }} >> $GITHUB_STEP_SUMMARY || true
+
+      # -------------------------------------------------------------------------
+      # SBOM Generation
+      # -------------------------------------------------------------------------
+
+      - name: Generate SBOM with Syft
+        uses: anchore/sbom-action@v0
+        with:
+          image: '${{ matrix.service }}:${{ github.sha }}'
+          format: spdx-json
+          output-file: sbom-${{ matrix.service }}.spdx.json
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-control-${{ matrix.service }}
+          path: sbom-${{ matrix.service }}.spdx.json
+          retention-days: 90
+
+      # -------------------------------------------------------------------------
+      # Push to ECR (only on main branch)
+      # -------------------------------------------------------------------------
+
+      - name: Tag and push to ECR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ananta-control-plane-${{ matrix.service }}
+        run: |
+          echo "Tagging images for ECR..."
+          docker tag ${{ matrix.service }}:${{ github.sha }} \
+            $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}
+          docker tag ${{ matrix.service }}:${{ github.sha }} \
+            $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker tag ${{ matrix.service }}:${{ github.sha }} \
+            $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.ref_name }}
+
+          echo "Pushing images to ECR..."
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.ref_name }}
+
+          echo "Image pushed successfully!"
+          echo "Image URI: $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Scan ECR image
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ananta-control-plane-${{ matrix.service }}
+        run: |
+          echo "Waiting for ECR scan to complete..."
+          aws ecr wait image-scan-complete \
+            --repository-name $ECR_REPOSITORY \
+            --image-id imageTag=${{ github.sha }} \
+            --region ${{ env.AWS_REGION }} || true
+
+          echo "Retrieving scan findings..."
+          aws ecr describe-image-scan-findings \
+            --repository-name $ECR_REPOSITORY \
+            --image-id imageTag=${{ github.sha }} \
+            --region ${{ env.AWS_REGION }} || true
+
+  # ---------------------------------------------------------------------------
+  # Build and Scan App Plane Services
+  # ---------------------------------------------------------------------------
+  build-app-plane:
+    name: Build App Plane
+    needs: detect-changes
+    if: needs.detect-changes.outputs.has-changes == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - cns-service
+          - cns-dashboard
+          - backend
+          - customer-portal-app
+          - backstage-portal
+          - dashboard
+          - audit-logger
+          - middleware-api
+          - novu-consumer
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEV }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Determine service path
+        id: service-info
+        run: |
+          SERVICE="${{ matrix.service }}"
+
+          if [[ "$SERVICE" == "cns-dashboard" ]]; then
+            echo "path=app-plane/services/cns-service/dashboard" >> $GITHUB_OUTPUT
+          else
+            echo "path=app-plane/services/$SERVICE" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Build image
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ steps.service-info.outputs.path }}
+          push: false
+          load: true
+          tags: |
+            ${{ matrix.service }}:${{ github.sha }}
+            ${{ matrix.service }}:latest
+          cache-from: type=gha,scope=app-${{ matrix.service }}
+          cache-to: type=gha,mode=max,scope=app-${{ matrix.service }}
+
+      # -------------------------------------------------------------------------
+      # Security Scanning
+      # -------------------------------------------------------------------------
+
+      - name: Run Hadolint
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: ${{ steps.service-info.outputs.path }}/Dockerfile
+          failure-threshold: warning
+          format: sarif
+          output-file: hadolint-app-results.sarif
+
+      - name: Upload Hadolint results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: hadolint-app-results.sarif
+          category: hadolint-app-${{ matrix.service }}
+
+      - name: Run Trivy scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ matrix.service }}:${{ github.sha }}'
+          format: 'sarif'
+          output: 'trivy-app-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          ignore-unfixed: true
+
+      - name: Upload Trivy results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-app-results.sarif'
+          category: trivy-app-${{ matrix.service }}
+
+      - name: Run Grype scanner
+        uses: anchore/scan-action@v3
+        id: grype
+        with:
+          image: '${{ matrix.service }}:${{ github.sha }}'
+          fail-build: false
+          severity-cutoff: high
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: '${{ matrix.service }}:${{ github.sha }}'
+          format: spdx-json
+          output-file: sbom-app-${{ matrix.service }}.spdx.json
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-app-${{ matrix.service }}
+          path: sbom-app-${{ matrix.service }}.spdx.json
+          retention-days: 90
+
+      # -------------------------------------------------------------------------
+      # Push to ECR (only on main branch)
+      # -------------------------------------------------------------------------
+
+      - name: Tag and push to ECR
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ECR_REPOSITORY: ananta-app-plane-${{ matrix.service }}
+        run: |
+          docker tag ${{ matrix.service }}:${{ github.sha }} \
+            $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}
+          docker tag ${{ matrix.service }}:${{ github.sha }} \
+            $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}
+          docker push $ECR_REGISTRY/$ECR_REPOSITORY:latest
+
+          echo "Image URI: $ECR_REGISTRY/$ECR_REPOSITORY:${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+
+  # ---------------------------------------------------------------------------
+  # Security Summary Report
+  # ---------------------------------------------------------------------------
+  security-summary:
+    name: Security Summary
+    needs: [build-control-plane, build-app-plane]
+    if: always() && needs.detect-changes.outputs.has-changes == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all SBOM artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: sbom-*
+          path: ./sboms
+
+      - name: Generate security summary
+        run: |
+          echo "# Container Security Scan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Build: ${{ github.run_number }}" >> $GITHUB_STEP_SUMMARY
+          echo "Commit: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "## SBOM Artifacts Generated" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          find ./sboms -name "*.spdx.json" -type f | while read file; do
+            echo "- $(basename $file)" >> $GITHUB_STEP_SUMMARY
+          done
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Security scan results uploaded to GitHub Security tab." >> $GITHUB_STEP_SUMMARY
+
+      - name: Comment on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const comment = `## Container Security Scan Complete
+
+            All container images have been scanned for vulnerabilities.
+
+            - Dockerfile linting: Hadolint
+            - Vulnerability scanning: Trivy + Grype
+            - SBOM generation: Syft (SPDX format)
+
+            View detailed results in the [Security tab](https://github.com/${{ github.repository }}/security/code-scanning).
+            `;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+  # ---------------------------------------------------------------------------
+  # Image Promotion (staging/prod)
+  # ---------------------------------------------------------------------------
+  promote-images:
+    name: Promote to ${{ github.event.inputs.environment }}
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.environment != 'dev'
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_PROD }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Promote images
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          ENVIRONMENT: ${{ github.event.inputs.environment }}
+        run: |
+          SERVICES=(
+            "tenant-management-service"
+            "temporal-worker-service"
+            "subscription-service"
+            "admin-app"
+            "customer-portal"
+            "cns-service"
+          )
+
+          for service in "${SERVICES[@]}"; do
+            echo "Promoting $service to $ENVIRONMENT..."
+
+            # Pull from dev
+            docker pull $ECR_REGISTRY/ananta-control-plane-$service:latest
+
+            # Tag for target environment
+            docker tag $ECR_REGISTRY/ananta-control-plane-$service:latest \
+              $ECR_REGISTRY/ananta-control-plane-$service:$ENVIRONMENT
+
+            # Push to target environment
+            docker push $ECR_REGISTRY/ananta-control-plane-$service:$ENVIRONMENT
+          done
+
+          echo "All images promoted to $ENVIRONMENT successfully!"

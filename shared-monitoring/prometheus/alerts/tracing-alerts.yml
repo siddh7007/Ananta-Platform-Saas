@@ -1,0 +1,73 @@
+# =============================================================================
+# Distributed Tracing Alerts - OpenTelemetry & Jaeger
+# =============================================================================
+
+groups:
+  - name: tracing
+    interval: 30s
+    rules:
+      # OpenTelemetry Collector health
+      - alert: OTelCollectorDown
+        expr: up{job="otel-collector"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: observability
+        annotations:
+          summary: "OpenTelemetry Collector is down"
+          description: "The OTel Collector at {{ $labels.instance }} has been down for more than 2 minutes."
+
+      # High span drop rate
+      - alert: OTelHighSpanDropRate
+        expr: rate(otelcol_processor_dropped_spans_total[5m]) > 100
+        for: 5m
+        labels:
+          severity: warning
+          component: observability
+        annotations:
+          summary: "OpenTelemetry Collector dropping spans"
+          description: "OTel Collector is dropping {{ $value | humanize }} spans/sec. Check memory limits and processing capacity."
+
+      # Jaeger health
+      - alert: JaegerDown
+        expr: up{job="jaeger"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: observability
+        annotations:
+          summary: "Jaeger is down"
+          description: "Jaeger tracing backend at {{ $labels.instance }} has been down for more than 2 minutes."
+
+      # High trace ingestion latency
+      - alert: HighTraceIngestionLatency
+        expr: histogram_quantile(0.99, rate(jaeger_collector_save_latency_bucket[5m])) > 1
+        for: 10m
+        labels:
+          severity: warning
+          component: observability
+        annotations:
+          summary: "High trace ingestion latency"
+          description: "P99 trace ingestion latency is {{ $value | humanize }}s. Traces may be delayed."
+
+      # OTel Collector memory pressure
+      - alert: OTelCollectorMemoryPressure
+        expr: otelcol_process_memory_rss / 1024 / 1024 > 400
+        for: 5m
+        labels:
+          severity: warning
+          component: observability
+        annotations:
+          summary: "OpenTelemetry Collector high memory usage"
+          description: "OTel Collector is using {{ $value | humanize }}MB of memory (threshold: 400MB)."
+
+      # No traces received
+      - alert: NoTracesReceived
+        expr: rate(otelcol_receiver_accepted_spans_total[10m]) == 0
+        for: 15m
+        labels:
+          severity: warning
+          component: observability
+        annotations:
+          summary: "No traces being received"
+          description: "OTel Collector has not received any traces in the last 15 minutes. Check application instrumentation."

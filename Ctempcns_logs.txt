@@ -1,0 +1,200 @@
+2025-12-26 01:50:16 - app.core.dual_database_routing - INFO - 🔀 [ROUTING] Endpoint=GET /api/components/alternates, Database=supabase, OrgType=None, UserRole=None
+2025-12-26 01:50:16 - app.middleware.dual_database_routing - INFO - Applied default organization_type: staff
+2025-12-26 01:50:16 - app.middleware.dual_database_routing - INFO - AUDIT: {'timestamp': 1766713816.8024154, 'request_id': '59', 'method': 'GET', 'path': '/api/components/alternates', 'organization_type': 'staff', 'user_role': 'user', 'database': 'supabase', 'status_code': 404}
+2025-12-26 01:50:16 - app.middleware.dual_database_routing - INFO - ✅ [59] GET /api/components/alternates → supabase (0.005s)
+2025-12-26 01:50:16 - app.api.requests - WARNING - GET /api/components/alternates -> 404
+2025-12-26 01:50:16 - app.core.middleware - INFO - [sess-mjm5uffe-uegskq] GET /api/components/alternates - COMPLETE (404) in 12ms
+INFO:     172.18.0.1:34560 - "GET /api/components/alternates?mpn=CM5441Z101B-10&manufacturer=Laird HTTP/1.1" 404 Not Found
+2025-12-26 01:50:20 - opentelemetry.exporter.otlp.proto.grpc.exporter - ERROR - Failed to export traces to localhost:4317, error code: StatusCode.UNAVAILABLE
+2025-12-26 01:50:20 - app.core.middleware - INFO - [71a5c1d6-a923-4324-91b8-897e91260529] OPTIONS /api/projects - START
+2025-12-26 01:50:20 - app.api.requests - INFO - OPTIONS /api/projects
+2025-12-26 01:50:20 - app.core.middleware - INFO - [9aeb3848-228a-48a5-95a1-2f0665384ff3] OPTIONS /api/catalog/my-components - START
+2025-12-26 01:50:20 - app.api.requests - INFO - OPTIONS /api/catalog/my-components
+2025-12-26 01:50:20 - app.core.middleware - INFO - [7b354337-f9e8-419c-bd58-b7aed31056ff] OPTIONS /api/boms - START
+2025-12-26 01:50:20 - app.api.requests - INFO - OPTIONS /api/boms
+2025-12-26 01:50:20 - app.api.requests - INFO - OPTIONS /api/projects -> 200
+2025-12-26 01:50:20 - app.api.requests - INFO - OPTIONS /api/catalog/my-components -> 200
+2025-12-26 01:50:20 - app.api.requests - INFO - OPTIONS /api/boms -> 200
+2025-12-26 01:50:20 - app.core.middleware - INFO - [71a5c1d6-a923-4324-91b8-897e91260529] OPTIONS /api/projects - COMPLETE (200) in 8ms
+INFO:     172.18.0.1:34560 - "OPTIONS /api/projects?filter=%7B%22limit%22:100,%22skip%22:0%7D&organization_id=a0000000-0000-0000-0000-000000000000&workspace_id=c13f4caa-fee3-4e9b-805c-a8282bfd59ed HTTP/1.1" 200 OK
+2025-12-26 01:50:20 - app.core.middleware - INFO - [9aeb3848-228a-48a5-95a1-2f0665384ff3] OPTIONS /api/catalog/my-components - COMPLETE (200) in 7ms
+INFO:     172.18.0.1:60846 - "OPTIONS /api/catalog/my-components?limit=50&offset=0&organization_id=a0000000-0000-0000-0000-000000000000&workspace_id=c13f4caa-fee3-4e9b-805c-a8282bfd59ed&include_facets=true HTTP/1.1" 200 OK
+2025-12-26 01:50:20 - app.core.middleware - INFO - [7b354337-f9e8-419c-bd58-b7aed31056ff] OPTIONS /api/boms - COMPLETE (200) in 5ms
+INFO:     172.18.0.1:60848 - "OPTIONS /api/boms?filter=%7B%22limit%22:100,%22skip%22:0%7D&organization_id=a0000000-0000-0000-0000-000000000000&workspace_id=c13f4caa-fee3-4e9b-805c-a8282bfd59ed HTTP/1.1" 200 OK
+2025-12-26 01:50:20 - app.core.middleware - INFO - [sess-mjm5uffe-uegskq] GET /api/projects - START
+2025-12-26 01:50:20 - app.api.requests - INFO - GET /api/projects
+2025-12-26 01:50:20 - app.core.middleware - INFO - [sess-mjm5uffe-uegskq] GET /api/catalog/my-components - START
+2025-12-26 01:50:20 - app.core.middleware - INFO - [sess-mjm5uffe-uegskq] GET /api/boms - START
+2025-12-26 01:50:20 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Detected RS256 token, trying Auth0
+2025-12-26 01:50:20 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Auth0 validation - enabled=True
+2025-12-26 01:50:20 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Auth0 config: domain=arc-saas-keycloak:8080/realms/ananta-saas, audience=cbp-frontend,cns-api,account
+2025-12-26 01:50:20 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Auth0 token validated: sub=1d07c925-48ba-4b4e-b28f-665041a012ca
+2025-12-26 01:50:20 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Auth0 validation SUCCESS: sub=1d07c925-48ba-4b4e-b28f-665041a012ca
+2025-12-26 01:50:20 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Derived role from token roles: ['owner', 'default-roles-ananta-saas', 'super_admin', 'offline_access', 'admin', 'uma_authorization'] -> super_admin
+2025-12-26 01:50:20 - app.middleware.auth_middleware - INFO - [AuthMiddleware] No org_id in JWT, attempting auto-provision for admin@cbp.local
+2025-12-26 01:50:20 - app.middleware.auth_middleware - INFO - [AutoProvision] Found org from membership: a0000000-0000-0000-0000-000000000000
+2025-12-26 01:50:20 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Auto-provisioned: org_id=a0000000-0000-0000-0000-000000000000
+2025-12-26 01:50:20 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Authenticated: user=1d07c925-48ba-4b4e-b28f-665041a012ca org=a0000000-0000-0000-0000-000000000000 role=super_admin path=/api/projects
+2025-12-26 01:50:20 - app.api.requests - INFO - GET /api/catalog/my-components
+2025-12-26 01:50:20 - app.api.requests - INFO - GET /api/boms
+2025-12-26 01:50:20 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Detected RS256 token, trying Auth0
+2025-12-26 01:50:20 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Auth0 validation - enabled=True
+2025-12-26 01:50:20 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Auth0 config: domain=arc-saas-keycloak:8080/realms/ananta-saas, audience=cbp-frontend,cns-api,account
+2025-12-26 01:50:20 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Auth0 token validated: sub=1d07c925-48ba-4b4e-b28f-665041a012ca
+2025-12-26 01:50:20 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Auth0 validation SUCCESS: sub=1d07c925-48ba-4b4e-b28f-665041a012ca
+2025-12-26 01:50:20 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Derived role from token roles: ['owner', 'default-roles-ananta-saas', 'super_admin', 'offline_access', 'admin', 'uma_authorization'] -> super_admin
+2025-12-26 01:50:20 - app.middleware.auth_middleware - INFO - [AuthMiddleware] No org_id in JWT, attempting auto-provision for admin@cbp.local
+2025-12-26 01:50:20 - app.middleware.auth_middleware - INFO - [AutoProvision] Found org from membership: a0000000-0000-0000-0000-000000000000
+2025-12-26 01:50:20 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Auto-provisioned: org_id=a0000000-0000-0000-0000-000000000000
+2025-12-26 01:50:20 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Authenticated: user=1d07c925-48ba-4b4e-b28f-665041a012ca org=a0000000-0000-0000-0000-000000000000 role=super_admin path=/api/catalog/my-components
+2025-12-26 01:50:20 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Detected RS256 token, trying Auth0
+2025-12-26 01:50:20 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Auth0 validation - enabled=True
+2025-12-26 01:50:20 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Auth0 config: domain=arc-saas-keycloak:8080/realms/ananta-saas, audience=cbp-frontend,cns-api,account
+2025-12-26 01:50:20 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Auth0 token validated: sub=1d07c925-48ba-4b4e-b28f-665041a012ca
+2025-12-26 01:50:20 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Auth0 validation SUCCESS: sub=1d07c925-48ba-4b4e-b28f-665041a012ca
+2025-12-26 01:50:20 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Derived role from token roles: ['owner', 'default-roles-ananta-saas', 'super_admin', 'offline_access', 'admin', 'uma_authorization'] -> super_admin
+2025-12-26 01:50:20 - app.middleware.auth_middleware - INFO - [AuthMiddleware] No org_id in JWT, attempting auto-provision for admin@cbp.local
+2025-12-26 01:50:20 - app.middleware.auth_middleware - INFO - [AutoProvision] Found org from membership: a0000000-0000-0000-0000-000000000000
+2025-12-26 01:50:20 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Auto-provisioned: org_id=a0000000-0000-0000-0000-000000000000
+2025-12-26 01:50:20 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Authenticated: user=1d07c925-48ba-4b4e-b28f-665041a012ca org=a0000000-0000-0000-0000-000000000000 role=super_admin path=/api/boms
+2025-12-26 01:50:20 - app.middleware.dual_database_routing - WARNING - Invalid X-Organization-Id header: a0000000-0000-0000-0000-000000000000
+2025-12-26 01:50:20 - app.core.dual_database_routing - WARNING - Ambiguous routing context, defaulting to Supabase. Context: org_type=None, user_role=None
+2025-12-26 01:50:20 - app.core.dual_database_routing - INFO - 🔀 [ROUTING] Endpoint=GET /api/projects, Database=supabase, OrgType=None, UserRole=None
+2025-12-26 01:50:20 - app.middleware.dual_database_routing - INFO - Applied default organization_type: staff
+2025-12-26 01:50:20 - app.middleware.dual_database_routing - WARNING - Invalid X-Organization-Id header: a0000000-0000-0000-0000-000000000000
+2025-12-26 01:50:20 - app.core.dual_database_routing - WARNING - Ambiguous routing context, defaulting to Supabase. Context: org_type=None, user_role=None
+2025-12-26 01:50:20 - app.core.dual_database_routing - INFO - 🔀 [ROUTING] Endpoint=GET /api/catalog/my-components, Database=supabase, OrgType=None, UserRole=None
+2025-12-26 01:50:20 - app.middleware.dual_database_routing - WARNING - Invalid X-Organization-Id header: a0000000-0000-0000-0000-000000000000
+2025-12-26 01:50:20 - app.core.dual_database_routing - WARNING - Ambiguous routing context, defaulting to Supabase. Context: org_type=None, user_role=None
+2025-12-26 01:50:20 - app.core.dual_database_routing - INFO - 🔀 [ROUTING] Endpoint=GET /api/boms, Database=supabase, OrgType=None, UserRole=None
+2025-12-26 01:50:20 - app.middleware.dual_database_routing - INFO - Applied default organization_type: staff
+2025-12-26 01:50:20 - app.middleware.dual_database_routing - INFO - Applied default organization_type: staff
+2025-12-26 01:50:20 - shared.auth_billing.auth.decorators - INFO - [Auth] Role check PASSED: user=1d07c925-48ba-4b4e-b28f-665041a012ca role=super_admin required=Role.ANALYST endpoint=list_boms
+2025-12-26 01:50:20 - app.api.boms_unified - INFO - [boms_unified] list_boms: user=1d07c925-48ba-4b4e-b28f-665041a012ca org=a0000000-0000-0000-0000-000000000000 role=super_admin project=None
+2025-12-26 01:50:20 - app.api.boms_unified - INFO - [boms_unified] list_boms: returning 20 BOMs (total=39, page=1)
+2025-12-26 01:50:20 - app.api.catalog - INFO - [Catalog API] My Components - org=a0000000-0000-0000-0000-000000000000, workspace=c13f4caa-fee3-4e9b-805c-a8282bfd59ed, project=None, bom=None, query=None, limit=50
+2025-12-26 01:50:20 - app.api.projects - INFO - [PROJECT] Listing projects: workspace=c13f4caa-fee3-4e9b-805c-a8282bfd59ed, user=1d07c925-48ba-4b4e-b28f-665041a012ca
+2025-12-26 01:50:20 - app.middleware.dual_database_routing - INFO - AUDIT: {'timestamp': 1766713820.858505, 'request_id': '62', 'method': 'GET', 'path': '/api/boms', 'organization_type': 'staff', 'user_role': 'user', 'database': 'supabase', 'status_code': 200}
+2025-12-26 01:50:20 - app.middleware.dual_database_routing - INFO - AUDIT: {'timestamp': 1766713820.865465, 'request_id': '60', 'method': 'GET', 'path': '/api/projects', 'organization_type': 'staff', 'user_role': 'user', 'database': 'supabase', 'status_code': 200}
+2025-12-26 01:50:20 - app.middleware.dual_database_routing - INFO - ✅ [62] GET /api/boms → supabase (0.036s)
+2025-12-26 01:50:20 - app.middleware.dual_database_routing - INFO - ✅ [62] GET /api/projects → supabase (0.041s)
+2025-12-26 01:50:20 - app.api.requests - INFO - GET /api/boms -> 200
+2025-12-26 01:50:20 - app.api.requests - INFO - GET /api/projects -> 200
+2025-12-26 01:50:20 - app.core.middleware - INFO - [sess-mjm5uffe-uegskq] GET /api/boms - COMPLETE (200) in 65ms
+INFO:     172.18.0.1:60848 - "GET /api/boms?filter=%7B%22limit%22:100,%22skip%22:0%7D&organization_id=a0000000-0000-0000-0000-000000000000&workspace_id=c13f4caa-fee3-4e9b-805c-a8282bfd59ed HTTP/1.1" 200 OK
+2025-12-26 01:50:20 - app.core.middleware - INFO - [sess-mjm5uffe-uegskq] GET /api/projects - COMPLETE (200) in 71ms
+INFO:     172.18.0.1:34560 - "GET /api/projects?filter=%7B%22limit%22:100,%22skip%22:0%7D&organization_id=a0000000-0000-0000-0000-000000000000&workspace_id=c13f4caa-fee3-4e9b-805c-a8282bfd59ed HTTP/1.1" 200 OK
+2025-12-26 01:50:20 - app.api.catalog - INFO - [Catalog API] My Components - returning 50/534 results
+2025-12-26 01:50:20 - app.middleware.dual_database_routing - INFO - AUDIT: {'timestamp': 1766713820.904665, 'request_id': '61', 'method': 'GET', 'path': '/api/catalog/my-components', 'organization_type': 'staff', 'user_role': 'user', 'database': 'supabase', 'status_code': 200}
+2025-12-26 01:50:20 - app.middleware.dual_database_routing - INFO - ✅ [62] GET /api/catalog/my-components → supabase (0.073s)
+2025-12-26 01:50:20 - app.api.requests - INFO - GET /api/catalog/my-components -> 200
+2025-12-26 01:50:20 - app.core.middleware - INFO - [sess-mjm5uffe-uegskq] GET /api/catalog/my-components - COMPLETE (200) in 95ms
+INFO:     172.18.0.1:60846 - "GET /api/catalog/my-components?limit=50&offset=0&organization_id=a0000000-0000-0000-0000-000000000000&workspace_id=c13f4caa-fee3-4e9b-805c-a8282bfd59ed&include_facets=true HTTP/1.1" 200 OK
+2025-12-26 01:50:25 - opentelemetry.exporter.otlp.proto.grpc.exporter - WARNING - Transient error StatusCode.UNAVAILABLE encountered while exporting traces to localhost:4317, retrying in 1.12s.
+2025-12-26 01:50:31 - app.core.middleware - INFO - [cc90a778-0550-4cd5-a8e9-0474af070d25] GET /health - START
+2025-12-26 01:50:31 - app.api.requests - INFO - GET /health
+2025-12-26 01:50:31 - app.core.dual_database_routing - WARNING - Ambiguous routing context, defaulting to Supabase. Context: org_type=None, user_role=None
+2025-12-26 01:50:31 - app.core.dual_database_routing - INFO - 🔀 [ROUTING] Endpoint=GET /health, Database=supabase, OrgType=None, UserRole=None
+2025-12-26 01:50:31 - app.middleware.dual_database_routing - INFO - Applied default organization_type: staff
+2025-12-26 01:50:31 - app.middleware.dual_database_routing - INFO - AUDIT: {'timestamp': 1766713831.657823, 'request_id': '63', 'method': 'GET', 'path': '/health', 'organization_type': 'staff', 'user_role': 'user', 'database': 'supabase', 'status_code': 200}
+2025-12-26 01:50:31 - app.middleware.dual_database_routing - INFO - ✅ [63] GET /health → supabase (0.002s)
+2025-12-26 01:50:31 - app.api.requests - INFO - GET /health -> 200
+2025-12-26 01:50:31 - app.core.middleware - INFO - [cc90a778-0550-4cd5-a8e9-0474af070d25] GET /health - COMPLETE (200) in 4ms
+INFO:     127.0.0.1:57624 - "GET /health HTTP/1.1" 200 OK
+2025-12-26 01:50:31 - opentelemetry.exporter.otlp.proto.grpc.exporter - ERROR - Failed to export traces to localhost:4317, error code: StatusCode.UNAVAILABLE
+2025-12-26 01:50:33 - app.core.middleware - INFO - [3fec92a3-8e85-4714-a51d-b3293d2e1f3a] OPTIONS /api/catalog/browse - START
+2025-12-26 01:50:33 - app.api.requests - INFO - OPTIONS /api/catalog/browse
+2025-12-26 01:50:33 - app.api.requests - INFO - OPTIONS /api/catalog/browse -> 200
+2025-12-26 01:50:33 - app.core.middleware - INFO - [3fec92a3-8e85-4714-a51d-b3293d2e1f3a] OPTIONS /api/catalog/browse - COMPLETE (200) in 1ms
+INFO:     172.18.0.1:58592 - "OPTIONS /api/catalog/browse?limit=50&offset=0&include_facets=true HTTP/1.1" 200 OK
+2025-12-26 01:50:33 - app.core.middleware - INFO - [sess-mjm5uffe-uegskq] GET /api/catalog/browse - START
+2025-12-26 01:50:33 - app.api.requests - INFO - GET /api/catalog/browse
+2025-12-26 01:50:33 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Detected RS256 token, trying Auth0
+2025-12-26 01:50:33 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Auth0 validation - enabled=True
+2025-12-26 01:50:33 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Auth0 config: domain=arc-saas-keycloak:8080/realms/ananta-saas, audience=cbp-frontend,cns-api,account
+2025-12-26 01:50:33 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Auth0 token validated: sub=1d07c925-48ba-4b4e-b28f-665041a012ca
+2025-12-26 01:50:33 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Auth0 validation SUCCESS: sub=1d07c925-48ba-4b4e-b28f-665041a012ca
+2025-12-26 01:50:33 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Derived role from token roles: ['owner', 'default-roles-ananta-saas', 'super_admin', 'offline_access', 'admin', 'uma_authorization'] -> super_admin
+2025-12-26 01:50:33 - app.middleware.auth_middleware - INFO - [AuthMiddleware] No org_id in JWT, attempting auto-provision for admin@cbp.local
+2025-12-26 01:50:33 - app.middleware.auth_middleware - INFO - [AutoProvision] Found org from membership: a0000000-0000-0000-0000-000000000000
+2025-12-26 01:50:33 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Auto-provisioned: org_id=a0000000-0000-0000-0000-000000000000
+2025-12-26 01:50:33 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Authenticated: user=1d07c925-48ba-4b4e-b28f-665041a012ca org=a0000000-0000-0000-0000-000000000000 role=super_admin path=/api/catalog/browse
+2025-12-26 01:50:33 - app.middleware.dual_database_routing - WARNING - Invalid X-Organization-Id header: a0000000-0000-0000-0000-000000000000
+2025-12-26 01:50:33 - app.core.dual_database_routing - WARNING - Ambiguous routing context, defaulting to Supabase. Context: org_type=None, user_role=None
+2025-12-26 01:50:33 - app.core.dual_database_routing - INFO - 🔀 [ROUTING] Endpoint=GET /api/catalog/browse, Database=supabase, OrgType=None, UserRole=None
+2025-12-26 01:50:33 - app.middleware.dual_database_routing - INFO - Applied default organization_type: staff
+2025-12-26 01:50:33 - app.api.catalog - INFO - [Catalog API] Browse catalog - limit=50, offset=0, sort=quality_score desc
+2025-12-26 01:50:33 - app.api.catalog - INFO - [Catalog API] Browse complete - 50/81 results
+2025-12-26 01:50:33 - app.middleware.dual_database_routing - INFO - AUDIT: {'timestamp': 1766713833.5125942, 'request_id': '64', 'method': 'GET', 'path': '/api/catalog/browse', 'organization_type': 'staff', 'user_role': 'user', 'database': 'supabase', 'status_code': 200}
+2025-12-26 01:50:33 - app.middleware.dual_database_routing - INFO - ✅ [64] GET /api/catalog/browse → supabase (0.021s)
+2025-12-26 01:50:33 - app.api.requests - INFO - GET /api/catalog/browse -> 200
+2025-12-26 01:50:33 - app.core.middleware - INFO - [sess-mjm5uffe-uegskq] GET /api/catalog/browse - COMPLETE (200) in 28ms
+INFO:     172.18.0.1:58592 - "GET /api/catalog/browse?limit=50&offset=0&include_facets=true HTTP/1.1" 200 OK
+2025-12-26 01:50:35 - app.core.middleware - INFO - [e64904f3-7c50-4e3e-8063-8c9c52e5e2fb] GET /api/projects - START
+2025-12-26 01:50:35 - app.api.requests - INFO - GET /api/projects
+2025-12-26 01:50:35 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Detected HS256 token, trying Supabase
+2025-12-26 01:50:35 - app.middleware.auth_middleware - WARNING - [AuthMiddleware] JWT signature verification FAILED
+2025-12-26 01:50:35 - app.middleware.auth_middleware - WARNING - [AuthMiddleware] Token signature INVALID - possible forgery
+2025-12-26 01:50:35 - app.api.requests - WARNING - GET /api/projects -> 401
+2025-12-26 01:50:35 - app.core.middleware - INFO - [e64904f3-7c50-4e3e-8063-8c9c52e5e2fb] GET /api/projects - COMPLETE (401) in 1ms
+INFO:     172.18.0.1:58604 - "GET /api/projects?workspace_id=b0000000-0000-0000-0000-000000000000 HTTP/1.1" 401 Unauthorized
+2025-12-26 01:50:36 - app.core.middleware - INFO - [sess-mjm5uffe-uegskq] GET /api/projects - START
+2025-12-26 01:50:36 - app.api.requests - INFO - GET /api/projects
+2025-12-26 01:50:36 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Detected RS256 token, trying Auth0
+2025-12-26 01:50:36 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Auth0 validation - enabled=True
+2025-12-26 01:50:36 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Auth0 config: domain=arc-saas-keycloak:8080/realms/ananta-saas, audience=cbp-frontend,cns-api,account
+2025-12-26 01:50:36 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Auth0 token validated: sub=1d07c925-48ba-4b4e-b28f-665041a012ca
+2025-12-26 01:50:36 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Auth0 validation SUCCESS: sub=1d07c925-48ba-4b4e-b28f-665041a012ca
+2025-12-26 01:50:36 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Derived role from token roles: ['owner', 'default-roles-ananta-saas', 'super_admin', 'offline_access', 'admin', 'uma_authorization'] -> super_admin
+2025-12-26 01:50:36 - app.middleware.auth_middleware - INFO - [AuthMiddleware] No org_id in JWT, attempting auto-provision for admin@cbp.local
+2025-12-26 01:50:36 - app.middleware.auth_middleware - INFO - [AutoProvision] Found org from membership: a0000000-0000-0000-0000-000000000000
+2025-12-26 01:50:36 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Auto-provisioned: org_id=a0000000-0000-0000-0000-000000000000
+2025-12-26 01:50:36 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Authenticated: user=1d07c925-48ba-4b4e-b28f-665041a012ca org=a0000000-0000-0000-0000-000000000000 role=super_admin path=/api/projects
+2025-12-26 01:50:36 - app.middleware.dual_database_routing - WARNING - Invalid X-Organization-Id header: a0000000-0000-0000-0000-000000000000
+2025-12-26 01:50:36 - app.core.dual_database_routing - WARNING - Ambiguous routing context, defaulting to Supabase. Context: org_type=None, user_role=None
+2025-12-26 01:50:36 - app.core.dual_database_routing - INFO - 🔀 [ROUTING] Endpoint=GET /api/projects, Database=supabase, OrgType=None, UserRole=None
+2025-12-26 01:50:36 - app.core.middleware - INFO - [sess-mjm5uffe-uegskq] GET /api/boms - START
+2025-12-26 01:50:36 - app.middleware.dual_database_routing - INFO - Applied default organization_type: staff
+2025-12-26 01:50:36 - app.api.requests - INFO - GET /api/boms
+2025-12-26 01:50:36 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Detected RS256 token, trying Auth0
+2025-12-26 01:50:36 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Auth0 validation - enabled=True
+2025-12-26 01:50:36 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Auth0 config: domain=arc-saas-keycloak:8080/realms/ananta-saas, audience=cbp-frontend,cns-api,account
+2025-12-26 01:50:36 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Auth0 token validated: sub=1d07c925-48ba-4b4e-b28f-665041a012ca
+2025-12-26 01:50:36 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Auth0 validation SUCCESS: sub=1d07c925-48ba-4b4e-b28f-665041a012ca
+2025-12-26 01:50:36 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Derived role from token roles: ['owner', 'default-roles-ananta-saas', 'super_admin', 'offline_access', 'admin', 'uma_authorization'] -> super_admin
+2025-12-26 01:50:36 - app.middleware.auth_middleware - INFO - [AuthMiddleware] No org_id in JWT, attempting auto-provision for admin@cbp.local
+2025-12-26 01:50:36 - app.middleware.auth_middleware - INFO - [AutoProvision] Found org from membership: a0000000-0000-0000-0000-000000000000
+2025-12-26 01:50:36 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Auto-provisioned: org_id=a0000000-0000-0000-0000-000000000000
+2025-12-26 01:50:36 - app.middleware.auth_middleware - INFO - [AuthMiddleware] Authenticated: user=1d07c925-48ba-4b4e-b28f-665041a012ca org=a0000000-0000-0000-0000-000000000000 role=super_admin path=/api/boms
+2025-12-26 01:50:36 - app.middleware.dual_database_routing - WARNING - Invalid X-Organization-Id header: a0000000-0000-0000-0000-000000000000
+2025-12-26 01:50:36 - app.core.dual_database_routing - WARNING - Ambiguous routing context, defaulting to Supabase. Context: org_type=None, user_role=None
+2025-12-26 01:50:36 - app.core.dual_database_routing - INFO - 🔀 [ROUTING] Endpoint=GET /api/boms, Database=supabase, OrgType=None, UserRole=None
+2025-12-26 01:50:36 - app.middleware.dual_database_routing - INFO - Applied default organization_type: staff
+2025-12-26 01:50:36 - shared.auth_billing.auth.decorators - INFO - [Auth] Role check PASSED: user=1d07c925-48ba-4b4e-b28f-665041a012ca role=super_admin required=Role.ANALYST endpoint=list_boms
+2025-12-26 01:50:36 - app.api.boms_unified - INFO - [boms_unified] list_boms: user=1d07c925-48ba-4b4e-b28f-665041a012ca org=a0000000-0000-0000-0000-000000000000 role=super_admin project=None
+2025-12-26 01:50:36 - app.api.boms_unified - INFO - [boms_unified] list_boms: returning 20 BOMs (total=39, page=1)
+2025-12-26 01:50:36 - app.api.projects - INFO - [PROJECT] Listing projects: workspace=c13f4caa-fee3-4e9b-805c-a8282bfd59ed, user=1d07c925-48ba-4b4e-b28f-665041a012ca
+2025-12-26 01:50:36 - app.middleware.dual_database_routing - INFO - AUDIT: {'timestamp': 1766713836.753602, 'request_id': '66', 'method': 'GET', 'path': '/api/boms', 'organization_type': 'staff', 'user_role': 'user', 'database': 'supabase', 'status_code': 200}
+2025-12-26 01:50:36 - app.middleware.dual_database_routing - INFO - AUDIT: {'timestamp': 1766713836.7544494, 'request_id': '65', 'method': 'GET', 'path': '/api/projects', 'organization_type': 'staff', 'user_role': 'user', 'database': 'supabase', 'status_code': 200}
+2025-12-26 01:50:36 - app.middleware.dual_database_routing - INFO - ✅ [66] GET /api/boms → supabase (0.022s)
+2025-12-26 01:50:36 - app.middleware.dual_database_routing - INFO - ✅ [66] GET /api/projects → supabase (0.033s)
+2025-12-26 01:50:36 - app.api.requests - INFO - GET /api/boms -> 200
+2025-12-26 01:50:36 - app.api.requests - INFO - GET /api/projects -> 200
+2025-12-26 01:50:36 - app.core.middleware - INFO - [sess-mjm5uffe-uegskq] GET /api/boms - COMPLETE (200) in 34ms
+INFO:     172.18.0.1:58618 - "GET /api/boms?filter=%7B%22limit%22:100,%22skip%22:0%7D&organization_id=a0000000-0000-0000-0000-000000000000&workspace_id=c13f4caa-fee3-4e9b-805c-a8282bfd59ed HTTP/1.1" 200 OK
+2025-12-26 01:50:36 - app.core.middleware - INFO - [sess-mjm5uffe-uegskq] GET /api/projects - COMPLETE (200) in 43ms
+INFO:     172.18.0.1:58592 - "GET /api/projects?filter=%7B%22limit%22:100,%22skip%22:0%7D&organization_id=a0000000-0000-0000-0000-000000000000&workspace_id=c13f4caa-fee3-4e9b-805c-a8282bfd59ed HTTP/1.1" 200 OK
+2025-12-26 01:50:37 - opentelemetry.exporter.otlp.proto.grpc.exporter - WARNING - Transient error StatusCode.UNAVAILABLE encountered while exporting traces to localhost:4317, retrying in 0.85s.
+2025-12-26 01:50:40 - opentelemetry.exporter.otlp.proto.grpc.exporter - WARNING - Transient error StatusCode.UNAVAILABLE encountered while exporting traces to localhost:4317, retrying in 3.91s.
+2025-12-26 01:50:44 - opentelemetry.exporter.otlp.proto.grpc.exporter - ERROR - Failed to export traces to localhost:4317, error code: StatusCode.UNAVAILABLE
+2025-12-26 01:51:02 - app.core.middleware - INFO - [a366d9b5-a472-49ec-a1bf-fb41c3e42bd2] GET /health - START
+2025-12-26 01:51:02 - app.api.requests - INFO - GET /health
+2025-12-26 01:51:02 - app.core.dual_database_routing - WARNING - Ambiguous routing context, defaulting to Supabase. Context: org_type=None, user_role=None
+2025-12-26 01:51:02 - app.core.dual_database_routing - INFO - 🔀 [ROUTING] Endpoint=GET /health, Database=supabase, OrgType=None, UserRole=None
+2025-12-26 01:51:02 - app.middleware.dual_database_routing - INFO - Applied default organization_type: staff
+2025-12-26 01:51:02 - app.middleware.dual_database_routing - INFO - AUDIT: {'timestamp': 1766713862.8091419, 'request_id': '67', 'method': 'GET', 'path': '/health', 'organization_type': 'staff', 'user_role': 'user', 'database': 'supabase', 'status_code': 200}
+2025-12-26 01:51:02 - app.middleware.dual_database_routing - INFO - ✅ [67] GET /health → supabase (0.004s)
+2025-12-26 01:51:02 - app.api.requests - INFO - GET /health -> 200
+2025-12-26 01:51:02 - app.core.middleware - INFO - [a366d9b5-a472-49ec-a1bf-fb41c3e42bd2] GET /health - COMPLETE (200) in 5ms
+INFO:     127.0.0.1:56836 - "GET /health HTTP/1.1" 200 OK
+2025-12-26 01:51:04 - opentelemetry.exporter.otlp.proto.grpc.exporter - WARNING - Transient error StatusCode.UNAVAILABLE encountered while exporting traces to localhost:4317, retrying in 1.14s.
