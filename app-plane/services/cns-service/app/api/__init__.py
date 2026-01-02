@@ -26,6 +26,7 @@ from app.api import workspaces
 from app.api import projects
 from app.api import column_mapping_templates
 from app.api import workflow_state
+from app.api import component_enrichment
 
 # CRITICAL Fixes Examples
 try:
@@ -83,6 +84,7 @@ api_router.include_router(workspaces.invitations_router, tags=["Workspaces"])  #
 api_router.include_router(projects.router, tags=["Projects"])  # Project management within workspaces
 api_router.include_router(column_mapping_templates.router, tags=["Column Mapping Templates"])  # Column mapping template management
 api_router.include_router(workflow_state.router, tags=["Workflow State"])  # S3-persisted workflow state for BOM upload
+api_router.include_router(component_enrichment.router, tags=["Single Component Enrichment"])  # On-demand single component enrichment via Temporal
 
 # CRITICAL Fixes Example Endpoints
 if CRITICAL_EXAMPLES_AVAILABLE:

@@ -1343,7 +1343,7 @@ ON CONFLICT (id) DO UPDATE SET
 -- Seed User 1: Platform Super Admin
 INSERT INTO public.users (id, email, first_name, last_name, role, is_platform_admin, is_active, email_verified)
 VALUES (
-    'b0000000-0000-0000-0000-000000000001'::uuid,
+    'u0000000-0000-0000-0000-000000000001'::uuid,
     'superadmin@ananta.dev',
     'Platform',
     'Admin',
@@ -1361,7 +1361,7 @@ ON CONFLICT (email) DO UPDATE SET
 -- Seed User 2: CNS Staff Lead
 INSERT INTO public.users (id, email, first_name, last_name, role, is_platform_admin, is_active, email_verified)
 VALUES (
-    'b0000000-0000-0000-0000-000000000002'::uuid,
+    'u0000000-0000-0000-0000-000000000002'::uuid,
     'cns-lead@ananta.dev',
     'CNS',
     'Lead',
@@ -1378,7 +1378,7 @@ ON CONFLICT (email) DO UPDATE SET
 -- Seed User 3: CNS Engineer
 INSERT INTO public.users (id, email, first_name, last_name, role, is_platform_admin, is_active, email_verified)
 VALUES (
-    'b0000000-0000-0000-0000-000000000003'::uuid,
+    'u0000000-0000-0000-0000-000000000003'::uuid,
     'cns-engineer@ananta.dev',
     'CNS',
     'Engineer',
@@ -1395,7 +1395,7 @@ ON CONFLICT (email) DO UPDATE SET
 -- Seed User 4: Demo Owner
 INSERT INTO public.users (id, email, first_name, last_name, role, is_platform_admin, is_active, email_verified)
 VALUES (
-    'b0000000-0000-0000-0000-000000000004'::uuid,
+    'u0000000-0000-0000-0000-000000000004'::uuid,
     'demo-owner@example.com',
     'Demo',
     'Owner',
@@ -1412,7 +1412,7 @@ ON CONFLICT (email) DO UPDATE SET
 -- Seed User 5: Demo Engineer
 INSERT INTO public.users (id, email, first_name, last_name, role, is_platform_admin, is_active, email_verified)
 VALUES (
-    'b0000000-0000-0000-0000-000000000005'::uuid,
+    'u0000000-0000-0000-0000-000000000005'::uuid,
     'demo-engineer@example.com',
     'Demo',
     'Engineer',
@@ -1429,11 +1429,11 @@ ON CONFLICT (email) DO UPDATE SET
 -- Seed Organization Memberships
 INSERT INTO public.organization_memberships (user_id, organization_id, role)
 VALUES
-    ('b0000000-0000-0000-0000-000000000001'::uuid, 'a0000000-0000-0000-0000-000000000001'::uuid, 'admin'),
-    ('b0000000-0000-0000-0000-000000000002'::uuid, 'a0000000-0000-0000-0000-000000000002'::uuid, 'admin'),
-    ('b0000000-0000-0000-0000-000000000003'::uuid, 'a0000000-0000-0000-0000-000000000002'::uuid, 'engineer'),
-    ('b0000000-0000-0000-0000-000000000004'::uuid, 'a0000000-0000-0000-0000-000000000000'::uuid, 'owner'),
-    ('b0000000-0000-0000-0000-000000000005'::uuid, 'a0000000-0000-0000-0000-000000000000'::uuid, 'engineer')
+    ('u0000000-0000-0000-0000-000000000001'::uuid, 'a0000000-0000-0000-0000-000000000001'::uuid, 'admin'),
+    ('u0000000-0000-0000-0000-000000000002'::uuid, 'a0000000-0000-0000-0000-000000000002'::uuid, 'admin'),
+    ('u0000000-0000-0000-0000-000000000003'::uuid, 'a0000000-0000-0000-0000-000000000002'::uuid, 'engineer'),
+    ('u0000000-0000-0000-0000-000000000004'::uuid, 'a0000000-0000-0000-0000-000000000000'::uuid, 'owner'),
+    ('u0000000-0000-0000-0000-000000000005'::uuid, 'a0000000-0000-0000-0000-000000000000'::uuid, 'engineer')
 ON CONFLICT (user_id, organization_id) DO UPDATE SET role = EXCLUDED.role;
 
 -- Seed Suppliers

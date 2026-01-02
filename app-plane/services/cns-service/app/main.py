@@ -318,6 +318,26 @@ async def lifespan(app: FastAPI):
         logger.warning("[WARN] Continuing without unified BOM stream consumer")
         unified_bom_stream_task = None
 
+    # Start single component stream consumer (listens for component enrichment events from RabbitMQ Stream)
+    from app.workers.single_component_stream_runner import (
+        start_single_component_stream_consumer,
+        stop_single_component_stream_consumer,
+    )
+    single_component_stream_task = None
+    try:
+        single_component_stream_task = start_single_component_stream_consumer()
+        if single_component_stream_task:
+            logger.info("[OK] Single component stream consumer started successfully")
+            logger.info("     - Consuming from: stream.component.enrich")
+            logger.info("     - Events: component.enrich.request, component.enrich.force, component.enrich.batch")
+            logger.info("     - Workflow: SingleComponentEnrichmentWorkflow (Temporal)")
+        else:
+            logger.warning("[WARN] Single component stream consumer not started (already running or failed)")
+    except Exception as e:
+        logger.error(f"[FAIL] Failed to start single component stream consumer: {e}", exc_info=True)
+        logger.warning("[WARN] Continuing without single component stream consumer")
+        single_component_stream_task = None
+
     logger.info("CNS service started successfully")
 
     yield
@@ -331,6 +351,9 @@ async def lifespan(app: FastAPI):
 
     if unified_bom_stream_task:
         await stop_unified_bom_stream_consumer()
+
+    if single_component_stream_task:
+        await stop_single_component_stream_consumer()
 
     # Shutdown
     logger.info("Shutting down CNS service...")

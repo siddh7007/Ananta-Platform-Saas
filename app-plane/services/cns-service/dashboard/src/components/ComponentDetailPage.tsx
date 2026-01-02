@@ -34,6 +34,7 @@ import {
   Link as MuiLink,
   Tooltip,
   IconButton,
+  Snackbar,
 } from '@mui/material';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 
@@ -54,12 +55,12 @@ import AttachMoneyIcon from '@mui/icons-material/AttachMoney';
 import LocalShippingIcon from '@mui/icons-material/LocalShipping';
 import TimelineIcon from '@mui/icons-material/Timeline';
 import LinkIcon from '@mui/icons-material/Link';
-import InventoryIcon from '@mui/icons-material/Inventory';
 import StorefrontIcon from '@mui/icons-material/Storefront';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 
 // Detail components
 import { SectionCard, DataTable, createRow, CollapsibleJsonViewer, ComplianceBadge } from './detail';
-import { CNS_API_URL, getAuthHeadersAsync } from '../config/api';
+import { CNS_API_URL, getAuthHeadersAsync, CNS_STAFF_ORGANIZATION_ID } from '../config/api';
 
 // UUID v4 regex pattern
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -163,6 +164,10 @@ export const ComponentDetailPage: React.FC = () => {
   const [activeSection, setActiveSection] = useState<string>('specifications');
   const [printMode, setPrintMode] = useState(false);
 
+  // Enrichment state
+  const [enriching, setEnriching] = useState(false);
+  const [enrichmentMessage, setEnrichmentMessage] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+
   // Section refs for intersection observer
   const sectionRefs = useRef<Record<string, HTMLElement | null>>({});
 
@@ -258,6 +263,59 @@ export const ComponentDetailPage: React.FC = () => {
       setPrintMode(false);
     }, 100);
   };
+
+  // Enrich component handler - triggers Single Component Enrichment workflow
+  const handleEnrich = useCallback(async () => {
+    if (!component) return;
+
+    setEnriching(true);
+    setEnrichmentMessage({ type: 'info', text: 'Starting enrichment workflow...' });
+
+    try {
+      const headers = await getAuthHeadersAsync();
+      const response = await fetch(`${CNS_API_URL}/component/enrich`, {
+        method: 'POST',
+        headers: {
+          ...headers,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          mpn: component.mpn,
+          manufacturer: component.manufacturer,
+          organization_id: CNS_STAFF_ORGANIZATION_ID,
+          enable_suppliers: true,
+          enable_ai: false,
+          enable_web_scraping: false,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.detail || 'Failed to start enrichment');
+      }
+
+      // Show success with workflow link
+      const workflowId = data.workflow_id;
+      const temporalUrl = data.temporal_ui_url;
+      setEnrichmentMessage({
+        type: 'success',
+        text: `Enrichment started! Workflow ID: ${workflowId}${temporalUrl ? ` - View in Temporal UI` : ''}`,
+      });
+
+      // Reload component after a delay to show updated data
+      setTimeout(() => {
+        loadComponentDetail();
+      }, 3000);
+    } catch (err) {
+      setEnrichmentMessage({
+        type: 'error',
+        text: err instanceof Error ? err.message : 'Failed to start enrichment',
+      });
+    } finally {
+      setEnriching(false);
+    }
+  }, [component, loadComponentDetail]);
 
   // Loading state
   if (loading) {
@@ -498,6 +556,18 @@ export const ComponentDetailPage: React.FC = () => {
                       3D Model
                     </Button>
                   )}
+                  <Tooltip title="Run single component enrichment workflow to fetch latest supplier data">
+                    <Button
+                      variant="outlined"
+                      size="small"
+                      color="secondary"
+                      startIcon={enriching ? <CircularProgress size={16} /> : <AutoFixHighIcon />}
+                      onClick={handleEnrich}
+                      disabled={enriching}
+                    >
+                      {enriching ? 'Enriching...' : 'Enrich'}
+                    </Button>
+                  </Tooltip>
                 </Box>
               </Grid>
 
@@ -999,6 +1069,22 @@ export const ComponentDetailPage: React.FC = () => {
           </Box>
         </SectionCard>
       </Box>
+
+      {/* Enrichment Status Snackbar */}
+      <Snackbar
+        open={enrichmentMessage !== null}
+        autoHideDuration={enrichmentMessage?.type === 'error' ? 6000 : 4000}
+        onClose={() => setEnrichmentMessage(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert
+          onClose={() => setEnrichmentMessage(null)}
+          severity={enrichmentMessage?.type || 'info'}
+          sx={{ width: '100%' }}
+        >
+          {enrichmentMessage?.text}
+        </Alert>
+      </Snackbar>
     </Box>
   );
 };

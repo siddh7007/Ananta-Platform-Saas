@@ -1,0 +1,173 @@
+# =============================================================================
+# Core Databases for Ananta Platform (Coolify Deployment)
+# =============================================================================
+# This compose file sets up the core databases with initialization
+# Deploy this first, then deploy application services
+# =============================================================================
+
+services:
+  # ---------------------------------------------------------------------------
+  # Control Plane PostgreSQL (Arc-SaaS + Keycloak)
+  # ---------------------------------------------------------------------------
+  control-plane-postgres:
+    image: postgres:15-alpine
+    volumes:
+      - control-plane-postgres-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${CONTROL_PLANE_DB_PASSWORD:-supersecretpassword}
+      POSTGRES_DB: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+
+  # ---------------------------------------------------------------------------
+  # Supabase PostgreSQL (App Plane tenant data)
+  # ---------------------------------------------------------------------------
+  supabase-db:
+    image: postgres:15-alpine
+    volumes:
+      - supabase-db-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${SUPABASE_DB_PASSWORD:-supersecretpassword}
+      POSTGRES_DB: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    ports:
+      - "27432:5432"
+
+  # ---------------------------------------------------------------------------
+  # Components-V2 PostgreSQL (Component Catalog)
+  # ---------------------------------------------------------------------------
+  components-v2-postgres:
+    image: postgres:15-alpine
+    volumes:
+      - components-v2-postgres-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${COMPONENTS_V2_DB_PASSWORD:-supersecretpassword}
+      POSTGRES_DB: components_v2
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    ports:
+      - "27010:5432"
+
+  # ---------------------------------------------------------------------------
+  # Shared Redis
+  # ---------------------------------------------------------------------------
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
+  # ---------------------------------------------------------------------------
+  # RabbitMQ (Message Broker)
+  # ---------------------------------------------------------------------------
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-supersecretpassword}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  # ---------------------------------------------------------------------------
+  # Temporal PostgreSQL
+  # ---------------------------------------------------------------------------
+  temporal-postgresql:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: ${TEMPORAL_DB_PASSWORD:-temporalpassword}
+      POSTGRES_DB: temporal
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - temporal-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal -d temporal"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Temporal Server
+  # ---------------------------------------------------------------------------
+  temporal:
+    image: temporalio/auto-setup:1.24.2
+    depends_on:
+      temporal-postgresql:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: ${TEMPORAL_DB_PASSWORD:-temporalpassword}
+      POSTGRES_SEEDS: temporal-postgresql
+      ENABLE_ES: "false"
+      SKIP_DEFAULT_NAMESPACE_CREATION: "false"
+      DEFAULT_NAMESPACE: default
+      DEFAULT_NAMESPACE_RETENTION: 72h
+    healthcheck:
+      test: ["CMD-SHELL", "tctl cluster health || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 90s
+    restart: unless-stopped
+    ports:
+      - "7233:7233"
+
+  # ---------------------------------------------------------------------------
+  # Temporal UI
+  # ---------------------------------------------------------------------------
+  temporal-ui:
+    image: temporalio/ui:2.21.3
+    depends_on:
+      - temporal
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: "http://localhost:3000"
+    restart: unless-stopped
+    ports:
+      - "8088:8080"
+
+volumes:
+  control-plane-postgres-data:
+  supabase-db-data:
+  components-v2-postgres-data:
+  redis-data:
+  rabbitmq-data:
+  temporal-postgres-data:

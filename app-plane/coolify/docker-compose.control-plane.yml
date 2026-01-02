@@ -1,0 +1,465 @@
+# =============================================================================
+# Coolify Production Deployment - Control Plane (arc-saas)
+# =============================================================================
+#
+# Control Plane services for multi-tenant SaaS management:
+#   - Tenant Management API
+#   - Keycloak (Identity)
+#   - Novu (Notifications)
+#   - Temporal Workers
+#   - Admin Portal
+#
+# =============================================================================
+
+services:
+  # ===========================================================================
+  # CORE INFRASTRUCTURE
+  # ===========================================================================
+
+  postgres:
+    image: postgres:15-alpine
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./docker/init-db:/docker-entrypoint-initdb.d
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: arc_saas
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-}
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+
+  # ===========================================================================
+  # KEYCLOAK (Identity Provider)
+  # ===========================================================================
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:23.0
+    command: start --optimized
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: postgres
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      KC_HEALTH_ENABLED: "true"
+      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:-auth.yourdomain.com}
+      KC_PROXY: edge
+      KC_HTTP_ENABLED: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080;echo -e 'GET /health/ready HTTP/1.1\r\nhost: localhost\r\nConnection: close\r\n\r\n' >&3;if [ $? -eq 0 ]; then exit 0; else exit 1; fi"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=8080
+      - coolify.name=keycloak
+
+  # ===========================================================================
+  # NOVU (Notifications)
+  # ===========================================================================
+
+  novu-mongodb:
+    image: mongo:6
+    volumes:
+      - novu-mongo-data:/data/db
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+
+  novu-redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - novu-redis-data:/data
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+
+  novu-api:
+    image: ghcr.io/novuhq/novu/api:latest
+    depends_on:
+      - novu-mongodb
+      - novu-redis
+    environment:
+      NODE_ENV: production
+      API_ROOT_URL: ${NOVU_API_URL:-https://novu-api.yourdomain.com}
+      DISABLE_USER_REGISTRATION: "false"
+      PORT: 3000
+      FRONT_BASE_URL: ${NOVU_WEB_URL:-https://novu.yourdomain.com}
+      WIDGET_BASE_URL: ${NOVU_WEB_URL:-https://novu.yourdomain.com}
+      MONGO_URL: mongodb://novu-mongodb:27017/novu-db
+      REDIS_HOST: novu-redis
+      REDIS_PORT: 6379
+      REDIS_CACHE_SERVICE_HOST: novu-redis
+      REDIS_CACHE_SERVICE_PORT: 6379
+      S3_LOCAL_STACK: http://minio:9000
+      S3_BUCKET_NAME: novu-storage
+      S3_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      JWT_SECRET: ${NOVU_JWT_SECRET}
+      STORE_ENCRYPTION_KEY: ${NOVU_ENCRYPTION_KEY}
+      NOVU_SECRET_KEY: ${NOVU_SECRET_KEY}
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=3000
+      - coolify.name=novu-api
+
+  novu-ws:
+    image: ghcr.io/novuhq/novu/ws:latest
+    depends_on:
+      - novu-mongodb
+      - novu-redis
+    environment:
+      NODE_ENV: production
+      PORT: 3002
+      MONGO_URL: mongodb://novu-mongodb:27017/novu-db
+      REDIS_HOST: novu-redis
+      REDIS_PORT: 6379
+      JWT_SECRET: ${NOVU_JWT_SECRET}
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=3002
+      - coolify.name=novu-ws
+
+  novu-worker:
+    image: ghcr.io/novuhq/novu/worker:latest
+    depends_on:
+      - novu-mongodb
+      - novu-redis
+      - novu-api
+    environment:
+      NODE_ENV: production
+      MONGO_URL: mongodb://novu-mongodb:27017/novu-db
+      REDIS_HOST: novu-redis
+      REDIS_PORT: 6379
+      REDIS_CACHE_SERVICE_HOST: novu-redis
+      REDIS_CACHE_SERVICE_PORT: 6379
+      JWT_SECRET: ${NOVU_JWT_SECRET}
+      STORE_ENCRYPTION_KEY: ${NOVU_ENCRYPTION_KEY}
+      NOVU_SECRET_KEY: ${NOVU_SECRET_KEY}
+      API_ROOT_URL: http://novu-api:3000
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+
+  novu-web:
+    image: ghcr.io/novuhq/novu/web:latest
+    depends_on:
+      - novu-api
+      - novu-ws
+    environment:
+      REACT_APP_API_URL: ${NOVU_API_URL:-https://novu-api.yourdomain.com}
+      REACT_APP_WS_URL: ${NOVU_WS_URL:-https://novu-ws.yourdomain.com}
+      REACT_APP_WIDGET_EMBED_PATH: ${NOVU_API_URL}/embed.umd.min.js
+      REACT_APP_NOVU_APP_ID: arc-saas
+      REACT_APP_LAUNCH_DARKLY_CLIENT_SIDE_ID: ""
+      REACT_APP_SEGMENT_KEY: ""
+      API_ROOT_URL: http://novu-api:3000
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=4200
+      - coolify.name=novu-dashboard
+
+  # ===========================================================================
+  # STORAGE & OBSERVABILITY
+  # ===========================================================================
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=9001
+      - coolify.name=minio-console
+
+  minio-init:
+    image: minio/mc:latest
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set myminio http://minio:9000 $${MINIO_ROOT_USER} $${MINIO_ROOT_PASSWORD};
+      mc mb myminio/arc-saas-tenants --ignore-existing;
+      mc mb myminio/arc-saas-assets --ignore-existing;
+      mc mb myminio/arc-saas-backups --ignore-existing;
+      mc mb myminio/novu-storage --ignore-existing;
+      mc anonymous set download myminio/arc-saas-assets;
+      echo 'MinIO buckets initialized';
+      exit 0;
+      "
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.53
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=16686
+      - coolify.name=jaeger-ui
+
+  # ===========================================================================
+  # TEMPORAL (Shared Workflow Engine)
+  # ===========================================================================
+
+  temporal-postgresql:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: ${TEMPORAL_DB_PASSWORD}
+      POSTGRES_DB: temporal
+    volumes:
+      - temporal-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+
+  temporal:
+    image: temporalio/auto-setup:1.24.2
+    depends_on:
+      temporal-postgresql:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: ${TEMPORAL_DB_PASSWORD}
+      POSTGRES_SEEDS: temporal-postgresql
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development-sql.yaml
+      ENABLE_ES: "false"
+    healthcheck:
+      test: ["CMD-SHELL", "tctl cluster health || exit 1"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 90s
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=7233
+      - coolify.name=temporal-grpc
+
+  temporal-ui:
+    image: temporalio/ui:2.26.2
+    depends_on:
+      - temporal
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: "*"
+      TEMPORAL_UI_PORT: 8080
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=8080
+      - coolify.name=temporal-ui
+
+  # ===========================================================================
+  # BACKEND SERVICES
+  # ===========================================================================
+
+  tenant-management-service:
+    build:
+      context: ./services/tenant-management-service
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 14000
+      HOST: 0.0.0.0
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_DATABASE: arc_saas
+      DB_SCHEMA: main
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-}
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: arc-saas
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ISSUER: ${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}
+      JWT_AUDIENCE: ${JWT_AUDIENCE:-cbp-frontend}
+      LEAD_TOKEN_EXPIRY: "86400"
+      KEYCLOAK_ENABLED: "true"
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-ananta-saas}
+      NOVU_ENABLED: "true"
+      NOVU_API_KEY: ${NOVU_API_KEY:-}
+      NOVU_BACKEND_URL: http://novu-api:3000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:14000/ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=14000
+      - coolify.name=tenant-api
+
+  temporal-worker-service:
+    build:
+      context: ./services/temporal-worker-service
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      temporal:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: arc-saas
+      TEMPORAL_TASK_QUEUE: tenant-provisioning
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: ${POSTGRES_PASSWORD}
+      DB_DATABASE: arc_saas
+      DB_SCHEMA: main
+      S3_ENDPOINT: http://minio:9000
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD}
+      KEYCLOAK_ENABLED: "true"
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-ananta-saas}
+      KEYCLOAK_ADMIN_USER: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      NOVU_ENABLED: "true"
+      NOVU_BACKEND_URL: http://novu-api:3000
+      APP_PLANE_WEBHOOK_URL: ${APP_PLANE_WEBHOOK_URL:-http://webhook-bridge:27600}
+      APP_PLANE_WEBHOOK_SECRET: ${APP_PLANE_WEBHOOK_SECRET}
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+
+  # ===========================================================================
+  # FRONTEND APPLICATIONS
+  # ===========================================================================
+
+  admin-app:
+    build:
+      context: ./apps/admin-app
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${CONTROL_PLANE_API_URL:-https://api.yourdomain.com}
+        VITE_KEYCLOAK_URL: ${KEYCLOAK_URL:-https://auth.yourdomain.com}
+        VITE_KEYCLOAK_REALM: ${KEYCLOAK_REALM:-ananta-saas}
+        VITE_KEYCLOAK_CLIENT_ID: admin-portal
+    depends_on:
+      - tenant-management-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=80
+      - coolify.name=admin-portal
+
+  customer-portal:
+    build:
+      context: ./apps/customer-portal
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${CONTROL_PLANE_API_URL:-https://api.yourdomain.com}
+        VITE_KEYCLOAK_URL: ${KEYCLOAK_URL:-https://auth.yourdomain.com}
+        VITE_KEYCLOAK_REALM: ${KEYCLOAK_REALM:-ananta-saas}
+        VITE_KEYCLOAK_CLIENT_ID: cbp-frontend
+        VITE_CNS_API_URL: ${CNS_API_URL:-https://cns.yourdomain.com}
+    depends_on:
+      - tenant-management-service
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=80
+      - coolify.name=customer-portal
+
+# =============================================================================
+# VOLUMES
+# =============================================================================
+volumes:
+  postgres-data:
+  redis-data:
+  temporal-postgres-data:
+  novu-mongo-data:
+  novu-redis-data:
+  minio-data:
+
+# =============================================================================
+# NETWORKS
+# =============================================================================
+networks:
+  default:
+    name: control-plane-coolify

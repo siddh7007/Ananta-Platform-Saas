@@ -56,6 +56,7 @@ import PackageIcon from '@mui/icons-material/Inventory';
 import ImageIcon from '@mui/icons-material/Image';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import MenuOpenIcon from '@mui/icons-material/MenuOpen';
+import AutoFixHighIcon from '@mui/icons-material/AutoFixHigh';
 import { API_CONFIG, getAuthHeaders } from '../../config/api';
 import {
   getQualityScoreChipColor,
@@ -448,9 +449,11 @@ function ComponentCardSkeleton() {
 interface ComponentCardProps {
   component: DisplayComponent;
   onViewDetails: () => void;
+  onEnrich?: (e: React.MouseEvent) => void;
+  isEnriching?: boolean;
 }
 
-function EnhancedComponentCard({ component, onViewDetails }: ComponentCardProps) {
+function EnhancedComponentCard({ component, onViewDetails, onEnrich, isEnriching }: ComponentCardProps) {
   const statusConfig = getStatusConfig(component.status);
 
   return (
@@ -755,6 +758,29 @@ function EnhancedComponentCard({ component, onViewDetails }: ComponentCardProps)
                 </IconButton>
               </Tooltip>
             )}
+            {/* Enrich Button */}
+            {onEnrich && (
+              <Tooltip title="Enrich component with supplier data">
+                <IconButton
+                  size="small"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onEnrich(e);
+                  }}
+                  disabled={isEnriching}
+                  sx={{
+                    color: 'secondary.main',
+                    '&:hover': { color: 'secondary.dark', bgcolor: 'secondary.light' },
+                  }}
+                >
+                  {isEnriching ? (
+                    <CircularProgress size={18} color="inherit" />
+                  ) : (
+                    <AutoFixHighIcon fontSize="small" />
+                  )}
+                </IconButton>
+              </Tooltip>
+            )}
             <Tooltip title="View Details">
               <IconButton
                 size="small"
@@ -917,6 +943,11 @@ function ComponentSearchTabInner({
   // Available facets for filters (populated from API response)
   const [availableManufacturers, setAvailableManufacturers] = useState<string[]>([]);
   const [availableCategories, setAvailableCategories] = useState<string[]>([]);
+
+  // Enrichment state
+  const [enrichingComponents, setEnrichingComponents] = useState<Set<string>>(new Set());
+  const [enrichmentSuccess, setEnrichmentSuccess] = useState<string | null>(null);
+  const [enrichmentError, setEnrichmentError] = useState<string | null>(null);
 
   // Navigation hook for component details
   const navigate = useNavigate();
@@ -1132,6 +1163,73 @@ function ComponentSearchTabInner({
     // Navigate to full-page component detail view
     navigate(`/component/${encodeURIComponent(component.mpn)}`);
   }, [navigate]);
+
+  // Handle single component enrichment
+  const handleEnrichComponent = useCallback(async (component: DisplayComponent, e?: React.MouseEvent) => {
+    // Stop event propagation if called from a click handler
+    if (e) {
+      e.stopPropagation();
+      e.preventDefault();
+    }
+
+    // Already enriching this component
+    if (enrichingComponents.has(component.id)) {
+      return;
+    }
+
+    // Clear previous messages
+    setEnrichmentSuccess(null);
+    setEnrichmentError(null);
+
+    // Add to enriching set
+    setEnrichingComponents(prev => new Set(prev).add(component.id));
+
+    try {
+      const response = await fetch(`${API_CONFIG.BASE_URL}/component/enrich`, {
+        method: 'POST',
+        headers: {
+          ...getAuthHeaders(),
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          mpn: component.mpn,
+          manufacturer: component.manufacturer || null,
+          organization_id: tenantId || '',
+          force_refresh: false,
+          enable_suppliers: true,
+          enable_ai: false,
+          enable_web_scraping: false,
+        }),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `Enrichment failed: ${response.status}`);
+      }
+
+      const result = await response.json();
+      console.log('[Enrich] Workflow started:', result);
+
+      setEnrichmentSuccess(`Enrichment started for ${component.mpn}. Workflow ID: ${result.workflow_id}`);
+
+      // Open Temporal UI in new tab if available
+      if (result.temporal_ui_url) {
+        window.open(result.temporal_ui_url, '_blank', 'noopener,noreferrer');
+      }
+
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to start enrichment';
+      console.error('[Enrich] Error:', err);
+      setEnrichmentError(`Failed to enrich ${component.mpn}: ${errorMessage}`);
+    } finally {
+      // Remove from enriching set
+      setEnrichingComponents(prev => {
+        const next = new Set(prev);
+        next.delete(component.id);
+        return next;
+      });
+    }
+  }, [tenantId, enrichingComponents]);
 
   // Scope indicator
   const scopeText = useMemo(() => {
@@ -1422,6 +1520,18 @@ function ComponentSearchTabInner({
                 {error}
               </Alert>
             )}
+
+            {/* Enrichment Success/Error Alerts */}
+            {enrichmentSuccess && (
+              <Alert severity="success" sx={{ mt: 2 }} onClose={() => setEnrichmentSuccess(null)}>
+                {enrichmentSuccess}
+              </Alert>
+            )}
+            {enrichmentError && (
+              <Alert severity="error" sx={{ mt: 2 }} onClose={() => setEnrichmentError(null)}>
+                {enrichmentError}
+              </Alert>
+            )}
           </CardContent>
         </Card>
 
@@ -1610,14 +1720,35 @@ function ComponentSearchTabInner({
                         </TableCell>
                         {/* Actions */}
                         <TableCell align="center">
-                          <MuiLink
-                            component={Link}
-                            to={`/component/${encodeURIComponent(component.mpn)}`}
-                            underline="hover"
-                            onClick={(e: React.MouseEvent) => e.stopPropagation()}
-                          >
-                            View Details
-                          </MuiLink>
+                          <Box display="flex" gap={1} justifyContent="center" alignItems="center">
+                            {/* Enrich Button */}
+                            <Tooltip title="Enrich component with supplier data">
+                              <IconButton
+                                size="small"
+                                color="secondary"
+                                onClick={(e) => handleEnrichComponent(component, e)}
+                                disabled={enrichingComponents.has(component.id)}
+                                sx={{
+                                  '&:hover': { bgcolor: 'secondary.light' },
+                                }}
+                              >
+                                {enrichingComponents.has(component.id) ? (
+                                  <CircularProgress size={18} color="inherit" />
+                                ) : (
+                                  <AutoFixHighIcon fontSize="small" />
+                                )}
+                              </IconButton>
+                            </Tooltip>
+                            {/* View Details Link */}
+                            <MuiLink
+                              component={Link}
+                              to={`/component/${encodeURIComponent(component.mpn)}`}
+                              underline="hover"
+                              onClick={(e: React.MouseEvent) => e.stopPropagation()}
+                            >
+                              View
+                            </MuiLink>
+                          </Box>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -1641,6 +1772,8 @@ function ComponentSearchTabInner({
                   <EnhancedComponentCard
                     component={component}
                     onViewDetails={() => handleViewDetails(component)}
+                    onEnrich={(e) => handleEnrichComponent(component, e)}
+                    isEnriching={enrichingComponents.has(component.id)}
                   />
                 </Grid>
               ))}

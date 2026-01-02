@@ -65,6 +65,18 @@ from app.workflows.scheduled_maintenance import (
     SCHEDULED_WORKFLOWS,
     SCHEDULED_ACTIVITIES,
 )
+from app.workflows.single_component_workflow import (
+    SingleComponentEnrichmentWorkflow,
+    validate_component_input_activity,
+    lookup_catalog_activity,
+    enrich_from_suppliers_activity,
+    apply_ai_enhancement_activity,
+    apply_web_scraping_activity,
+    calculate_quality_score_activity,
+    normalize_component_data_activity,
+    save_to_catalog_activity,
+    publish_enrichment_result_activity,
+)
 from app.config import settings
 
 # Configure logging from environment variable (LOG_LEVEL)
@@ -157,6 +169,7 @@ async def main():
                 RiskCacheMaintenanceWorkflow,
                 RiskScoreEventWorkflow,
                 BOMRiskAnalysisWorkflow,  # BOM risk scoring workflow
+                SingleComponentEnrichmentWorkflow,  # On-demand single component enrichment
                 # Scheduled maintenance workflows (trial expiration, account deletion)
                 *SCHEDULED_WORKFLOWS,
             ],
@@ -199,6 +212,16 @@ async def main():
                 publish_workflow_event,
                 # Scheduled maintenance activities (trial expiration, account deletion)
                 *SCHEDULED_ACTIVITIES,
+                # Single component enrichment activities
+                validate_component_input_activity,
+                lookup_catalog_activity,
+                enrich_from_suppliers_activity,
+                apply_ai_enhancement_activity,
+                apply_web_scraping_activity,
+                calculate_quality_score_activity,
+                normalize_component_data_activity,
+                save_to_catalog_activity,
+                publish_enrichment_result_activity,
             ],
             max_concurrent_workflow_tasks=10,  # Process up to 10 workflows at once
             max_concurrent_activities=20,       # Process up to 20 activities at once
@@ -217,6 +240,17 @@ async def main():
         logger.info("   - RiskCacheMaintenanceWorkflow")
         logger.info("   - RiskScoreEventWorkflow")
         logger.info("   - BOMRiskAnalysisWorkflow")
+        logger.info("   - SingleComponentEnrichmentWorkflow (On-demand)")
+        logger.info("📋 Single component enrichment activities:")
+        logger.info("   - validate_component_input_activity")
+        logger.info("   - lookup_catalog_activity")
+        logger.info("   - enrich_from_suppliers_activity")
+        logger.info("   - apply_ai_enhancement_activity")
+        logger.info("   - apply_web_scraping_activity")
+        logger.info("   - calculate_quality_score_activity")
+        logger.info("   - normalize_component_data_activity")
+        logger.info("   - save_to_catalog_activity")
+        logger.info("   - publish_enrichment_result_activity")
         logger.info("📋 Registered activities:")
         logger.info("   - bulk_prefilter_components")
         logger.info("   - fetch_bom_line_items")
