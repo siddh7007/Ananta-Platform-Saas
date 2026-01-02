@@ -345,7 +345,11 @@ CREATE TABLE IF NOT EXISTS main.users (
     first_name VARCHAR(100) NOT NULL,
     last_name VARCHAR(100) NOT NULL,
     auth_id VARCHAR(255),
+    keycloak_user_id VARCHAR(255),
     status SMALLINT DEFAULT 0 NOT NULL,
+    role VARCHAR(50) DEFAULT 'user',
+    is_active BOOLEAN DEFAULT true,
+    permissions JSONB DEFAULT '[]'::jsonb,
     tenant_id UUID NOT NULL REFERENCES main.tenants(id),
     phone VARCHAR(50),
     avatar_url VARCHAR(500),
@@ -362,6 +366,10 @@ CREATE TABLE IF NOT EXISTS main.users (
 
 COMMENT ON TABLE main.users IS 'User accounts with multi-tenant support and Keycloak SSO integration';
 COMMENT ON COLUMN main.users.auth_id IS 'Keycloak user UUID for SSO authentication';
+COMMENT ON COLUMN main.users.keycloak_user_id IS 'Keycloak username/email for SSO lookup';
+COMMENT ON COLUMN main.users.role IS 'User role: super_admin, owner, admin, engineer, analyst';
+COMMENT ON COLUMN main.users.is_active IS 'Whether the user account is active';
+COMMENT ON COLUMN main.users.permissions IS 'JSON array of additional permissions';
 COMMENT ON COLUMN main.users.status IS '0=pending, 1=active, 2=suspended, 3=deactivated';
 
 CREATE INDEX IF NOT EXISTS idx_users_email ON main.users(email) WHERE deleted = false;
@@ -1328,7 +1336,7 @@ INSERT INTO main.users (
     created_on,
     modified_on
 ) VALUES (
-    'u0000000-0000-0000-0000-000000000001',
+    'c0000000-0000-0000-0000-000000000001',
     'a0000000-0000-0000-0000-000000000001',
     'Platform',
     'Admin',
@@ -1361,7 +1369,7 @@ INSERT INTO main.users (
     created_on,
     modified_on
 ) VALUES (
-    'u0000000-0000-0000-0000-000000000002',
+    'c0000000-0000-0000-0000-000000000002',
     'a0000000-0000-0000-0000-000000000002',
     'CNS',
     'Lead',
@@ -1394,7 +1402,7 @@ INSERT INTO main.users (
     created_on,
     modified_on
 ) VALUES (
-    'u0000000-0000-0000-0000-000000000003',
+    'c0000000-0000-0000-0000-000000000003',
     'a0000000-0000-0000-0000-000000000002',
     'CNS',
     'Engineer',
@@ -1427,7 +1435,7 @@ INSERT INTO main.users (
     created_on,
     modified_on
 ) VALUES (
-    'u0000000-0000-0000-0000-000000000004',
+    'c0000000-0000-0000-0000-000000000004',
     'a0000000-0000-0000-0000-000000000000',
     'Demo',
     'Owner',
@@ -1460,7 +1468,7 @@ INSERT INTO main.users (
     created_on,
     modified_on
 ) VALUES (
-    'u0000000-0000-0000-0000-000000000005',
+    'c0000000-0000-0000-0000-000000000005',
     'a0000000-0000-0000-0000-000000000000',
     'Demo',
     'Engineer',
@@ -1490,8 +1498,8 @@ INSERT INTO main.user_roles (
     tenant_id,
     created_on
 ) VALUES (
-    'r0000000-0000-0000-0000-000000000001',
-    'u0000000-0000-0000-0000-000000000001',
+    'd0000000-0000-0000-0000-000000000001',
+    'c0000000-0000-0000-0000-000000000001',
     'super_admin',
     'a0000000-0000-0000-0000-000000000001',
     NOW()
@@ -1505,8 +1513,8 @@ INSERT INTO main.user_roles (
     tenant_id,
     created_on
 ) VALUES (
-    'r0000000-0000-0000-0000-000000000002',
-    'u0000000-0000-0000-0000-000000000002',
+    'd0000000-0000-0000-0000-000000000002',
+    'c0000000-0000-0000-0000-000000000002',
     'owner',
     'a0000000-0000-0000-0000-000000000002',
     NOW()
@@ -1520,8 +1528,8 @@ INSERT INTO main.user_roles (
     tenant_id,
     created_on
 ) VALUES (
-    'r0000000-0000-0000-0000-000000000003',
-    'u0000000-0000-0000-0000-000000000003',
+    'd0000000-0000-0000-0000-000000000003',
+    'c0000000-0000-0000-0000-000000000003',
     'engineer',
     'a0000000-0000-0000-0000-000000000002',
     NOW()
@@ -1535,8 +1543,8 @@ INSERT INTO main.user_roles (
     tenant_id,
     created_on
 ) VALUES (
-    'r0000000-0000-0000-0000-000000000004',
-    'u0000000-0000-0000-0000-000000000004',
+    'd0000000-0000-0000-0000-000000000004',
+    'c0000000-0000-0000-0000-000000000004',
     'owner',
     'a0000000-0000-0000-0000-000000000000',
     NOW()
@@ -1550,8 +1558,8 @@ INSERT INTO main.user_roles (
     tenant_id,
     created_on
 ) VALUES (
-    'r0000000-0000-0000-0000-000000000005',
-    'u0000000-0000-0000-0000-000000000005',
+    'd0000000-0000-0000-0000-000000000005',
+    'c0000000-0000-0000-0000-000000000005',
     'engineer',
     'a0000000-0000-0000-0000-000000000000',
     NOW()
@@ -1565,19 +1573,23 @@ INSERT INTO main.user_roles (
 INSERT INTO main.subscriptions (
     id,
     tenant_id,
-    plan_id,
+    planid,
+    planname,
+    plantier,
     status,
-    start_date,
+    amount,
     current_period_start,
     current_period_end,
     created_on,
     modified_on
 ) VALUES (
-    's0000000-0000-0000-0000-000000000001',
+    'e0000000-0000-0000-0000-000000000001',
     'a0000000-0000-0000-0000-000000000001',
     'plan-premium',
+    'Premium',
+    'premium',
     'active',
-    NOW(),
+    199.00,
     NOW(),
     NOW() + INTERVAL '100 years',
     NOW(),
@@ -1590,19 +1602,23 @@ INSERT INTO main.subscriptions (
 INSERT INTO main.subscriptions (
     id,
     tenant_id,
-    plan_id,
+    planid,
+    planname,
+    plantier,
     status,
-    start_date,
+    amount,
     current_period_start,
     current_period_end,
     created_on,
     modified_on
 ) VALUES (
-    's0000000-0000-0000-0000-000000000002',
+    'e0000000-0000-0000-0000-000000000002',
     'a0000000-0000-0000-0000-000000000002',
     'plan-premium',
+    'Premium',
+    'premium',
     'active',
-    NOW(),
+    199.00,
     NOW(),
     NOW() + INTERVAL '100 years',
     NOW(),
@@ -1615,9 +1631,11 @@ INSERT INTO main.subscriptions (
 INSERT INTO main.subscriptions (
     id,
     tenant_id,
-    plan_id,
+    planid,
+    planname,
+    plantier,
     status,
-    start_date,
+    amount,
     trial_start,
     trial_end,
     current_period_start,
@@ -1625,11 +1643,13 @@ INSERT INTO main.subscriptions (
     created_on,
     modified_on
 ) VALUES (
-    's0000000-0000-0000-0000-000000000003',
+    'e0000000-0000-0000-0000-000000000003',
     'a0000000-0000-0000-0000-000000000000',
     'plan-standard',
+    'Standard',
+    'standard',
     'trialing',
-    NOW(),
+    79.00,
     NOW(),
     NOW() + INTERVAL '14 days',
     NOW(),
@@ -1642,95 +1662,35 @@ INSERT INTO main.subscriptions (
     modified_on = NOW();
 
 -- ============================================================================
--- TENANT QUOTA SEED DATA
+-- TENANT QUOTA SEED DATA (using flexible metric_type schema)
 -- ============================================================================
 
--- Quota for Platform Admin (unlimited)
+-- Quota for Platform Admin - Users (unlimited)
 INSERT INTO main.tenant_quotas (
-    id,
-    tenant_id,
-    max_users,
-    max_storage_gb,
-    max_api_calls,
-    max_projects,
-    current_users,
-    current_storage_gb,
-    current_api_calls,
-    current_projects,
-    created_on
+    id, tenant_id, metric_type, metric_name, soft_limit, hard_limit, current_usage
 ) VALUES (
-    'q0000000-0000-0000-0000-000000000001',
+    'f0000000-0000-0000-0000-000000000001',
     'a0000000-0000-0000-0000-000000000001',
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    1,
-    0,
-    0,
-    0,
-    NOW()
-) ON CONFLICT (tenant_id) DO UPDATE SET
-    max_users = NULL,
-    max_storage_gb = NULL;
+    'users', 'User Accounts', 999999, 999999, 1
+) ON CONFLICT (id) DO NOTHING;
 
--- Quota for CNS Staff (unlimited)
+-- Quota for CNS Staff - Users (unlimited)
 INSERT INTO main.tenant_quotas (
-    id,
-    tenant_id,
-    max_users,
-    max_storage_gb,
-    max_api_calls,
-    max_projects,
-    current_users,
-    current_storage_gb,
-    current_api_calls,
-    current_projects,
-    created_on
+    id, tenant_id, metric_type, metric_name, soft_limit, hard_limit, current_usage
 ) VALUES (
-    'q0000000-0000-0000-0000-000000000002',
+    'f0000000-0000-0000-0000-000000000002',
     'a0000000-0000-0000-0000-000000000002',
-    NULL,
-    NULL,
-    NULL,
-    NULL,
-    2,
-    0,
-    0,
-    0,
-    NOW()
-) ON CONFLICT (tenant_id) DO UPDATE SET
-    max_users = NULL,
-    max_storage_gb = NULL;
+    'users', 'User Accounts', 999999, 999999, 2
+) ON CONFLICT (id) DO NOTHING;
 
--- Quota for Demo Org (Standard plan limits)
+-- Quota for Demo Org - Users (Standard plan: 25 users)
 INSERT INTO main.tenant_quotas (
-    id,
-    tenant_id,
-    max_users,
-    max_storage_gb,
-    max_api_calls,
-    max_projects,
-    current_users,
-    current_storage_gb,
-    current_api_calls,
-    current_projects,
-    created_on
+    id, tenant_id, metric_type, metric_name, soft_limit, hard_limit, current_usage
 ) VALUES (
-    'q0000000-0000-0000-0000-000000000003',
+    'f0000000-0000-0000-0000-000000000003',
     'a0000000-0000-0000-0000-000000000000',
-    25,
-    100,
-    100000,
-    50,
-    2,
-    0,
-    0,
-    0,
-    NOW()
-) ON CONFLICT (tenant_id) DO UPDATE SET
-    max_users = 25,
-    max_storage_gb = 100;
+    'users', 'User Accounts', 20, 25, 2
+) ON CONFLICT (id) DO NOTHING;
 
 COMMIT;
 

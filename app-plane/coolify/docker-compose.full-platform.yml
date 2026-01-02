@@ -110,6 +110,11 @@ services:
     command: redis-server --appendonly yes
     volumes:
       - novu-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     restart: unless-stopped
 
   novu-api:
@@ -315,7 +320,7 @@ services:
 
   tenant-management-service:
     build:
-      context: ./arc-saas/services/tenant-management-service
+      context: ../../arc-saas/services/tenant-management-service
       dockerfile: Dockerfile
     depends_on:
       control-plane-postgres:
@@ -357,7 +362,7 @@ services:
 
   temporal-worker-service:
     build:
-      context: ./arc-saas/services/temporal-worker-service
+      context: ../../arc-saas/services/temporal-worker-service
       dockerfile: Dockerfile
     depends_on:
       temporal:
@@ -388,7 +393,7 @@ services:
 
   subscription-service:
     build:
-      context: ./arc-saas/services/subscription-service
+      context: ../../arc-saas/services/subscription-service
       dockerfile: Dockerfile
     depends_on:
       control-plane-postgres:
@@ -581,7 +586,7 @@ services:
 
   cns-service:
     build:
-      context: ./app-plane/services/cns-service
+      context: ../services/cns-service
       dockerfile: Dockerfile
       target: production
     environment:
@@ -645,7 +650,7 @@ services:
 
   cns-worker:
     build:
-      context: ./app-plane/services/cns-service
+      context: ../services/cns-service
       dockerfile: Dockerfile
       target: production
     command: python -m app.workers.bom_worker
@@ -675,7 +680,7 @@ services:
 
   django-backend:
     build:
-      context: ./app-plane/services/backend
+      context: ../services/backend
       dockerfile: Dockerfile
     environment:
       DEBUG: "False"
@@ -705,7 +710,7 @@ services:
 
   middleware-api:
     build:
-      context: ./app-plane/services/middleware-api
+      context: ../services/middleware-api
       dockerfile: Dockerfile
     environment:
       FLASK_ENV: production
@@ -727,7 +732,7 @@ services:
 
   webhook-bridge:
     build:
-      context: ./app-plane/webhook-bridge
+      context: ../webhook-bridge
       dockerfile: Dockerfile
     environment:
       WEBHOOK_SECRET: ${APP_PLANE_WEBHOOK_SECRET}
@@ -749,7 +754,7 @@ services:
 
   audit-logger:
     build:
-      context: ./app-plane
+      context: ..
       dockerfile: services/audit-logger/Dockerfile
     environment:
       DATABASE_URL: postgres://postgres:${SUPABASE_DB_PASSWORD}@supabase-db:5432/postgres
@@ -781,7 +786,7 @@ services:
 
   novu-consumer:
     build:
-      context: ./app-plane/services/novu-consumer
+      context: ../services/novu-consumer
       dockerfile: Dockerfile
     environment:
       NOVU_API_KEY: ${NOVU_API_KEY}
@@ -840,7 +845,7 @@ services:
 
   admin-app:
     build:
-      context: ./arc-saas/apps/admin-app
+      context: ../../arc-saas/apps/admin-app
       dockerfile: Dockerfile
       args:
         VITE_API_URL: ${CONTROL_PLANE_API_URL}
@@ -857,7 +862,7 @@ services:
 
   customer-portal:
     build:
-      context: ./arc-saas/apps/customer-portal
+      context: ../../arc-saas/apps/customer-portal
       dockerfile: Dockerfile
       args:
         VITE_API_URL: ${CONTROL_PLANE_API_URL}
@@ -876,7 +881,7 @@ services:
 
   cns-dashboard:
     build:
-      context: ./app-plane/services/cns-service/dashboard
+      context: ../services/cns-service/dashboard
       dockerfile: Dockerfile
       args:
         VITE_CNS_API_URL: ${CNS_API_URL}
@@ -894,7 +899,7 @@ services:
 
   backstage-portal:
     build:
-      context: ./app-plane/services/backstage-portal
+      context: ../services/backstage-portal
       dockerfile: Dockerfile
       args:
         VITE_API_URL: ${CNS_API_URL}
@@ -909,7 +914,7 @@ services:
 
   dashboard:
     build:
-      context: ./app-plane/services/dashboard
+      context: ../services/dashboard
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${DJANGO_API_URL:-http://django-backend:8000}
@@ -948,6 +953,12 @@ volumes:
 # =============================================================================
 # NETWORKS
 # =============================================================================
+# Single network for Coolify - all services communicate on same network
+# For on-premise deployments needing isolation, split into:
+#   - control-plane-network (arc-saas services)
+#   - app-plane-network (CNS, Django, Supabase)
+#   - shared-services-network (Temporal, monitoring)
 networks:
   default:
     name: ananta-platform-coolify
+    driver: bridge
