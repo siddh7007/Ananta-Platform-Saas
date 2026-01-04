@@ -6,7 +6,7 @@
 #   - Control Plane (arc-saas): Tenant management, Keycloak, Novu
 #   - App Plane: CNS Service, Django, Supabase, frontends
 #
-# Total: 47 services
+# Total: 40 services
 #
 # Services added:
 #   - subscription-service: Billing/subscription management
@@ -28,8 +28,8 @@ services:
     image: postgres:15-alpine
     volumes:
       - control-plane-postgres-data:/var/lib/postgresql/data
-      - ./migrations/000_init_databases.sql:/docker-entrypoint-initdb.d/000_init_databases.sql:ro
-      - ./migrations/003_ARC_SAAS_MASTER.sql:/docker-entrypoint-initdb.d/001_arc_saas.sql:ro
+      - ./app-plane/coolify/migrations/000_init_databases.sql:/docker-entrypoint-initdb.d/000_init_databases.sql:ro
+      - ./app-plane/coolify/migrations/003_ARC_SAAS_MASTER.sql:/docker-entrypoint-initdb.d/001_arc_saas.sql:ro
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${CONTROL_PLANE_DB_PASSWORD}
@@ -45,13 +45,11 @@ services:
 
   control-plane-redis:
     image: redis:7-alpine
-    command: ["sh", "-c", "if [ -n \"$$REDIS_PASSWORD\" ]; then redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\"; else redis-server --appendonly yes; fi"]
-    environment:
-      REDIS_PASSWORD: ${CONTROL_PLANE_REDIS_PASSWORD:-}
+    command: redis-server --appendonly yes --requirepass ${CONTROL_PLANE_REDIS_PASSWORD:-}
     volumes:
       - control-plane-redis-data:/data
     healthcheck:
-      test: ["CMD-SHELL", "if [ -n \"$$REDIS_PASSWORD\" ]; then redis-cli -a \"$$REDIS_PASSWORD\" ping; else redis-cli ping; fi"]
+      test: ["CMD-SHELL", "if [ -n \"$CONTROL_PLANE_REDIS_PASSWORD\" ]; then redis-cli -a \"$CONTROL_PLANE_REDIS_PASSWORD\" ping; else redis-cli ping; fi"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -78,8 +76,7 @@ services:
       KC_PROXY: edge
       KC_HTTP_ENABLED: "true"
     depends_on:
-      control-plane-postgres:
-        condition: service_healthy
+      - control-plane-postgres
     healthcheck:
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080"]
       interval: 30s
@@ -101,7 +98,7 @@ services:
     volumes:
       - novu-mongo-data:/data/db
     healthcheck:
-      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      test: ["CMD-SHELL", "timeout 2 sh -c '>/dev/tcp/127.0.0.1/27017'"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -209,7 +206,7 @@ services:
     volumes:
       - control-plane-minio-data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD-SHELL", "timeout 2 sh -c '>/dev/tcp/127.0.0.1/9000'"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -222,8 +219,7 @@ services:
   control-plane-minio-init:
     image: minio/mc:latest
     depends_on:
-      control-plane-minio:
-        condition: service_healthy
+      - control-plane-minio
     entrypoint: >
       /bin/sh -c "
       mc alias set myminio http://control-plane-minio:9000 $${CONTROL_PLANE_MINIO_USER} $${CONTROL_PLANE_MINIO_PASSWORD};
@@ -268,8 +264,7 @@ services:
   temporal:
     image: temporalio/auto-setup:1.24.2
     depends_on:
-      temporal-postgresql:
-        condition: service_healthy
+      - temporal-postgresql
     environment:
       DB: postgres12
       DB_PORT: 5432
@@ -282,7 +277,7 @@ services:
       DEFAULT_NAMESPACE: default
       DEFAULT_NAMESPACE_RETENTION: 72h
     healthcheck:
-      test: ["CMD-SHELL", "tctl cluster health || exit 1"]
+      test: ["CMD-SHELL", "timeout 2 sh -c '>/dev/tcp/127.0.0.1/7233'"]
       interval: 10s
       timeout: 10s
       retries: 15
@@ -294,10 +289,9 @@ services:
 
   # Temporal namespace initialization (runs once to create arc-saas and enrichment namespaces)
   temporal-init:
-    image: temporalio/admin-tools:1.25.0
+    image: temporalio/admin-tools:1.24.2-tctl-1.18.1-cli-1.0.0
     depends_on:
-      temporal:
-        condition: service_healthy
+      - temporal
     environment:
       TEMPORAL_ADDRESS: temporal:7233
     command: ["sh", "-c", "tctl --ns arc-saas namespace register --retention 72h || true; tctl --ns enrichment namespace register --retention 72h || true; tctl namespace list"]
@@ -322,13 +316,11 @@ services:
 
   tenant-management-service:
     build:
-      context: ../../arc-saas/services/tenant-management-service
+      context: ./arc-saas/services/tenant-management-service
       dockerfile: Dockerfile
     depends_on:
-      control-plane-postgres:
-        condition: service_healthy
-      control-plane-redis:
-        condition: service_healthy
+      - control-plane-postgres
+      - control-plane-redis
     environment:
       NODE_ENV: production
       PORT: 14000
@@ -351,8 +343,14 @@ services:
       NOVU_ENABLED: "true"
       NOVU_API_KEY: ${NOVU_API_KEY:-}
       NOVU_BACKEND_URL: http://novu-api:3000
+      BILLING_PROVIDER: ${BILLING_PROVIDER:-none}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PRICE_STARTER: ${STRIPE_PRICE_STARTER:-}
+      STRIPE_PRICE_PROFESSIONAL: ${STRIPE_PRICE_PROFESSIONAL:-}
+      STRIPE_PRICE_ENTERPRISE: ${STRIPE_PRICE_ENTERPRISE:-}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:14000/ping"]
+      test: ["CMD-SHELL", "timeout 2 sh -c '>/dev/tcp/127.0.0.1/14000'"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -364,11 +362,10 @@ services:
 
   temporal-worker-service:
     build:
-      context: ../../arc-saas/services/temporal-worker-service
+      context: ./arc-saas/services/temporal-worker-service
       dockerfile: Dockerfile
     depends_on:
-      temporal:
-        condition: service_healthy
+      - temporal
     environment:
       NODE_ENV: production
       TEMPORAL_ADDRESS: temporal:7233
@@ -395,13 +392,11 @@ services:
 
   subscription-service:
     build:
-      context: ../../arc-saas/services/subscription-service
+      context: ./arc-saas/services/subscription-service
       dockerfile: Dockerfile
     depends_on:
-      control-plane-postgres:
-        condition: service_healthy
-      control-plane-redis:
-        condition: service_healthy
+      - control-plane-postgres
+      - control-plane-redis
     environment:
       NODE_ENV: production
       PORT: 3002
@@ -413,8 +408,14 @@ services:
       DB_SCHEMA: subscription
       REDIS_HOST: control-plane-redis
       REDIS_PORT: 6379
+      BILLING_PROVIDER: ${BILLING_PROVIDER:-none}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PRICE_STARTER: ${STRIPE_PRICE_STARTER:-}
+      STRIPE_PRICE_PROFESSIONAL: ${STRIPE_PRICE_PROFESSIONAL:-}
+      STRIPE_PRICE_ENTERPRISE: ${STRIPE_PRICE_ENTERPRISE:-}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3002/ping"]
+      test: ["CMD-SHELL", "timeout 2 sh -c '>/dev/tcp/127.0.0.1/3002'"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -432,7 +433,7 @@ services:
     image: supabase/postgres:15.1.0.147
     volumes:
       - supabase-db-data:/var/lib/postgresql/data
-      - ./migrations/001_SUPABASE_MASTER.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
+      - ./app-plane/coolify/migrations/001_SUPABASE_MASTER.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
     environment:
       POSTGRES_PASSWORD: ${SUPABASE_DB_PASSWORD}
       POSTGRES_USER: postgres
@@ -448,7 +449,7 @@ services:
     image: postgres:15-alpine
     volumes:
       - components-v2-postgres-data:/var/lib/postgresql/data
-      - ./migrations/002_COMPONENTS_V2_MASTER.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
+      - ./app-plane/coolify/migrations/002_COMPONENTS_V2_MASTER.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: ${COMPONENTS_V2_DB_PASSWORD}
@@ -460,19 +461,33 @@ services:
       retries: 5
     restart: unless-stopped
 
+  migrate-and-seed:
+    image: postgres:15-alpine
+    volumes:
+      - ./:/workspace:ro
+      - migrate-seed-state:/state
+    depends_on:
+      - control-plane-postgres
+      - supabase-db
+      - components-v2-postgres
+    environment:
+      CONTROL_PLANE_DB_PASSWORD: ${CONTROL_PLANE_DB_PASSWORD}
+      SUPABASE_DB_PASSWORD: ${SUPABASE_DB_PASSWORD}
+      COMPONENTS_V2_DB_PASSWORD: ${COMPONENTS_V2_DB_PASSWORD}
+    entrypoint: ["/bin/sh", "/workspace/coolify/scripts/migrate-and-seed.sh"]
+    restart: "no"
+
   # ===========================================================================
   # APP PLANE - INFRASTRUCTURE
   # ===========================================================================
 
   app-plane-redis:
     image: redis:7-alpine
-    command: ["sh", "-c", "if [ -n \"$$REDIS_PASSWORD\" ]; then redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\"; else redis-server --appendonly yes; fi"]
-    environment:
-      REDIS_PASSWORD: ${APP_PLANE_REDIS_PASSWORD:-}
+    command: redis-server --appendonly yes --requirepass ${APP_PLANE_REDIS_PASSWORD:-}
     volumes:
       - app-plane-redis-data:/data
     healthcheck:
-      test: ["CMD-SHELL", "if [ -n \"$$REDIS_PASSWORD\" ]; then redis-cli -a \"$$REDIS_PASSWORD\" ping; else redis-cli ping; fi"]
+      test: ["CMD-SHELL", "if [ -n \"$APP_PLANE_REDIS_PASSWORD\" ]; then redis-cli -a \"$APP_PLANE_REDIS_PASSWORD\" ping; else redis-cli ping; fi"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -505,7 +520,7 @@ services:
     volumes:
       - app-plane-minio-data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: ["CMD-SHELL", "timeout 2 sh -c '>/dev/tcp/127.0.0.1/9000'"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -518,8 +533,7 @@ services:
   app-plane-minio-init:
     image: minio/mc:latest
     depends_on:
-      app-plane-minio:
-        condition: service_healthy
+      - app-plane-minio
     entrypoint: >
       /bin/sh -c "
       mc alias set myminio http://app-plane-minio:9000 $${APP_PLANE_MINIO_USER} $${APP_PLANE_MINIO_PASSWORD};
@@ -548,8 +562,7 @@ services:
       PGRST_DB_ANON_ROLE: anon
       PGRST_JWT_SECRET: ${SUPABASE_JWT_SECRET}
     depends_on:
-      supabase-db:
-        condition: service_healthy
+      - supabase-db
     restart: unless-stopped
     labels:
       - coolify.managed=true
@@ -566,8 +579,7 @@ services:
       PG_META_DB_USER: postgres
       PG_META_DB_PASSWORD: ${SUPABASE_DB_PASSWORD}
     depends_on:
-      supabase-db:
-        condition: service_healthy
+      - supabase-db
     restart: unless-stopped
 
   supabase-studio:
@@ -590,7 +602,7 @@ services:
 
   cns-service:
     build:
-      context: ../services/cns-service
+      context: ./app-plane/services/cns-service
       dockerfile: Dockerfile
       target: application
     environment:
@@ -623,6 +635,13 @@ services:
       DIGIKEY_CLIENT_SECRET: ${DIGIKEY_CLIENT_SECRET:-}
       ELEMENT14_ENABLED: ${ELEMENT14_ENABLED:-true}
       ELEMENT14_API_KEY: ${ELEMENT14_API_KEY:-}
+      BILLING_PROVIDER: ${BILLING_PROVIDER:-none}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PRICE_STARTER: ${STRIPE_PRICE_STARTER:-}
+      STRIPE_PRICE_PROFESSIONAL: ${STRIPE_PRICE_PROFESSIONAL:-}
+      STRIPE_PRICE_ENTERPRISE: ${STRIPE_PRICE_ENTERPRISE:-}
       MINIO_ENABLED: "true"
       MINIO_ENDPOINT: app-plane-minio:9000
       MINIO_ACCESS_KEY: ${APP_PLANE_MINIO_USER}
@@ -630,18 +649,13 @@ services:
       MINIO_SECURE: "false"
       DEBUG: "false"
     depends_on:
-      supabase-db:
-        condition: service_healthy
-      components-v2-postgres:
-        condition: service_healthy
-      app-plane-redis:
-        condition: service_healthy
-      app-plane-minio:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
+      - supabase-db
+      - components-v2-postgres
+      - app-plane-redis
+      - app-plane-minio
+      - rabbitmq
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD-SHELL", "timeout 2 sh -c '>/dev/tcp/127.0.0.1/8000'"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -654,7 +668,7 @@ services:
 
   cns-worker:
     build:
-      context: ../services/cns-service
+      context: ./app-plane/services/cns-service
       dockerfile: Dockerfile
       target: application
     command: python -m app.workers.bom_worker
@@ -677,14 +691,19 @@ services:
       MINIO_ENDPOINT: app-plane-minio:9000
       MINIO_ACCESS_KEY: ${APP_PLANE_MINIO_USER}
       MINIO_SECRET_KEY: ${APP_PLANE_MINIO_PASSWORD}
+      BILLING_PROVIDER: ${BILLING_PROVIDER:-none}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PRICE_STARTER: ${STRIPE_PRICE_STARTER:-}
+      STRIPE_PRICE_PROFESSIONAL: ${STRIPE_PRICE_PROFESSIONAL:-}
+      STRIPE_PRICE_ENTERPRISE: ${STRIPE_PRICE_ENTERPRISE:-}
     depends_on:
-      cns-service:
-        condition: service_healthy
+      - cns-service
     restart: unless-stopped
 
   django-backend:
     build:
-      context: ../services/backend
+      context: ./app-plane/services/backend
       dockerfile: Dockerfile
     environment:
       DEBUG: "False"
@@ -693,12 +712,10 @@ services:
       DATABASE_URL: postgresql://postgres:${COMPONENTS_V2_DB_PASSWORD}@components-v2-postgres:5432/components_v2
       REDIS_URL: redis://:${APP_PLANE_REDIS_PASSWORD:-}@app-plane-redis:6379/0
     depends_on:
-      components-v2-postgres:
-        condition: service_healthy
-      app-plane-redis:
-        condition: service_healthy
+      - components-v2-postgres
+      - app-plane-redis
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD-SHELL", "timeout 2 sh -c '>/dev/tcp/127.0.0.1/8000'"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -714,7 +731,7 @@ services:
 
   middleware-api:
     build:
-      context: ../services/middleware-api
+      context: ./app-plane/services/middleware-api
       dockerfile: Dockerfile
     environment:
       FLASK_ENV: production
@@ -724,10 +741,8 @@ services:
       CNS_API_URL: http://cns-service:8000
       CONTROL_PLANE_URL: http://tenant-management-service:14000
     depends_on:
-      django-backend:
-        condition: service_healthy
-      cns-service:
-        condition: service_healthy
+      - django-backend
+      - cns-service
     restart: unless-stopped
     labels:
       - coolify.managed=true
@@ -736,7 +751,7 @@ services:
 
   webhook-bridge:
     build:
-      context: ../webhook-bridge
+      context: ./app-plane/webhook-bridge
       dockerfile: Dockerfile
     environment:
       WEBHOOK_SECRET: ${APP_PLANE_WEBHOOK_SECRET}
@@ -744,8 +759,7 @@ services:
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
       FLASK_ENV: production
     depends_on:
-      supabase-db:
-        condition: service_healthy
+      - supabase-db
     restart: unless-stopped
     labels:
       - coolify.managed=true
@@ -758,7 +772,7 @@ services:
 
   audit-logger:
     build:
-      context: ..
+      context: ./app-plane
       dockerfile: services/audit-logger/Dockerfile
     environment:
       DATABASE_URL: postgres://postgres:${SUPABASE_DB_PASSWORD}@supabase-db:5432/postgres
@@ -777,10 +791,8 @@ services:
       TEMPORAL_NAMESPACE: enrichment
       TEMPORAL_TASK_QUEUE: cns-enrichment
     depends_on:
-      supabase-db:
-        condition: service_healthy
-      rabbitmq:
-        condition: service_healthy
+      - supabase-db
+      - rabbitmq
     healthcheck:
       test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
       interval: 30s
@@ -790,7 +802,7 @@ services:
 
   novu-consumer:
     build:
-      context: ../services/novu-consumer
+      context: ./app-plane/services/novu-consumer
       dockerfile: Dockerfile
     environment:
       NOVU_API_KEY: ${NOVU_API_KEY}
@@ -801,10 +813,8 @@ services:
       RABBITMQ_USER: ${RABBITMQ_USER:-admin}
       RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
     depends_on:
-      rabbitmq:
-        condition: service_healthy
-      novu-api:
-        condition: service_started
+      - rabbitmq
+      - novu-api
     restart: unless-stopped
 
   # ===========================================================================
@@ -833,10 +843,8 @@ services:
     volumes:
       - directus-uploads:/directus/uploads
     depends_on:
-      supabase-db:
-        condition: service_healthy
-      app-plane-redis:
-        condition: service_healthy
+      - supabase-db
+      - app-plane-redis
     restart: unless-stopped
     labels:
       - coolify.managed=true
@@ -849,7 +857,7 @@ services:
 
   admin-app:
     build:
-      context: ../../arc-saas/apps/admin-app
+      context: ./arc-saas/apps/admin-app
       dockerfile: Dockerfile
       args:
         VITE_API_URL: ${CONTROL_PLANE_API_URL}
@@ -866,7 +874,7 @@ services:
 
   customer-portal:
     build:
-      context: ../../arc-saas/apps/customer-portal
+      context: ./arc-saas/apps/customer-portal
       dockerfile: Dockerfile
       args:
         VITE_API_URL: ${CONTROL_PLANE_API_URL}
@@ -874,6 +882,7 @@ services:
         VITE_KEYCLOAK_REALM: ${KEYCLOAK_REALM:-ananta-saas}
         VITE_KEYCLOAK_CLIENT_ID: cbp-frontend
         VITE_CNS_API_URL: ${CNS_API_URL}
+        VITE_STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
     depends_on:
       - tenant-management-service
       - cns-service
@@ -885,7 +894,7 @@ services:
 
   cns-dashboard:
     build:
-      context: ../services/cns-service/dashboard
+      context: ./app-plane/services/cns-service/dashboard
       dockerfile: Dockerfile
       args:
         VITE_CNS_API_URL: ${CNS_API_URL}
@@ -893,47 +902,16 @@ services:
         VITE_KEYCLOAK_REALM: ${KEYCLOAK_REALM:-ananta-saas}
         VITE_KEYCLOAK_CLIENT_ID: cns-dashboard
     depends_on:
-      cns-service:
-        condition: service_healthy
+      - cns-service
     restart: unless-stopped
     labels:
       - coolify.managed=true
       - coolify.port=80
       - coolify.name=cns-dashboard
 
-  backstage-portal:
-    build:
-      context: ../services/backstage-portal
-      dockerfile: Dockerfile
-      args:
-        VITE_API_URL: ${CNS_API_URL}
-        VITE_KEYCLOAK_URL: ${KEYCLOAK_URL}
-        VITE_KEYCLOAK_REALM: ${KEYCLOAK_REALM:-ananta-saas}
-        VITE_KEYCLOAK_CLIENT_ID: backstage-portal
-    restart: unless-stopped
-    labels:
-      - coolify.managed=true
-      - coolify.port=80
-      - coolify.name=backstage-portal
+  # Backstage portal removed for Coolify bundle
 
-  dashboard:
-    build:
-      context: ../services/dashboard
-      dockerfile: Dockerfile
-      args:
-        NEXT_PUBLIC_API_URL: ${DJANGO_API_URL:-http://django-backend:8000}
-        NEXT_PUBLIC_SUPABASE_URL: ${SUPABASE_API_URL}
-        NEXT_PUBLIC_KEYCLOAK_URL: ${KEYCLOAK_URL}
-        NEXT_PUBLIC_KEYCLOAK_REALM: ${KEYCLOAK_REALM:-ananta-saas}
-        NEXT_PUBLIC_KEYCLOAK_CLIENT_ID: dashboard
-    depends_on:
-      django-backend:
-        condition: service_healthy
-    restart: unless-stopped
-    labels:
-      - coolify.managed=true
-      - coolify.port=3000
-      - coolify.name=unified-dashboard
+  # Unified dashboard removed for Coolify bundle
 
 # =============================================================================
 # VOLUMES
@@ -953,6 +931,7 @@ volumes:
   app-plane-minio-data:
   rabbitmq-data:
   directus-uploads:
+  migrate-seed-state:
 
 # =============================================================================
 # NETWORKS

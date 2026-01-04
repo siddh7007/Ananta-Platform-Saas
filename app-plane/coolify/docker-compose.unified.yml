@@ -1,0 +1,475 @@
+# =============================================================================
+# Ananta Platform - Unified Stack for Local Development
+# =============================================================================
+# All infrastructure services with ports exposed for local access
+# Application services can be run separately using bun/node
+# =============================================================================
+
+services:
+  # ===========================================================================
+  # CONTROL PLANE - CORE DATABASES
+  # ===========================================================================
+
+  control-plane-postgres:
+    image: postgres:15-alpine
+    container_name: arc-saas-postgres
+    volumes:
+      - control-plane-postgres-data:/var/lib/postgresql/data
+      - ./docker/init-db/control-plane:/docker-entrypoint-initdb.d
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${CONTROL_PLANE_DB_PASSWORD:-supersecretpassword}
+      POSTGRES_DB: postgres
+      POSTGRES_HOST_AUTH_METHOD: trust
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+    restart: unless-stopped
+    ports:
+      - "25432:5432"
+    networks:
+      - ananta-network
+
+  control-plane-redis:
+    image: redis:7-alpine
+    container_name: arc-saas-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - control-plane-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    ports:
+      - "26379:6379"
+    networks:
+      - ananta-network
+
+  # ===========================================================================
+  # KEYCLOAK (Identity Provider)
+  # ===========================================================================
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:23.0
+    container_name: arc-saas-keycloak
+    command: start-dev
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://control-plane-postgres:5432/keycloak
+      KC_DB_USERNAME: postgres
+      KC_DB_PASSWORD: ${CONTROL_PLANE_DB_PASSWORD:-supersecretpassword}
+      KC_HEALTH_ENABLED: "true"
+    ports:
+      - "8180:8080"
+    depends_on:
+      control-plane-postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    networks:
+      - ananta-network
+    restart: unless-stopped
+
+  # ===========================================================================
+  # CONTROL PLANE - MINIO (Storage)
+  # ===========================================================================
+
+  control-plane-minio:
+    image: minio/minio:latest
+    container_name: arc-saas-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${CONTROL_PLANE_MINIO_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${CONTROL_PLANE_MINIO_PASSWORD:-minioadmin}
+    volumes:
+      - control-plane-minio-data:/data
+    ports:
+      - "29000:9000"
+      - "29001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ananta-network
+    restart: unless-stopped
+
+  # ===========================================================================
+  # SHARED - TEMPORAL (Workflow Engine)
+  # ===========================================================================
+
+  temporal-postgresql:
+    image: postgres:15-alpine
+    container_name: shared-temporal-postgres
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: ${TEMPORAL_DB_PASSWORD:-temporalpassword}
+      POSTGRES_DB: temporal
+      POSTGRES_HOST_AUTH_METHOD: trust
+    volumes:
+      - temporal-postgres-data:/var/lib/postgresql/data
+      - ./docker/init-db/temporal:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal -d temporal"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+    restart: unless-stopped
+    networks:
+      - ananta-network
+
+  temporal:
+    image: temporalio/auto-setup:1.24.2
+    container_name: shared-temporal
+    depends_on:
+      temporal-postgresql:
+        condition: service_healthy
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: ${TEMPORAL_DB_PASSWORD:-temporalpassword}
+      POSTGRES_SEEDS: temporal-postgresql
+      ENABLE_ES: "false"
+      SKIP_DEFAULT_NAMESPACE_CREATION: "false"
+      DEFAULT_NAMESPACE: default
+      DEFAULT_NAMESPACE_RETENTION: 72h
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 7233"]
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 90s
+    restart: unless-stopped
+    ports:
+      - "7233:7233"
+    networks:
+      ananta-network:
+        aliases:
+          - temporal
+
+  temporal-ui:
+    image: temporalio/ui:2.21.3
+    container_name: shared-temporal-ui
+    depends_on:
+      - temporal
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:3000
+    restart: unless-stopped
+    ports:
+      - "8088:8080"
+    networks:
+      - ananta-network
+
+  # Temporal Admin Tools - Creates required namespaces on startup
+  # NOTE: Uses 'temporal' CLI (not deprecated 'tctl') with explicit IP resolution
+  temporal-admin-tools:
+    image: temporalio/auto-setup:1.24.2
+    container_name: shared-temporal-admin-tools
+    depends_on:
+      temporal:
+        condition: service_healthy
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        echo "[temporal-admin] Waiting 90 seconds for Temporal to be fully ready..."
+        sleep 90
+
+        echo "[temporal-admin] Resolving Temporal server IP..."
+        TEMPORAL_IP=$(getent hosts temporal | awk '{print $1}')
+        echo "[temporal-admin] Temporal IP: $TEMPORAL_IP"
+
+        echo "[temporal-admin] Creating arc-saas namespace..."
+        temporal --address $TEMPORAL_IP:7233 operator namespace create arc-saas --retention 72h --description "Control Plane workflows" 2>&1 || echo "[temporal-admin] arc-saas namespace already exists"
+
+        echo "[temporal-admin] Creating enrichment namespace..."
+        temporal --address $TEMPORAL_IP:7233 operator namespace create enrichment --retention 72h --description "App Plane enrichment workflows" 2>&1 || echo "[temporal-admin] enrichment namespace already exists"
+
+        echo "[temporal-admin] Listing all namespaces..."
+        temporal --address $TEMPORAL_IP:7233 operator namespace list
+
+        echo "[temporal-admin] Namespace setup complete!"
+    networks:
+      - ananta-network
+    restart: "no"
+
+  # ===========================================================================
+  # APP PLANE - DATABASES
+  # ===========================================================================
+
+  supabase-db:
+    image: postgres:15-alpine
+    container_name: app-plane-supabase-db
+    volumes:
+      - supabase-db-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${SUPABASE_DB_PASSWORD:-supersecretpassword}
+      POSTGRES_DB: postgres
+      POSTGRES_HOST_AUTH_METHOD: trust
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+    restart: unless-stopped
+    ports:
+      - "27433:5432"
+    networks:
+      - ananta-network
+
+  components-v2-postgres:
+    image: postgres:15-alpine
+    container_name: app-plane-components-v2-postgres
+    volumes:
+      - components-v2-postgres-data:/var/lib/postgresql/data
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${COMPONENTS_V2_DB_PASSWORD:-supersecretpassword}
+      POSTGRES_DB: components_v2
+      POSTGRES_HOST_AUTH_METHOD: trust
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 120s
+    restart: unless-stopped
+    ports:
+      - "27011:5432"
+    networks:
+      - ananta-network
+
+  # ===========================================================================
+  # APP PLANE - INFRASTRUCTURE
+  # ===========================================================================
+
+  app-plane-redis:
+    image: redis:7-alpine
+    container_name: app-plane-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - app-plane-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    ports:
+      - "27012:6379"
+    networks:
+      - ananta-network
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: app-plane-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-supersecretpassword}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    ports:
+      - "25672:5672"
+      - "25673:15672"
+    networks:
+      - ananta-network
+
+  app-plane-minio:
+    image: minio/minio:latest
+    container_name: app-plane-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${APP_PLANE_MINIO_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${APP_PLANE_MINIO_PASSWORD:-minioadmin}
+    volumes:
+      - app-plane-minio-data:/data
+    ports:
+      - "27042:9000"
+      - "27043:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks:
+      - ananta-network
+    restart: unless-stopped
+
+  # ===========================================================================
+  # APP PLANE - SUPABASE SERVICES
+  # ===========================================================================
+
+  supabase-api:
+    image: postgrest/postgrest:v11.2.2
+    container_name: app-plane-supabase-api
+    ports:
+      - "27811:3000"
+    environment:
+      PGRST_DB_URI: postgres://postgres:${SUPABASE_DB_PASSWORD:-supersecretpassword}@supabase-db:5432/postgres
+      PGRST_DB_SCHEMA: public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${SUPABASE_JWT_SECRET:-your-super-secret-jwt-token-with-at-least-32-characters-long}
+    networks:
+      - ananta-network
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  supabase-meta:
+    image: supabase/postgres-meta:v0.74.0
+    container_name: app-plane-supabase-meta
+    environment:
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: supabase-db
+      PG_META_DB_PORT: 5432
+      PG_META_DB_NAME: postgres
+      PG_META_DB_USER: postgres
+      PG_META_DB_PASSWORD: ${SUPABASE_DB_PASSWORD:-supersecretpassword}
+    networks:
+      - ananta-network
+    depends_on:
+      supabase-db:
+        condition: service_healthy
+    restart: unless-stopped
+
+  supabase-studio:
+    image: supabase/studio:latest
+    container_name: app-plane-supabase-studio
+    ports:
+      - "27801:3000"
+    environment:
+      STUDIO_PG_META_URL: http://supabase-meta:8080
+      POSTGRES_PASSWORD: ${SUPABASE_DB_PASSWORD:-supersecretpassword}
+      SUPABASE_URL: http://supabase-api:3000
+    networks:
+      - ananta-network
+    depends_on:
+      - supabase-db
+      - supabase-meta
+    restart: unless-stopped
+
+  # ===========================================================================
+  # CONTROL PLANE - PORTALS (Frontend Applications)
+  # ===========================================================================
+
+  admin-app:
+    build:
+      context: ./apps/admin-app
+      dockerfile: Dockerfile
+    container_name: arc-saas-admin-app
+    ports:
+      - "27555:80"
+    networks:
+      - ananta-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  customer-portal:
+    build:
+      context: ./apps/customer-portal
+      dockerfile: Dockerfile
+    container_name: arc-saas-customer-portal
+    ports:
+      - "27100:80"
+    networks:
+      - ananta-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ===========================================================================
+  # NOVU (Notifications) - Optional for local dev
+  # ===========================================================================
+
+  novu-mongodb:
+    image: mongo:6
+    container_name: arc-saas-novu-mongodb
+    volumes:
+      - novu-mongo-data:/data/db
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - ananta-network
+    profiles:
+      - novu
+
+  novu-redis:
+    image: redis:7-alpine
+    container_name: arc-saas-novu-redis
+    command: redis-server --appendonly yes
+    volumes:
+      - novu-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - ananta-network
+    profiles:
+      - novu
+
+# =============================================================================
+# VOLUMES
+# =============================================================================
+volumes:
+  # Control Plane
+  control-plane-postgres-data:
+  control-plane-redis-data:
+  control-plane-minio-data:
+  temporal-postgres-data:
+  novu-mongo-data:
+  novu-redis-data:
+  # App Plane
+  supabase-db-data:
+  components-v2-postgres-data:
+  app-plane-redis-data:
+  app-plane-minio-data:
+  rabbitmq-data:
+
+# =============================================================================
+# NETWORKS
+# =============================================================================
+networks:
+  ananta-network:
+    driver: bridge
+    name: ananta-platform-network
