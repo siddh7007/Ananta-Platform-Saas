@@ -33,7 +33,7 @@ services:
 
   keycloak:
     image: quay.io/keycloak/keycloak:23.0
-    command: start --optimized
+    command: start-dev
     environment:
       KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
@@ -42,17 +42,16 @@ services:
       KC_DB_USERNAME: postgres
       KC_DB_PASSWORD: ${CONTROL_PLANE_DB_PASSWORD}
       KC_HEALTH_ENABLED: "true"
-      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:-auth.yourdomain.com}
-      KC_PROXY: edge
       KC_HTTP_ENABLED: "true"
     depends_on:
-      - control-plane-postgres
+      control-plane-postgres:
+        condition: service_healthy
     healthcheck:
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080"]
       interval: 30s
       timeout: 10s
       retries: 5
-      start_period: 60s
+      start_period: 120s
     restart: unless-stopped
     labels:
       - coolify.managed=true
