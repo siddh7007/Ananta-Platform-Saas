@@ -1,0 +1,111 @@
+# Stack 2: Novu Notification Services
+# Deploy AFTER Stack 1 (core) - depends on control-plane-minio
+
+services:
+  novu-mongodb:
+    image: mongo:6
+    volumes:
+      - novu-mongo-data:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 sh -c '>/dev/tcp/127.0.0.1/27017'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  novu-redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - novu-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  novu-api:
+    image: ghcr.io/novuhq/novu/api:latest
+    depends_on:
+      - novu-mongodb
+      - novu-redis
+    environment:
+      NODE_ENV: production
+      API_ROOT_URL: ${NOVU_API_URL}
+      DISABLE_USER_REGISTRATION: "false"
+      PORT: 3000
+      FRONT_BASE_URL: ${NOVU_WEB_URL}
+      WIDGET_BASE_URL: ${NOVU_WEB_URL}
+      MONGO_URL: mongodb://novu-mongodb:27017/novu-db
+      REDIS_HOST: novu-redis
+      REDIS_PORT: 6379
+      S3_LOCAL_STACK: http://control-plane-minio:9000
+      S3_BUCKET_NAME: novu-storage
+      S3_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: ${CONTROL_PLANE_MINIO_USER}
+      AWS_SECRET_ACCESS_KEY: ${CONTROL_PLANE_MINIO_PASSWORD}
+      JWT_SECRET: ${NOVU_JWT_SECRET}
+      STORE_ENCRYPTION_KEY: ${NOVU_ENCRYPTION_KEY}
+      NOVU_SECRET_KEY: ${NOVU_SECRET_KEY}
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=3000
+      - coolify.name=novu-api
+
+  novu-ws:
+    image: ghcr.io/novuhq/novu/ws:latest
+    depends_on:
+      - novu-mongodb
+      - novu-redis
+    environment:
+      NODE_ENV: production
+      PORT: 3002
+      MONGO_URL: mongodb://novu-mongodb:27017/novu-db
+      REDIS_HOST: novu-redis
+      REDIS_PORT: 6379
+      JWT_SECRET: ${NOVU_JWT_SECRET}
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=3002
+      - coolify.name=novu-ws
+
+  novu-worker:
+    image: ghcr.io/novuhq/novu/worker:latest
+    depends_on:
+      - novu-api
+    environment:
+      NODE_ENV: production
+      MONGO_URL: mongodb://novu-mongodb:27017/novu-db
+      REDIS_HOST: novu-redis
+      REDIS_PORT: 6379
+      JWT_SECRET: ${NOVU_JWT_SECRET}
+      STORE_ENCRYPTION_KEY: ${NOVU_ENCRYPTION_KEY}
+      NOVU_SECRET_KEY: ${NOVU_SECRET_KEY}
+      API_ROOT_URL: http://novu-api:3000
+    restart: unless-stopped
+
+  novu-web:
+    image: ghcr.io/novuhq/novu/web:latest
+    depends_on:
+      - novu-api
+    environment:
+      REACT_APP_API_URL: ${NOVU_API_URL}
+      REACT_APP_WS_URL: ${NOVU_WS_URL}
+      API_ROOT_URL: http://novu-api:3000
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=4200
+      - coolify.name=novu-dashboard
+
+volumes:
+  novu-mongo-data:
+  novu-redis-data:
+
+networks:
+  default:
+    name: ananta-platform-coolify
+    external: true

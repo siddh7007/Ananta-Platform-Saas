@@ -1,0 +1,146 @@
+# Stack 1: Core Infrastructure (Control Plane + Temporal)
+# Deploy this FIRST - other stacks depend on these services
+
+services:
+  control-plane-postgres:
+    image: postgres:15-alpine
+    volumes:
+      - control-plane-postgres-data:/var/lib/postgresql/data
+      - ./app-plane/coolify/migrations/000_init_databases.sql:/docker-entrypoint-initdb.d/000_init_databases.sql:ro
+      - ./app-plane/coolify/migrations/003_ARC_SAAS_MASTER.sql:/docker-entrypoint-initdb.d/001_arc_saas.sql:ro
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${CONTROL_PLANE_DB_PASSWORD}
+      POSTGRES_DB: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  control-plane-redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --requirepass ${CONTROL_PLANE_REDIS_PASSWORD:-}
+    volumes:
+      - control-plane-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:23.0
+    command: start --optimized
+    environment:
+      KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://control-plane-postgres:5432/keycloak
+      KC_DB_USERNAME: postgres
+      KC_DB_PASSWORD: ${CONTROL_PLANE_DB_PASSWORD}
+      KC_HEALTH_ENABLED: "true"
+      KC_HOSTNAME: ${KEYCLOAK_HOSTNAME:-auth.yourdomain.com}
+      KC_PROXY: edge
+      KC_HTTP_ENABLED: "true"
+    depends_on:
+      - control-plane-postgres
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=8080
+
+  control-plane-minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${CONTROL_PLANE_MINIO_USER}
+      MINIO_ROOT_PASSWORD: ${CONTROL_PLANE_MINIO_PASSWORD}
+    volumes:
+      - control-plane-minio-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 sh -c '>/dev/tcp/127.0.0.1/9000'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=9001
+
+  temporal-postgresql:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: temporal
+      POSTGRES_PASSWORD: ${TEMPORAL_DB_PASSWORD}
+      POSTGRES_DB: temporal
+    volumes:
+      - temporal-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  temporal:
+    image: temporalio/auto-setup:1.24.2
+    depends_on:
+      - temporal-postgresql
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_USER: temporal
+      POSTGRES_PWD: ${TEMPORAL_DB_PASSWORD}
+      POSTGRES_SEEDS: temporal-postgresql
+      ENABLE_ES: "false"
+      SKIP_DEFAULT_NAMESPACE_CREATION: "false"
+      DEFAULT_NAMESPACE: default
+      DEFAULT_NAMESPACE_RETENTION: 72h
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 sh -c '>/dev/tcp/127.0.0.1/7233'"]
+      interval: 10s
+      timeout: 10s
+      retries: 15
+      start_period: 90s
+    restart: unless-stopped
+
+  temporal-ui:
+    image: temporalio/ui:2.26.2
+    depends_on:
+      - temporal
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: "*"
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=8080
+
+  jaeger:
+    image: jaegertracing/all-in-one:1.53
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=16686
+
+volumes:
+  control-plane-postgres-data:
+  control-plane-redis-data:
+  control-plane-minio-data:
+  temporal-postgres-data:
+
+networks:
+  default:
+    name: ananta-platform-coolify
+    driver: bridge

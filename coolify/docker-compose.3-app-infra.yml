@@ -1,0 +1,158 @@
+# Stack 3: App Plane Infrastructure (Databases + Message Brokers)
+# Deploy AFTER Stack 1 (core) - provides foundation for app services
+
+services:
+  supabase-db:
+    image: supabase/postgres:15.1.0.147
+    volumes:
+      - supabase-db-data:/var/lib/postgresql/data
+      - ./app-plane/coolify/migrations/001_SUPABASE_MASTER.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
+    environment:
+      POSTGRES_PASSWORD: ${SUPABASE_DB_PASSWORD}
+      POSTGRES_USER: postgres
+      POSTGRES_DB: postgres
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  components-v2-postgres:
+    image: postgres:15-alpine
+    volumes:
+      - components-v2-postgres-data:/var/lib/postgresql/data
+      - ./app-plane/coolify/migrations/002_COMPONENTS_V2_MASTER.sql:/docker-entrypoint-initdb.d/001_init.sql:ro
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${COMPONENTS_V2_DB_PASSWORD}
+      POSTGRES_DB: components_v2
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d components_v2"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  app-plane-redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes --requirepass ${APP_PLANE_REDIS_PASSWORD:-}
+    volumes:
+      - app-plane-redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "if [ -n \"$APP_PLANE_REDIS_PASSWORD\" ]; then redis-cli -a \"$APP_PLANE_REDIS_PASSWORD\" ping; else redis-cli ping; fi"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  rabbitmq:
+    image: rabbitmq:3.12-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=15672
+      - coolify.name=rabbitmq-mgmt
+
+  app-plane-minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${APP_PLANE_MINIO_USER}
+      MINIO_ROOT_PASSWORD: ${APP_PLANE_MINIO_PASSWORD}
+    volumes:
+      - app-plane-minio-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 sh -c '>/dev/tcp/127.0.0.1/9000'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=9001
+      - coolify.name=app-plane-minio
+
+  app-plane-minio-init:
+    image: minio/mc:latest
+    depends_on:
+      - app-plane-minio
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set myminio http://app-plane-minio:9000 $${APP_PLANE_MINIO_USER} $${APP_PLANE_MINIO_PASSWORD};
+      mc mb myminio/bom-uploads --ignore-existing;
+      mc mb myminio/documents --ignore-existing;
+      mc mb myminio/exports --ignore-existing;
+      mc mb myminio/avatars --ignore-existing;
+      mc mb myminio/enrichment-audit --ignore-existing;
+      mc mb myminio/bulk-uploads --ignore-existing;
+      mc anonymous set download myminio/avatars;
+      exit 0;
+      "
+    environment:
+      APP_PLANE_MINIO_USER: ${APP_PLANE_MINIO_USER}
+      APP_PLANE_MINIO_PASSWORD: ${APP_PLANE_MINIO_PASSWORD}
+
+  supabase-api:
+    image: postgrest/postgrest:v11.2.2
+    environment:
+      PGRST_DB_URI: postgres://postgres:${SUPABASE_DB_PASSWORD}@supabase-db:5432/postgres
+      PGRST_DB_SCHEMA: public
+      PGRST_DB_ANON_ROLE: anon
+      PGRST_JWT_SECRET: ${SUPABASE_JWT_SECRET}
+    depends_on:
+      - supabase-db
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=3000
+      - coolify.name=supabase-api
+
+  supabase-meta:
+    image: supabase/postgres-meta:v0.74.0
+    environment:
+      PG_META_PORT: 8080
+      PG_META_DB_HOST: supabase-db
+      PG_META_DB_PORT: 5432
+      PG_META_DB_NAME: postgres
+      PG_META_DB_USER: postgres
+      PG_META_DB_PASSWORD: ${SUPABASE_DB_PASSWORD}
+    depends_on:
+      - supabase-db
+    restart: unless-stopped
+
+  supabase-studio:
+    image: supabase/studio:latest
+    environment:
+      STUDIO_PG_META_URL: http://supabase-meta:8080
+      POSTGRES_PASSWORD: ${SUPABASE_DB_PASSWORD}
+      SUPABASE_URL: http://supabase-api:3000
+    depends_on:
+      - supabase-meta
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=3000
+      - coolify.name=supabase-studio
+
+volumes:
+  supabase-db-data:
+  components-v2-postgres-data:
+  app-plane-redis-data:
+  app-plane-minio-data:
+  rabbitmq-data:
+
+networks:
+  default:
+    name: ananta-platform-coolify
+    external: true

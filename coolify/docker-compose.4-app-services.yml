@@ -1,0 +1,399 @@
+# Stack 4: App Plane Backend Services + Frontends
+# Deploy AFTER Stack 3 (app-infra) - depends on databases and message brokers
+
+services:
+  # ===========================================================================
+  # CONTROL PLANE BACKEND SERVICES
+  # ===========================================================================
+
+  tenant-management-service:
+    build:
+      context: ./arc-saas/services/tenant-management-service
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: 14000
+      HOST: 0.0.0.0
+      DB_HOST: control-plane-postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: ${CONTROL_PLANE_DB_PASSWORD}
+      DB_DATABASE: arc_saas
+      DB_SCHEMA: main
+      REDIS_HOST: control-plane-redis
+      REDIS_PORT: 6379
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: arc-saas
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ISSUER: ${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}
+      KEYCLOAK_ENABLED: "true"
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-ananta-saas}
+      NOVU_ENABLED: "true"
+      NOVU_API_KEY: ${NOVU_API_KEY:-}
+      NOVU_BACKEND_URL: http://novu-api:3000
+      BILLING_PROVIDER: ${BILLING_PROVIDER:-none}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PRICE_STARTER: ${STRIPE_PRICE_STARTER:-}
+      STRIPE_PRICE_PROFESSIONAL: ${STRIPE_PRICE_PROFESSIONAL:-}
+      STRIPE_PRICE_ENTERPRISE: ${STRIPE_PRICE_ENTERPRISE:-}
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 sh -c '>/dev/tcp/127.0.0.1/14000'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=14000
+      - coolify.name=tenant-api
+
+  temporal-worker-service:
+    build:
+      context: ./arc-saas/services/temporal-worker-service
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: production
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_NAMESPACE: arc-saas
+      TEMPORAL_TASK_QUEUE: tenant-provisioning
+      DB_HOST: control-plane-postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: ${CONTROL_PLANE_DB_PASSWORD}
+      DB_DATABASE: arc_saas
+      KEYCLOAK_ENABLED: "true"
+      KEYCLOAK_URL: http://keycloak:8080
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-ananta-saas}
+      KEYCLOAK_ADMIN_USER: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      S3_ENDPOINT: http://control-plane-minio:9000
+      AWS_ACCESS_KEY_ID: ${CONTROL_PLANE_MINIO_USER}
+      AWS_SECRET_ACCESS_KEY: ${CONTROL_PLANE_MINIO_PASSWORD}
+      NOVU_ENABLED: "true"
+      NOVU_BACKEND_URL: http://novu-api:3000
+      APP_PLANE_WEBHOOK_URL: http://webhook-bridge:27600
+      APP_PLANE_WEBHOOK_SECRET: ${APP_PLANE_WEBHOOK_SECRET}
+    restart: unless-stopped
+
+  subscription-service:
+    build:
+      context: ./arc-saas/services/subscription-service
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: 3002
+      DB_HOST: control-plane-postgres
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: ${CONTROL_PLANE_DB_PASSWORD}
+      DB_DATABASE: arc_saas
+      DB_SCHEMA: subscription
+      REDIS_HOST: control-plane-redis
+      REDIS_PORT: 6379
+      BILLING_PROVIDER: ${BILLING_PROVIDER:-none}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PRICE_STARTER: ${STRIPE_PRICE_STARTER:-}
+      STRIPE_PRICE_PROFESSIONAL: ${STRIPE_PRICE_PROFESSIONAL:-}
+      STRIPE_PRICE_ENTERPRISE: ${STRIPE_PRICE_ENTERPRISE:-}
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 sh -c '>/dev/tcp/127.0.0.1/3002'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=3002
+      - coolify.name=subscription-api
+
+  # ===========================================================================
+  # APP PLANE BACKEND SERVICES
+  # ===========================================================================
+
+  cns-service:
+    build:
+      context: ./app-plane/services/cns-service
+      dockerfile: Dockerfile
+      target: application
+    environment:
+      NODE_ENV: production
+      CNS_PORT: 8000
+      CNS_HOST: 0.0.0.0
+      LOG_LEVEL: INFO
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql://postgres:${COMPONENTS_V2_DB_PASSWORD}@components-v2-postgres:5432/components_v2
+      SUPABASE_DATABASE_URL: postgresql://postgres:${SUPABASE_DB_PASSWORD}@supabase-db:5432/postgres
+      COMPONENTS_V2_DATABASE_URL: postgresql://postgres:${COMPONENTS_V2_DB_PASSWORD}@components-v2-postgres:5432/components_v2
+      DATABASE_POOL_SIZE: 20
+      REDIS_URL: redis://:${APP_PLANE_REDIS_PASSWORD:-}@app-plane-redis:6379/2
+      JWT_SECRET_KEY: ${JWT_SECRET}
+      AUTH0_ENABLED: "true"
+      AUTH0_DOMAIN: ${KEYCLOAK_HOSTNAME}/realms/${KEYCLOAK_REALM}
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
+      ALLOW_DEV_DEFAULTS: "false"
+      TEMPORAL_ENABLED: "true"
+      TEMPORAL_HOST: temporal:7233
+      TEMPORAL_NAMESPACE: enrichment
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_PASS: ${RABBITMQ_PASSWORD}
+      MOUSER_ENABLED: ${MOUSER_ENABLED:-true}
+      MOUSER_API_KEY: ${MOUSER_API_KEY:-}
+      DIGIKEY_ENABLED: ${DIGIKEY_ENABLED:-true}
+      DIGIKEY_CLIENT_ID: ${DIGIKEY_CLIENT_ID:-}
+      DIGIKEY_CLIENT_SECRET: ${DIGIKEY_CLIENT_SECRET:-}
+      ELEMENT14_ENABLED: ${ELEMENT14_ENABLED:-true}
+      ELEMENT14_API_KEY: ${ELEMENT14_API_KEY:-}
+      BILLING_PROVIDER: ${BILLING_PROVIDER:-none}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PRICE_STARTER: ${STRIPE_PRICE_STARTER:-}
+      STRIPE_PRICE_PROFESSIONAL: ${STRIPE_PRICE_PROFESSIONAL:-}
+      STRIPE_PRICE_ENTERPRISE: ${STRIPE_PRICE_ENTERPRISE:-}
+      MINIO_ENABLED: "true"
+      MINIO_ENDPOINT: app-plane-minio:9000
+      MINIO_ACCESS_KEY: ${APP_PLANE_MINIO_USER}
+      MINIO_SECRET_KEY: ${APP_PLANE_MINIO_PASSWORD}
+      MINIO_SECURE: "false"
+      DEBUG: "false"
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 sh -c '>/dev/tcp/127.0.0.1/8000'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 45s
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=8000
+      - coolify.name=cns-api
+
+  cns-worker:
+    build:
+      context: ./app-plane/services/cns-service
+      dockerfile: Dockerfile
+      target: application
+    command: python -m app.workers.bom_worker
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://postgres:${COMPONENTS_V2_DB_PASSWORD}@components-v2-postgres:5432/components_v2
+      SUPABASE_DATABASE_URL: postgresql://postgres:${SUPABASE_DB_PASSWORD}@supabase-db:5432/postgres
+      REDIS_URL: redis://:${APP_PLANE_REDIS_PASSWORD:-}@app-plane-redis:6379/2
+      JWT_SECRET_KEY: ${JWT_SECRET}
+      TEMPORAL_ENABLED: "true"
+      TEMPORAL_HOST: temporal:7233
+      TEMPORAL_NAMESPACE: enrichment
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_PASS: ${RABBITMQ_PASSWORD}
+      MOUSER_API_KEY: ${MOUSER_API_KEY:-}
+      DIGIKEY_CLIENT_ID: ${DIGIKEY_CLIENT_ID:-}
+      DIGIKEY_CLIENT_SECRET: ${DIGIKEY_CLIENT_SECRET:-}
+      MINIO_ENDPOINT: app-plane-minio:9000
+      MINIO_ACCESS_KEY: ${APP_PLANE_MINIO_USER}
+      MINIO_SECRET_KEY: ${APP_PLANE_MINIO_PASSWORD}
+      BILLING_PROVIDER: ${BILLING_PROVIDER:-none}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+      STRIPE_PRICE_STARTER: ${STRIPE_PRICE_STARTER:-}
+      STRIPE_PRICE_PROFESSIONAL: ${STRIPE_PRICE_PROFESSIONAL:-}
+      STRIPE_PRICE_ENTERPRISE: ${STRIPE_PRICE_ENTERPRISE:-}
+    restart: unless-stopped
+
+  django-backend:
+    build:
+      context: ./app-plane/services/backend
+      dockerfile: Dockerfile
+    environment:
+      DEBUG: "False"
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
+      ALLOWED_HOSTS: "*"
+      DATABASE_URL: postgresql://postgres:${COMPONENTS_V2_DB_PASSWORD}@components-v2-postgres:5432/components_v2
+      REDIS_URL: redis://:${APP_PLANE_REDIS_PASSWORD:-}@app-plane-redis:6379/0
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 sh -c '>/dev/tcp/127.0.0.1/8000'"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=8000
+      - coolify.name=django-api
+
+  # ===========================================================================
+  # MIDDLEWARE & INTEGRATION
+  # ===========================================================================
+
+  middleware-api:
+    build:
+      context: ./app-plane/services/middleware-api
+      dockerfile: Dockerfile
+    environment:
+      FLASK_ENV: production
+      DATABASE_URL: postgres://postgres:${SUPABASE_DB_PASSWORD}@supabase-db:5432/postgres
+      REDIS_URL: redis://:${APP_PLANE_REDIS_PASSWORD:-}@app-plane-redis:6379/3
+      DJANGO_API_URL: http://django-backend:8000
+      CNS_API_URL: http://cns-service:8000
+      CONTROL_PLANE_URL: http://tenant-management-service:14000
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=5000
+      - coolify.name=middleware-api
+
+  webhook-bridge:
+    build:
+      context: ./app-plane/webhook-bridge
+      dockerfile: Dockerfile
+    environment:
+      WEBHOOK_SECRET: ${APP_PLANE_WEBHOOK_SECRET}
+      SUPABASE_URL: http://supabase-api:3000
+      SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY}
+      FLASK_ENV: production
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=27600
+      - coolify.name=webhook-bridge
+
+  # ===========================================================================
+  # BACKGROUND WORKERS
+  # ===========================================================================
+
+  audit-logger:
+    build:
+      context: ./app-plane
+      dockerfile: services/audit-logger/Dockerfile
+    environment:
+      DATABASE_URL: postgres://postgres:${SUPABASE_DB_PASSWORD}@supabase-db:5432/postgres
+      SUPABASE_DB_HOST: supabase-db
+      SUPABASE_DB_PORT: 5432
+      SUPABASE_DB_NAME: postgres
+      SUPABASE_DB_USER: postgres
+      SUPABASE_DB_PASSWORD: ${SUPABASE_DB_PASSWORD}
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_PASS: ${RABBITMQ_PASSWORD}
+      LOG_LEVEL: INFO
+      TEMPORAL_ENABLED: "true"
+      TEMPORAL_HOST: temporal:7233
+      TEMPORAL_NAMESPACE: enrichment
+      TEMPORAL_TASK_QUEUE: cns-enrichment
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    restart: unless-stopped
+
+  novu-consumer:
+    build:
+      context: ./app-plane/services/novu-consumer
+      dockerfile: Dockerfile
+    environment:
+      NOVU_API_KEY: ${NOVU_API_KEY}
+      NOVU_URL: http://novu-api:3000
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_STREAM_PORT: 5552
+      RABBITMQ_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD}
+    restart: unless-stopped
+
+  # ===========================================================================
+  # CONTENT MANAGEMENT
+  # ===========================================================================
+
+  directus:
+    image: directus/directus:latest
+    environment:
+      KEY: ${DIRECTUS_KEY:-directus-key-change-in-production}
+      SECRET: ${DIRECTUS_SECRET:-directus-secret-change-in-production}
+      DB_CLIENT: pg
+      DB_HOST: supabase-db
+      DB_PORT: 5432
+      DB_DATABASE: directus
+      DB_USER: postgres
+      DB_PASSWORD: ${SUPABASE_DB_PASSWORD}
+      ADMIN_EMAIL: ${DIRECTUS_ADMIN_EMAIL:-admin@example.com}
+      ADMIN_PASSWORD: ${DIRECTUS_ADMIN_PASSWORD}
+      PUBLIC_URL: ${DIRECTUS_PUBLIC_URL}
+      CORS_ENABLED: "true"
+      CORS_ORIGIN: "*"
+      CACHE_ENABLED: "true"
+      CACHE_STORE: redis
+      REDIS: redis://:${APP_PLANE_REDIS_PASSWORD:-}@app-plane-redis:6379/4
+    volumes:
+      - directus-uploads:/directus/uploads
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=8055
+      - coolify.name=directus-cms
+
+  # ===========================================================================
+  # FRONTENDS
+  # ===========================================================================
+
+  admin-app:
+    build:
+      context: ./arc-saas/apps/admin-app
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${CONTROL_PLANE_API_URL}
+        VITE_KEYCLOAK_URL: ${KEYCLOAK_URL}
+        VITE_KEYCLOAK_REALM: ${KEYCLOAK_REALM:-ananta-saas}
+        VITE_KEYCLOAK_CLIENT_ID: admin-portal
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=80
+      - coolify.name=admin-portal
+
+  customer-portal:
+    build:
+      context: ./arc-saas/apps/customer-portal
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: ${CONTROL_PLANE_API_URL}
+        VITE_KEYCLOAK_URL: ${KEYCLOAK_URL}
+        VITE_KEYCLOAK_REALM: ${KEYCLOAK_REALM:-ananta-saas}
+        VITE_KEYCLOAK_CLIENT_ID: cbp-frontend
+        VITE_CNS_API_URL: ${CNS_API_URL}
+        VITE_STRIPE_PUBLISHABLE_KEY: ${STRIPE_PUBLISHABLE_KEY:-}
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=80
+      - coolify.name=customer-portal
+
+  cns-dashboard:
+    build:
+      context: ./app-plane/services/cns-service/dashboard
+      dockerfile: Dockerfile
+      args:
+        VITE_CNS_API_URL: ${CNS_API_URL}
+        VITE_KEYCLOAK_URL: ${KEYCLOAK_URL}
+        VITE_KEYCLOAK_REALM: ${KEYCLOAK_REALM:-ananta-saas}
+        VITE_KEYCLOAK_CLIENT_ID: cns-dashboard
+    restart: unless-stopped
+    labels:
+      - coolify.managed=true
+      - coolify.port=80
+      - coolify.name=cns-dashboard
+
+volumes:
+  directus-uploads:
+
+networks:
+  default:
+    name: ananta-platform-coolify
+    external: true
