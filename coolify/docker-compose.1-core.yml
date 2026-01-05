@@ -105,6 +105,7 @@ services:
       DEFAULT_NAMESPACE: default
       DEFAULT_NAMESPACE_RETENTION: 72h
       BIND_ON_IP: "0.0.0.0"
+      TEMPORAL_BROADCAST_ADDRESS: temporal
     healthcheck:
       test: ["CMD", "nc", "-z", "localhost", "7233"]
       interval: 10s
