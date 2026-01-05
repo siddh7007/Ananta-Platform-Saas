@@ -21,7 +21,7 @@ services:
 
   control-plane-redis:
     image: redis:7-alpine
-    command: redis-server --appendonly yes --requirepass ${CONTROL_PLANE_REDIS_PASSWORD:-}
+    command: redis-server --appendonly yes
     volumes:
       - control-plane-redis-data:/data
     healthcheck:
