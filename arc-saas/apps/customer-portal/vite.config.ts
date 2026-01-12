@@ -58,8 +58,10 @@ export default defineConfig({
       template: 'treemap',
     }),
     // PWA configuration for offline support and service worker
+    // DISABLED: ServiceWorker causes stale chunk issues when lazy-loading React components
     VitePWA({
       registerType: 'autoUpdate', // Changed from 'prompt' for immediate updates
+      disable: process.env.VITE_DISABLE_PWA !== 'false', // Disabled by default, opt-in via VITE_DISABLE_PWA=false
       includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
       manifest: {
         name: 'Component Platform',
@@ -103,6 +105,8 @@ export default defineConfig({
         clientsClaim: true,
         // Clean up outdated caches from previous versions
         cleanupOutdatedCaches: true,
+        // Add build timestamp to cache names for automatic invalidation
+        cacheId: `cbp-v${Date.now()}`,
         // IMPORTANT: SSE/EventSource endpoints must NOT be intercepted by ServiceWorker
         // They are streaming connections that cannot be cached. List patterns to skip.
         navigateFallbackDenylist: [
@@ -189,7 +193,10 @@ export default defineConfig({
         ],
       },
       devOptions: {
-        enabled: true,
+        // Disable PWA in dev to avoid stale cached chunks during HMR/rebuilds.
+        // ServiceWorker can serve old chunks, causing "error loading dynamically imported module".
+        // Enable explicitly via VITE_PWA_DEV=true if needed for testing.
+        enabled: process.env.VITE_PWA_DEV === 'true',
         type: 'module',
       },
     }),

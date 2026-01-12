@@ -1,0 +1,150 @@
+# =============================================================================
+# Temporal Worker Service - No HTTP server, worker only
+# =============================================================================
+replicaCount: 2
+
+image:
+  repository: ghcr.io/ananta-platform/temporal-worker-service
+  pullPolicy: IfNotPresent
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: "temporal-worker-service"
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/metrics"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+
+# Metrics service only
+service:
+  type: ClusterIP
+  port: 8080
+  targetPort: 8080
+  annotations: {}
+
+# No ingress needed for worker
+ingress:
+  enabled: false
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Health check on metrics port
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 8080
+  initialDelaySeconds: 30
+  periodSeconds: 30
+  timeoutSeconds: 5
+  successThreshold: 1
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 8080
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 3
+  successThreshold: 1
+  failureThreshold: 3
+
+startupProbe:
+  httpGet:
+    path: /health
+    port: 8080
+  initialDelaySeconds: 0
+  periodSeconds: 10
+  timeoutSeconds: 3
+  successThreshold: 1
+  failureThreshold: 30
+
+configMap:
+  LOG_LEVEL: info
+  NODE_ENV: production
+
+secrets:
+  existingSecret: "temporal-worker-secrets"
+  create: false
+  data: {}
+
+# Database for reading tenant data
+database:
+  host: postgres.database-system.svc.cluster.local
+  port: 5432
+  database: arc_saas
+
+# Temporal connection
+temporal:
+  address: temporal.temporal-system.svc.cluster.local:7233
+  namespace: arc-saas
+  taskQueue: tenant-provisioning
+  maxConcurrentWorkflows: 100
+  maxConcurrentActivities: 200
+
+# Keycloak for tenant provisioning
+keycloak:
+  url: https://auth.ananta.local
+  realm: ananta
+  adminUsername: admin
+
+serviceMonitor:
+  enabled: true
+  interval: 30s
+  scrapeTimeout: 10s
+  labels: {}
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+volumes:
+  - name: tmp
+    emptyDir: {}
+
+volumeMounts:
+  - name: tmp
+    mountPath: /tmp
+
+extraEnv: []
+extraEnvFrom: []
+initContainers: []
+sidecars: []

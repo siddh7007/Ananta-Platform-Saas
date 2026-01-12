@@ -1,0 +1,84 @@
+# =============================================================================
+# Infracost Configuration
+# =============================================================================
+# Cost estimation for Ananta Platform SaaS Terraform infrastructure
+# =============================================================================
+
+version: 0.1
+
+projects:
+  # ---------------------------------------------------------------------------
+  # Development Environment
+  # ---------------------------------------------------------------------------
+  - path: ../terraform/environments/dev
+    name: ananta-dev
+    terraform_var_files:
+      - ../dev.tfvars
+    terraform_vars:
+      environment: dev
+    usage_file: usage/dev.yml
+
+  # ---------------------------------------------------------------------------
+  # Staging Environment
+  # ---------------------------------------------------------------------------
+  - path: ../terraform/environments/staging
+    name: ananta-staging
+    terraform_var_files:
+      - ../staging.tfvars
+    terraform_vars:
+      environment: staging
+    usage_file: usage/staging.yml
+
+  # ---------------------------------------------------------------------------
+  # Production Environment
+  # ---------------------------------------------------------------------------
+  - path: ../terraform/environments/prod
+    name: ananta-prod
+    terraform_var_files:
+      - ../prod.tfvars
+    terraform_vars:
+      environment: prod
+    usage_file: usage/prod.yml
+
+  # ---------------------------------------------------------------------------
+  # Individual Module Estimates (for module development)
+  # ---------------------------------------------------------------------------
+  - path: ../terraform/modules/network
+    name: network-module
+    terraform_vars:
+      cloud_provider: aws
+      name_prefix: infracost-estimate
+      environment: dev
+      vpc_cidr: "10.0.0.0/16"
+      availability_zones: ["us-east-1a", "us-east-1b"]
+      public_subnet_cidrs: ["10.0.1.0/24", "10.0.2.0/24"]
+      private_subnet_cidrs: ["10.0.10.0/24", "10.0.11.0/24"]
+      enable_nat_gateway: true
+      single_nat_gateway: true
+
+  - path: ../terraform/modules/database
+    name: database-module
+    terraform_vars:
+      cloud_provider: aws
+      name_prefix: infracost-estimate
+      environment: dev
+      database_name: postgres
+      engine_version: "15"
+      instance_size: small
+      storage_gb: 100
+
+  - path: ../terraform/modules/cache
+    name: cache-module
+    terraform_vars:
+      cloud_provider: aws
+      name_prefix: infracost-estimate
+      environment: dev
+      instance_size: small
+      high_availability: false
+
+  - path: ../terraform/modules/compute
+    name: compute-module
+    terraform_vars:
+      cloud_provider: aws
+      name_prefix: infracost-estimate
+      environment: dev

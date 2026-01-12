@@ -1,0 +1,17 @@
+apiVersion: v2
+name: tenant-management-service
+description: Core backend API for tenant and subscription management
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - tenant-management
+  - saas
+  - control-plane
+  - loopback
+maintainers:
+  - name: Platform Team
+    email: platform@ananta.io
+home: https://github.com/your-org/ananta-platform-saas
+sources:
+  - https://github.com/your-org/ananta-platform-saas/tree/main/arc-saas/services/tenant-management-service

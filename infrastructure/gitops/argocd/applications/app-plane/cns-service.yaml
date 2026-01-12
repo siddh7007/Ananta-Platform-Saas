@@ -1,0 +1,138 @@
+# =============================================================================
+# ArgoCD Application - CNS Service
+# =============================================================================
+# Component Normalization Service for BOM enrichment
+# =============================================================================
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cns-service
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: cns-service
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: app-plane
+    environment: '{{.Values.environment}}'
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: ananta-platform
+
+  source:
+    repoURL: https://github.com/ananta-platform/ananta-platform-saas.git
+    targetRevision: HEAD
+    path: infrastructure/kubernetes/helm/cns-service
+
+    helm:
+      releaseName: cns-service
+      valueFiles:
+        - values.yaml
+        - values-{{.Values.environment}}.yaml
+
+      values: |
+        fullnameOverride: cns-service
+
+        image:
+          repository: ghcr.io/ananta-platform/cns-service
+          pullPolicy: IfNotPresent
+
+        service:
+          type: ClusterIP
+          port: 27200
+
+        ingress:
+          enabled: true
+          className: nginx
+          annotations:
+            cert-manager.io/cluster-issuer: letsencrypt-prod
+            nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+            nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+            nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+          hosts:
+            - host: cns.{{.Values.domain}}
+              paths:
+                - path: /
+                  pathType: Prefix
+
+        resources:
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 2Gi
+
+        autoscaling:
+          enabled: true
+          minReplicas: 2
+          maxReplicas: 20
+          targetCPUUtilizationPercentage: 60
+
+        # Database connections
+        databases:
+          supabase:
+            host: supabase-db.database-system.svc.cluster.local
+            port: 5432
+            database: postgres
+          componentsV2:
+            host: components-db.database-system.svc.cluster.local
+            port: 5432
+            database: components_v2
+
+        # Redis for caching
+        redis:
+          host: redis.cache-system.svc.cluster.local
+          port: 6379
+
+        # RabbitMQ for async processing
+        rabbitmq:
+          host: rabbitmq.messaging-system.svc.cluster.local
+          port: 5672
+          vhost: cns
+
+        # Temporal for workflows
+        temporal:
+          address: temporal.temporal-system.svc.cluster.local:7233
+          namespace: enrichment
+          taskQueue: component-enrichment
+
+        configMap:
+          LOG_LEVEL: info
+          PYTHON_ENV: production
+          ENABLE_STREAM_SSE: "true"
+
+        secrets:
+          existingSecret: cns-service-secrets
+
+        serviceMonitor:
+          enabled: true
+          interval: 30s
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ananta-{{.Values.environment}}
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  revisionHistoryLimit: 10
+
+  info:
+    - name: Documentation
+      value: https://docs.ananta-platform.io/services/cns
+    - name: Team
+      value: data-team

@@ -35,7 +35,73 @@ e:\Work\Ananta-Platform-Saas\
 - **Notifications**: Novu
 - **Cache**: Redis (lead tokens)
 - **Frontend**: React (TypeScript) with Refine.dev
-- **Infrastructure**: Docker, Docker Compose
+- **Infrastructure**: Docker, Docker Compose, Kubernetes (Rancher Desktop)
+
+## Local Kubernetes Development (Rancher Desktop)
+
+**Current Setup**: Uses Rancher Desktop with k3s and Docker runtime.
+
+### Key Details
+| Setting | Value |
+|---------|-------|
+| Kubernetes Context | `rancher-desktop` |
+| Node Name | `sevadas` |
+| Container Runtime | `docker` (shares images with Docker Desktop) |
+| kubectl Location | `e:/Work/Ananta-Platform-Saas/kubectl.exe` |
+| kind Location | `e:/Work/Ananta-Platform-Saas/kind.exe` (not used with rancher-desktop) |
+| helm Location | `e:/Work/Ananta-Platform-Saas/helm.exe` |
+| terraform Location | `e:/Work/Ananta-Platform-Saas/terraform.exe` |
+
+### Loading Docker Images to Kubernetes
+Since Rancher Desktop uses Docker runtime, locally built images are **automatically available** to the cluster:
+```bash
+# 1. Build image locally
+docker build -t myimage:tag .
+
+# 2. Tag for deployment (optional - if deployment uses different tag)
+docker tag myimage:tag ananta/myimage:local
+
+# 3. Rollout restart to pick up new image
+kubectl rollout restart deployment/my-deployment -n my-namespace
+```
+
+**Important**: No need for `kind load` or `nerdctl import` - Docker images are shared.
+
+### Common kubectl Commands
+```bash
+# Check cluster status
+kubectl get nodes
+kubectl get pods -n app-plane
+
+# View logs
+kubectl logs -f deployment/cns-service -n app-plane
+
+# Port-forward for local access
+kubectl port-forward -n app-plane svc/customer-portal 27100:27100
+kubectl port-forward -n app-plane svc/cns-service 27200:27200
+
+# Restart deployment
+kubectl rollout restart deployment/customer-portal -n app-plane
+
+# Apply Terraform changes
+./terraform.exe -chdir=infrastructure/terraform/environments/local apply -auto-approve
+```
+
+### App Plane vs Arc-SaaS Customer Portal
+**IMPORTANT**: There are TWO customer-portal applications:
+
+| Portal | Location | Purpose | Port |
+|--------|----------|---------|------|
+| Arc-SaaS Customer Portal | `arc-saas/apps/customer-portal/` | Control Plane CBP (Refine.dev) | 27100 |
+| App Plane Customer Portal | `app-plane/services/customer-portal/` | CNS frontend (React Admin) | 27100 |
+
+For Kubernetes deployment, use the **Arc-SaaS** customer-portal. Build and deploy:
+```bash
+cd arc-saas/apps/customer-portal
+bun run build
+docker build -t ananta/customer-portal:local .
+kubectl rollout restart deployment/customer-portal -n app-plane
+```
 
 ## CRITICAL: Tenant ID = Organization ID Mapping
 
@@ -98,11 +164,8 @@ docker-compose down
 | MinIO | app-plane-minio | 27040/27041 | Object storage |
 | Supabase API | app-plane-supabase-api | 27810 | PostgREST |
 | Supabase Studio | app-plane-supabase-studio | 27800 | DB Admin UI |
-| CNS Service | app-plane-cns-service | 27200 | Component normalization |
-| CNS Dashboard | app-plane-cns-dashboard | 27250 | CNS Admin UI |
-| Customer Portal | app-plane-customer-portal | 27100 | Customer facing |
-| Backstage Portal | app-plane-backstage-portal | 27150 | Admin portal |
-| Dashboard | app-plane-dashboard | 27400 | Unified dashboard |
+| CNS Service | app-plane-cns-service | 27200 | Component normalization (Python backend + React Admin dashboard at /dashboard) |
+| Customer Portal | app-plane-customer-portal | 27100 | CBP - Customer Business Portal (Refine) |
 
 ### Master Migrations (for fresh databases):
 ```bash

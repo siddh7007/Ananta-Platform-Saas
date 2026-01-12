@@ -5,9 +5,14 @@
       "command": "node",
       "args": ["e:/Work/Ananta-Platform-Saas/tools/coolify-mcp-enhanced/dist/index.js"],
       "env": {
-        "COOLIFY_ACCESS_TOKEN": "1|GnE24NL8I1rQ3wnf48vq2czwTl38VHvF1AVwVVli2a200755",
+        "COOLIFY_ACCESS_TOKEN": "1|mBE9OAwVoeWXSDdabKRIsViKxdF3QCR2Rl7IyvQn6fd3f949",
         "COOLIFY_BASE_URL": "http://172.25.76.67:8000"
       }
+    },
+    "kubernetes": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["kubernetes-mcp-server@latest"]
     }
   }
 }

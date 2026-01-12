@@ -1,3 +1,6 @@
-MPN,Manufacturer,Quantity
-LM7805CT,Texas Instruments,10
-ATMEGA328P-PU,Microchip,5
+Part Number,Manufacturer,Description,Quantity,Reference Designators
+LM358N,Texas Instruments,Dual Op-Amp,10,U1 U2 U3 U4 U5 U6 U7 U8 U9 U10
+10K-0805,Yageo,10K Resistor 0805,100,R1-R100
+100nF-0603,Samsung,100nF Capacitor 0603,50,C1-C50
+STM32F103C8T6,STMicroelectronics,ARM Cortex-M3 MCU,5,U11-U15
+NE555P,Texas Instruments,Timer IC,20,U16-U35

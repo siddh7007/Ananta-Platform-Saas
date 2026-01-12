@@ -37,13 +37,24 @@ const ensureInitialized = async (): Promise<boolean> => {
 // This is crucial for API calls that need a valid token
 const ensureAuthenticated = async (maxWaitMs = 10000): Promise<boolean> => {
   // First ensure initialized
-  await ensureInitialized();
+  const initResult = await ensureInitialized();
 
   const keycloak = getKeycloak();
+
+  console.log('[Keycloak] ensureAuthenticated: initResult=', initResult, 'authenticated=', keycloak.authenticated, 'token=', !!keycloak.token);
 
   // If already authenticated, return immediately
   if (keycloak.authenticated && keycloak.token) {
     return true;
+  }
+
+  // IMPORTANT: If init already completed with authenticated=false, don't poll forever.
+  // This happens when OAuth callback fails or user is not logged in.
+  // The polling is only useful if SSO check is still in progress.
+  // Since we now await initKeycloak(), if it returned false, auth has already failed.
+  if (initResult === false) {
+    console.warn('[Keycloak] ensureAuthenticated: Init returned false, user not authenticated');
+    return false;
   }
 
   // If there's already an auth promise in flight, wait for it
@@ -64,7 +75,11 @@ const ensureAuthenticated = async (maxWaitMs = 10000): Promise<boolean> => {
 
       // Check if we've exceeded max wait time
       if (Date.now() - startTime > maxWaitMs) {
-        console.warn('[Keycloak] ensureAuthenticated: Timeout waiting for authentication');
+        console.warn('[Keycloak] ensureAuthenticated: Timeout waiting for authentication', {
+          authenticated: keycloak.authenticated,
+          hasToken: !!keycloak.token,
+          elapsedMs: Date.now() - startTime,
+        });
         resolve(false);
         return;
       }

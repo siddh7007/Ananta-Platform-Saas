@@ -1,0 +1,14 @@
+apiVersion: v2
+name: customer-app
+description: Customer-facing React application for Ananta Platform
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - ananta
+  - customer
+  - frontend
+  - react
+maintainers:
+  - name: Platform Team
+    email: platform@ananta.io

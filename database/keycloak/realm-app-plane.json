@@ -1,0 +1,175 @@
+{
+  "realm": "components-platform",
+  "enabled": true,
+  "displayName": "Components Platform V2",
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "users": [
+    {
+      "username": "admin",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Platform",
+      "lastName": "Administrator",
+      "email": "admin@components-platform.local",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "admin123",
+          "temporary": false
+        }
+      ]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "dashboard",
+      "name": "Unified Dashboard",
+      "description": "Central SSO dashboard for all services",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["http://localhost:27012/*"],
+      "webOrigins": ["http://localhost:27012"],
+      "protocol": "openid-connect"
+    },
+    {
+      "clientId": "grafana",
+      "name": "Grafana Monitoring",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["http://localhost:27470/*"],
+      "webOrigins": ["http://localhost:27470"],
+      "protocol": "openid-connect"
+    },
+    {
+      "clientId": "n8n",
+      "name": "n8n Workflows",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["http://localhost:27300/*"],
+      "webOrigins": ["http://localhost:27300"],
+      "protocol": "openid-connect"
+    },
+    {
+      "clientId": "minio",
+      "name": "MinIO Console",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["http://localhost:27401/*"],
+      "webOrigins": ["http://localhost:27401"],
+      "protocol": "openid-connect"
+    },
+    {
+      "clientId": "temporal",
+      "name": "Temporal Workflows",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["http://localhost:27111/*"],
+      "webOrigins": ["http://localhost:27111"],
+      "protocol": "openid-connect"
+    },
+    {
+      "clientId": "jaeger",
+      "name": "Jaeger UI",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["http://localhost:27410/*"],
+      "webOrigins": ["http://localhost:27410"],
+      "protocol": "openid-connect"
+    },
+    {
+      "clientId": "rabbitmq",
+      "name": "RabbitMQ Management UI",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["http://localhost:27251/*"],
+      "webOrigins": ["http://localhost:27251"],
+      "protocol": "openid-connect"
+    },
+    {
+      "clientId": "backend-api",
+      "name": "Django Backend API",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["http://localhost:27010/*"],
+      "webOrigins": ["http://localhost:27010"],
+      "protocol": "openid-connect"
+    },
+    {
+      "clientId": "frontend-catalog",
+      "name": "Component Catalog Frontend",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["http://localhost:9005/*"],
+      "webOrigins": ["http://localhost:9005"],
+      "protocol": "openid-connect"
+    },
+    {
+      "clientId": "directus",
+      "name": "Directus CMS",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["http://localhost:27120/*"],
+      "webOrigins": ["http://localhost:27120"],
+      "protocol": "openid-connect"
+    },
+    {
+      "clientId": "loki",
+      "name": "Loki Log Aggregation",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["http://localhost:27480/*"],
+      "webOrigins": ["http://localhost:27480"],
+      "protocol": "openid-connect"
+    },
+    {
+      "clientId": "prometheus",
+      "name": "Prometheus Monitoring",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["http://localhost:27471/*"],
+      "webOrigins": ["http://localhost:27471"],
+      "protocol": "openid-connect"
+    },
+    {
+      "clientId": "meilisearch",
+      "name": "MeiliSearch",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "redirectUris": ["http://localhost:27350/*"],
+      "webOrigins": ["http://localhost:27350"],
+      "protocol": "openid-connect"
+    }
+  ]
+}

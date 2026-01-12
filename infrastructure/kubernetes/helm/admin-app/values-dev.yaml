@@ -1,0 +1,23 @@
+# Development environment overrides
+replicaCount: 1
+autoscaling:
+  enabled: false
+
+ingress:
+  hosts:
+    - host: admin-dev.ananta.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: admin-app-dev-tls
+      hosts:
+        - admin-dev.ananta.local
+
+configMap:
+  VITE_API_URL: https://api-dev.ananta.local
+  VITE_KEYCLOAK_URL: https://auth-dev.ananta.local
+  VITE_CUSTOMER_APP_URL: https://portal-dev.ananta.local
+
+podDisruptionBudget:
+  enabled: false

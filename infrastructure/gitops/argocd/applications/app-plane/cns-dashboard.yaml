@@ -1,0 +1,97 @@
+# =============================================================================
+# ArgoCD Application - CNS Dashboard
+# =============================================================================
+# Admin dashboard for CNS service management
+# =============================================================================
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cns-dashboard
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: cns-dashboard
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: app-plane
+    environment: '{{.Values.environment}}'
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: ananta-platform
+
+  source:
+    repoURL: https://github.com/ananta-platform/ananta-platform-saas.git
+    targetRevision: HEAD
+    path: infrastructure/kubernetes/helm/cns-dashboard
+
+    helm:
+      releaseName: cns-dashboard
+      valueFiles:
+        - values.yaml
+        - values-{{.Values.environment}}.yaml
+
+      values: |
+        fullnameOverride: cns-dashboard
+
+        image:
+          repository: ghcr.io/ananta-platform/cns-dashboard
+          pullPolicy: IfNotPresent
+
+        service:
+          type: ClusterIP
+          port: 80
+
+        ingress:
+          enabled: true
+          className: nginx
+          annotations:
+            cert-manager.io/cluster-issuer: letsencrypt-prod
+          hosts:
+            - host: cns-admin.{{.Values.domain}}
+              paths:
+                - path: /
+                  pathType: Prefix
+
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+
+        autoscaling:
+          enabled: true
+          minReplicas: 2
+          maxReplicas: 4
+
+        runtimeConfig:
+          VITE_CNS_API_URL: https://cns.{{.Values.domain}}
+          VITE_KEYCLOAK_URL: https://auth.{{.Values.domain}}
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ananta-{{.Values.environment}}
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  revisionHistoryLimit: 10
+
+  info:
+    - name: Documentation
+      value: https://docs.ananta-platform.io/apps/cns-dashboard
+    - name: Team
+      value: data-team

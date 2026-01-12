@@ -1,0 +1,91 @@
+# Production environment overrides
+server:
+  replicaCount: 5
+
+  frontend:
+    resources:
+      limits:
+        cpu: 2000m
+        memory: 2Gi
+      requests:
+        cpu: 500m
+        memory: 1Gi
+
+  history:
+    replicaCount: 5
+    resources:
+      limits:
+        cpu: 2000m
+        memory: 2Gi
+      requests:
+        cpu: 500m
+        memory: 1Gi
+
+  matching:
+    replicaCount: 5
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+      requests:
+        cpu: 200m
+        memory: 512Mi
+
+  worker:
+    replicaCount: 3
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+      requests:
+        cpu: 200m
+        memory: 512Mi
+
+web:
+  replicaCount: 3
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+  ingress:
+    hosts:
+      - host: temporal.ananta.io
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: temporal-ui-prod-tls
+        hosts:
+          - temporal.ananta.io
+
+postgresql:
+  host: postgres-prod.database-system.svc.cluster.local
+
+elasticsearch:
+  enabled: true
+  host: elasticsearch-prod.observability-system.svc.cluster.local
+
+podDisruptionBudget:
+  minAvailable: 2
+
+namespaces:
+  - name: default
+    retention: 30d
+  - name: arc-saas
+    retention: 90d
+  - name: enrichment
+    retention: 30d
+
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values:
+                - temporal
+        topologyKey: kubernetes.io/hostname

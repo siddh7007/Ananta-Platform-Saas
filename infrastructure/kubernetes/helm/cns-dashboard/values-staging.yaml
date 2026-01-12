@@ -1,0 +1,11 @@
+replicaCount: 2
+ingress:
+  hosts:
+    - host: cns-dashboard-staging.ananta.io
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: cns-dashboard-staging-tls
+      hosts:
+        - cns-dashboard-staging.ananta.io

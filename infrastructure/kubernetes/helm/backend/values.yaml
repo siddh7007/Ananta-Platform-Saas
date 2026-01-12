@@ -1,0 +1,107 @@
+# Default values for backend
+replicaCount: 2
+
+image:
+  repository: ananta/backend
+  pullPolicy: IfNotPresent
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "3000"
+  prometheus.io/path: "/metrics"
+
+podSecurityContext:
+  fsGroup: 1000
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+
+service:
+  type: ClusterIP
+  port: 3000
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+  hosts:
+    - host: api.ananta-platform.io
+      paths:
+        - path: /backend
+          pathType: Prefix
+  tls:
+    - secretName: backend-tls
+      hosts:
+        - api.ananta-platform.io
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 250m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 20
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Environment configuration
+environment: dev
+domain: ananta-platform.io
+
+# Database configuration
+database:
+  host: supabase-db
+  port: 5432
+  name: postgres
+  existingSecret: backend-db-secret
+  existingSecretKey: password
+
+# Redis configuration
+redis:
+  host: redis-master
+  port: 6379
+  existingSecret: redis-secret
+  existingSecretKey: redis-password
+
+# RabbitMQ configuration
+rabbitmq:
+  host: rabbitmq
+  port: 5672
+  existingSecret: rabbitmq-secret
+  existingSecretKey: rabbitmq-password
+
+# Keycloak configuration
+keycloak:
+  url: http://keycloak:8080
+  realm: ananta
+  clientId: backend-service
+
+# Feature flags
+features:
+  caching: true
+  eventStreaming: true
+  metrics: true

@@ -222,7 +222,7 @@ export function PWAUpdatePrompt({
                   App ready for offline use
                 </h3>
                 <p className="mt-1 text-sm text-green-700 dark:text-green-300">
-                  Component Platform is now cached and will work offline. You can continue using it even without an internet connection.
+                  Ananta Platform is now cached and will work offline. You can continue using it even without an internet connection.
                 </p>
               </div>
 

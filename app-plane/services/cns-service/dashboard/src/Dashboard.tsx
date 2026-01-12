@@ -15,7 +15,7 @@ import { SystemHealth, SupplierStatus, RecentActivity, QuickActions } from './da
 import type { ServiceHealth } from './dashboard/SystemHealth';
 import type { SupplierHealth } from './dashboard/SupplierStatus';
 import type { RecentJob } from './dashboard/RecentActivity';
-import { CNS_API_BASE_URL, getAuthHeaders } from './config/api';
+import { CNS_API_BASE_URL, getAuthHeadersAsync } from './config/api';
 import { enrichmentStatusColors, qualityColors } from './theme';
 
 interface DashboardMetrics {
@@ -54,9 +54,12 @@ export const Dashboard: React.FC = () => {
 
   const fetchDashboardData = useCallback(async () => {
     try {
+      // Wait for Keycloak authentication to complete before making API calls
+      const headers = await getAuthHeadersAsync();
+
       // Fetch analytics data
       const response = await fetch(`${CNS_API_BASE_URL}/analytics/dashboard?days=1`, {
-        headers: getAuthHeaders(),
+        headers,
       });
 
       if (response.ok) {

@@ -1,0 +1,38 @@
+# Staging environment overrides
+api:
+  replicaCount: 2
+  ingress:
+    hosts:
+      - host: novu-api-staging.ananta.io
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: novu-api-staging-tls
+        hosts:
+          - novu-api-staging.ananta.io
+
+web:
+  replicaCount: 2
+  ingress:
+    hosts:
+      - host: novu-staging.ananta.io
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: novu-web-staging-tls
+        hosts:
+          - novu-staging.ananta.io
+
+worker:
+  replicaCount: 2
+  autoscaling:
+    minReplicas: 2
+    maxReplicas: 10
+
+mongodb:
+  host: mongodb-staging.database-system.svc.cluster.local
+
+redis:
+  host: redis-staging.cache-system.svc.cluster.local

@@ -46,8 +46,10 @@ ADMIN_TOKEN_RATE_LIMIT = 10  # requests per minute
 ADMIN_TOKEN_WINDOW_SECONDS = 60
 
 # Regular authenticated request rate limits
-# Increased from 100 to 500 to handle frontend polling during BOM processing
-AUTHENTICATED_RATE_LIMIT = 500  # requests per minute
+# Increased to 2000 to handle high-volume frontend polling during BOM processing
+# With 5-10 BOMs processing simultaneously, each polling 4-5 endpoints every 2 seconds,
+# this allows ~800-1500 requests/minute with headroom
+AUTHENTICATED_RATE_LIMIT = 2000  # requests per minute
 AUTHENTICATED_WINDOW_SECONDS = 60
 
 # Public endpoint rate limits (unauthenticated)

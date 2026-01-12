@@ -1,0 +1,124 @@
+# =============================================================================
+# Novu Notification Services
+# =============================================================================
+# Port: API=3000, Web=4200, WS=3002
+# Based on coolify/docker-compose.2-novu.yml
+#
+# Novu is a self-hosted notification infrastructure service.
+# It requires MongoDB and Redis for persistence.
+#
+# Usage:
+#   docker-compose -f docker-compose.novu.yml up -d
+#
+# Environment Variables Required:
+#   NOVU_API_URL - External API URL (e.g., http://localhost:3000)
+#   NOVU_WEB_URL - External Web URL (e.g., http://localhost:4200)
+#   NOVU_WS_URL - External WebSocket URL (e.g., ws://localhost:3002)
+#   NOVU_JWT_SECRET - JWT signing secret (generate: openssl rand -hex 32)
+#   NOVU_ENCRYPTION_KEY - Encryption key (generate: openssl rand -hex 32)
+#   NOVU_SECRET_KEY - API secret key
+#   CONTROL_PLANE_MINIO_USER - MinIO access key for S3 storage
+#   CONTROL_PLANE_MINIO_PASSWORD - MinIO secret key
+# =============================================================================
+
+services:
+  novu-mongodb:
+    image: mongo:6
+    volumes:
+      - novu-mongo-data:/data/db
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 sh -c '>/dev/tcp/127.0.0.1/27017'"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  novu-redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    volumes:
+      - novu-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  novu-api:
+    image: ghcr.io/novuhq/novu/api:0.21.0
+    depends_on:
+      novu-mongodb:
+        condition: service_healthy
+      novu-redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      API_ROOT_URL: ${NOVU_API_URL:-http://localhost:3000}
+      DISABLE_USER_REGISTRATION: "false"
+      PORT: 3000
+      FRONT_BASE_URL: ${NOVU_WEB_URL:-http://localhost:4200}
+      WIDGET_BASE_URL: ${NOVU_WEB_URL:-http://localhost:4200}
+      MONGO_URL: mongodb://novu-mongodb:27017/novu-db
+      REDIS_HOST: novu-redis
+      REDIS_PORT: 6379
+      S3_LOCAL_STACK: ${S3_ENDPOINT:-http://minio:9000}
+      S3_BUCKET_NAME: novu-storage
+      S3_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: ${MINIO_ROOT_USER:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${MINIO_ROOT_PASSWORD:-minioadmin}
+      JWT_SECRET: ${NOVU_JWT_SECRET}
+      STORE_ENCRYPTION_KEY: ${NOVU_ENCRYPTION_KEY}
+      NOVU_SECRET_KEY: ${NOVU_SECRET_KEY}
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+
+  novu-ws:
+    image: ghcr.io/novuhq/novu/ws:0.21.0
+    depends_on:
+      novu-mongodb:
+        condition: service_healthy
+      novu-redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: 3002
+      MONGO_URL: mongodb://novu-mongodb:27017/novu-db
+      REDIS_HOST: novu-redis
+      REDIS_PORT: 6379
+      JWT_SECRET: ${NOVU_JWT_SECRET}
+    ports:
+      - "3002:3002"
+    restart: unless-stopped
+
+  novu-worker:
+    image: ghcr.io/novuhq/novu/worker:0.21.0
+    depends_on:
+      - novu-api
+    environment:
+      NODE_ENV: production
+      MONGO_URL: mongodb://novu-mongodb:27017/novu-db
+      REDIS_HOST: novu-redis
+      REDIS_PORT: 6379
+      JWT_SECRET: ${NOVU_JWT_SECRET}
+      STORE_ENCRYPTION_KEY: ${NOVU_ENCRYPTION_KEY}
+      NOVU_SECRET_KEY: ${NOVU_SECRET_KEY}
+      API_ROOT_URL: http://novu-api:3000
+    restart: unless-stopped
+
+  novu-web:
+    image: ghcr.io/novuhq/novu/web:0.21.0
+    depends_on:
+      - novu-api
+    environment:
+      REACT_APP_API_URL: ${NOVU_API_URL:-http://localhost:3000}
+      REACT_APP_WS_URL: ${NOVU_WS_URL:-ws://localhost:3002}
+      API_ROOT_URL: http://novu-api:3000
+    ports:
+      - "4200:4200"
+    restart: unless-stopped
+
+volumes:
+  novu-mongo-data:
+  novu-redis-data:

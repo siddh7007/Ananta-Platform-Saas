@@ -1,0 +1,47 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ananta-cns-service-config
+  namespace: app-plane
+data:
+  # Authentication - Keycloak (Auth0-compatible)
+  AUTH0_ENABLED: "true"
+  AUTH0_DOMAIN: "keycloak.auth-system.svc.cluster.local:8080/realms/ananta-saas"
+  AUTH0_AUDIENCE: "cbp-frontend"
+
+  # Database URLs - Use fully qualified Kubernetes DNS
+  DATABASE_URL: "postgresql://postgres:postgres@supabase-db.app-plane.svc.cluster.local:5432/postgres"
+  COMPONENTS_V2_DATABASE_URL: "postgresql://postgres:postgres@components-db.app-plane.svc.cluster.local:5432/components_v2"
+
+  # Supabase connection details
+  SUPABASE_URL: "http://supabase-api:3000"
+  SUPABASE_DB_HOST: "supabase-db"
+  SUPABASE_DB_PORT: "5432"
+  SUPABASE_DB_NAME: "postgres"
+  SUPABASE_DB_USER: "postgres"
+
+  # Components-V2 database
+  COMPONENTS_DB_HOST: "components-db"
+  COMPONENTS_DB_PORT: "5432"
+  COMPONENTS_DB_NAME: "components_v2"
+  COMPONENTS_DB_USER: "postgres"
+
+  # Infrastructure - Use existing Redis in cache-system namespace
+  REDIS_HOST: "ananta-redis.cache-system.svc.cluster.local"
+  REDIS_PORT: "6379"
+  RABBITMQ_HOST: "rabbitmq.app-plane.svc.cluster.local"
+  RABBITMQ_PORT: "5672"
+  MINIO_ENDPOINT: "minio:9000"
+  MINIO_USE_SSL: "false"
+
+  # Temporal
+  TEMPORAL_ADDRESS: "temporal.temporal-system.svc.cluster.local:7233"
+  TEMPORAL_NAMESPACE: "enrichment"
+
+  # Vendor API Enable flags
+  MOUSER_ENABLED: "true"
+  DIGIKEY_ENABLED: "true"
+  ELEMENT14_ENABLED: "true"
+  ARROW_ENABLED: "true"
+
+  LOG_LEVEL: "INFO"

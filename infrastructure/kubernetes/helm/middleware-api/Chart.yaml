@@ -1,0 +1,13 @@
+apiVersion: v2
+name: middleware-api
+description: Middleware API gateway
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - saas
+  - app-plane
+maintainers:
+  - name: Platform Team
+    email: platform@ananta.io
+home: https://github.com/your-org/ananta-platform-saas

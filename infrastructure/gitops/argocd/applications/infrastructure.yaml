@@ -1,0 +1,123 @@
+# =============================================================================
+# ArgoCD Application - Shared Infrastructure
+# =============================================================================
+# This application manages shared infrastructure components:
+# - Vault (secrets management)
+# - CloudNativePG Operator
+# - Redis Operator
+# - Observability (Prometheus, Grafana, Jaeger, Loki)
+# =============================================================================
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: vault
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: ananta-platform
+    app.kubernetes.io/component: infrastructure
+    environment: local
+spec:
+  project: ananta-platform
+
+  source:
+    repoURL: https://helm.releases.hashicorp.com
+    chart: vault
+    targetRevision: 0.27.0
+    helm:
+      releaseName: ananta-vault
+      values: |
+        server:
+          dev:
+            enabled: true
+          standalone:
+            enabled: true
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+        injector:
+          enabled: true
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "50m"
+            limits:
+              memory: "128Mi"
+              cpu: "250m"
+        ui:
+          enabled: true
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: vault-system
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cloudnative-pg-operator
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: ananta-platform
+    app.kubernetes.io/component: infrastructure
+spec:
+  project: ananta-platform
+
+  source:
+    repoURL: https://cloudnative-pg.github.io/charts
+    chart: cloudnative-pg
+    targetRevision: 0.19.1
+    helm:
+      releaseName: cnpg
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cnpg-system
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: redis-operator
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: ananta-platform
+    app.kubernetes.io/component: infrastructure
+spec:
+  project: ananta-platform
+
+  source:
+    repoURL: https://ot-container-kit.github.io/helm-charts/
+    chart: redis-operator
+    targetRevision: 3.2.9
+    helm:
+      releaseName: redis-operator
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: redis-operator
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

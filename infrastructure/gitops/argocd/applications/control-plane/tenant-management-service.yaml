@@ -1,0 +1,132 @@
+# =============================================================================
+# ArgoCD Application - Tenant Management Service
+# =============================================================================
+# Core backend API for tenant and subscription management
+# =============================================================================
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: tenant-management-service
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: tenant-management-service
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: control-plane
+    environment: '{{.Values.environment}}'
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: ananta-platform
+
+  source:
+    repoURL: https://github.com/ananta-platform/ananta-platform-saas.git
+    targetRevision: HEAD
+    path: infrastructure/kubernetes/helm/tenant-management-service
+
+    helm:
+      releaseName: tenant-management-service
+      valueFiles:
+        - values.yaml
+        - values-{{.Values.environment}}.yaml
+
+      parameters:
+        - name: image.tag
+          value: '{{.Values.imageTag}}'
+        - name: replicaCount
+          value: '{{.Values.replicaCount}}'
+        - name: environment
+          value: '{{.Values.environment}}'
+
+      values: |
+        # Common values
+        fullnameOverride: tenant-management-service
+
+        image:
+          repository: ghcr.io/ananta-platform/tenant-management-service
+          pullPolicy: IfNotPresent
+
+        service:
+          type: ClusterIP
+          port: 14000
+
+        ingress:
+          enabled: true
+          className: nginx
+          annotations:
+            cert-manager.io/cluster-issuer: letsencrypt-prod
+            nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+          hosts:
+            - host: api.{{.Values.domain}}
+              paths:
+                - path: /
+                  pathType: Prefix
+
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+
+        autoscaling:
+          enabled: true
+          minReplicas: 2
+          maxReplicas: 10
+          targetCPUUtilizationPercentage: 70
+
+        serviceMonitor:
+          enabled: true
+          interval: 30s
+
+        configMap:
+          LOG_LEVEL: info
+          NODE_ENV: production
+
+        secrets:
+          existingSecret: tenant-management-secrets
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ananta-{{.Values.environment}}
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+      - ApplyOutOfSyncOnly=true
+      - Validate=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  revisionHistoryLimit: 10
+
+  ignoreDifferences:
+    - group: apps
+      kind: Deployment
+      jsonPointers:
+        - /spec/replicas
+    - group: autoscaling
+      kind: HorizontalPodAutoscaler
+      jsonPointers:
+        - /status
+
+  info:
+    - name: Documentation
+      value: https://docs.ananta-platform.io/services/tenant-management
+    - name: Team
+      value: platform-team
+    - name: Slack
+      value: '#platform-alerts'

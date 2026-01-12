@@ -1,0 +1,205 @@
+---
+# Keycloak Realm Configuration ConfigMap
+# Contains the arc-saas realm JSON for import during deployment
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: keycloak-realm-config
+  namespace: auth-system
+data:
+  arc-saas-realm.json: |
+    {
+      "realm": "arc-saas",
+      "enabled": true,
+      "displayName": "ARC SaaS Platform",
+      "sslRequired": "external",
+      "registrationAllowed": false,
+      "loginWithEmailAllowed": true,
+      "duplicateEmailsAllowed": false,
+      "resetPasswordAllowed": true,
+      "editUsernameAllowed": false,
+      "bruteForceProtected": true,
+      "roles": {
+        "realm": [
+          {
+            "name": "super_admin",
+            "description": "Platform administrator with full access"
+          },
+          {
+            "name": "owner",
+            "description": "Organization owner with billing access"
+          },
+          {
+            "name": "admin",
+            "description": "Organization admin for user management"
+          },
+          {
+            "name": "engineer",
+            "description": "Technical user for managing BOMs and components"
+          },
+          {
+            "name": "analyst",
+            "description": "Read-only user for viewing data and reports"
+          }
+        ]
+      },
+      "clients": [
+        {
+          "clientId": "arc-saas-admin",
+          "name": "ARC SaaS Admin Portal",
+          "enabled": true,
+          "publicClient": true,
+          "standardFlowEnabled": true,
+          "directAccessGrantsEnabled": true,
+          "redirectUris": [
+            "http://localhost:27555/*",
+            "http://localhost:14000/*"
+          ],
+          "webOrigins": [
+            "http://localhost:27555",
+            "http://localhost:14000"
+          ],
+          "defaultClientScopes": [
+            "web-origins",
+            "profile",
+            "roles",
+            "email"
+          ],
+          "optionalClientScopes": [
+            "address",
+            "phone",
+            "offline_access"
+          ]
+        },
+        {
+          "clientId": "arc-saas-api",
+          "name": "ARC SaaS Backend API",
+          "enabled": true,
+          "publicClient": false,
+          "bearerOnly": true,
+          "standardFlowEnabled": false,
+          "directAccessGrantsEnabled": false
+        }
+      ],
+      "users": [
+        {
+          "username": "platform-admin",
+          "email": "admin@arc-saas.local",
+          "enabled": true,
+          "emailVerified": true,
+          "firstName": "Platform",
+          "lastName": "Admin",
+          "credentials": [
+            {
+              "type": "password",
+              "value": "admin123",
+              "temporary": true
+            }
+          ],
+          "realmRoles": ["super_admin"]
+        }
+      ],
+      "clientScopes": [
+        {
+          "name": "roles",
+          "protocol": "openid-connect",
+          "attributes": {
+            "include.in.token.scope": "true",
+            "display.on.consent.screen": "false"
+          },
+          "protocolMappers": [
+            {
+              "name": "realm roles",
+              "protocol": "openid-connect",
+              "protocolMapper": "oidc-usermodel-realm-role-mapper",
+              "consentRequired": false,
+              "config": {
+                "multivalued": "true",
+                "userinfo.token.claim": "true",
+                "id.token.claim": "true",
+                "access.token.claim": "true",
+                "claim.name": "realm_access.roles",
+                "jsonType.label": "String"
+              }
+            }
+          ]
+        }
+      ]
+    }
+---
+# Job to import realm on first deployment
+# Uses curlimages/curl since Keycloak image doesn't have curl
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: keycloak-realm-import
+  namespace: auth-system
+spec:
+  ttlSecondsAfterFinished: 600
+  backoffLimit: 5
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: realm-import
+          image: curlimages/curl:8.5.0
+          command:
+            - /bin/sh
+            - -c
+            - |
+              echo "Waiting for Keycloak to be ready..."
+              until curl -sf http://keycloak:8080/health/ready; do
+                echo "Keycloak not ready, waiting..."
+                sleep 5
+              done
+              echo "Keycloak is ready, importing realm..."
+
+              # Get admin token
+              echo "Getting admin token..."
+              TOKEN=$(curl -s -X POST "http://keycloak:8080/realms/master/protocol/openid-connect/token" \
+                -H "Content-Type: application/x-www-form-urlencoded" \
+                -d "username=admin" \
+                -d "password=admin123" \
+                -d "grant_type=password" \
+                -d "client_id=admin-cli" | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')
+
+              if [ -z "$TOKEN" ]; then
+                echo "Failed to get admin token"
+                exit 1
+              fi
+              echo "Got admin token"
+
+              # Check if realm exists
+              echo "Checking if realm exists..."
+              REALM_EXISTS=$(curl -s -o /dev/null -w "%{http_code}" \
+                "http://keycloak:8080/admin/realms/arc-saas" \
+                -H "Authorization: Bearer $TOKEN")
+
+              if [ "$REALM_EXISTS" = "200" ]; then
+                echo "Realm arc-saas already exists, skipping import"
+                exit 0
+              fi
+
+              # Import realm
+              echo "Creating arc-saas realm..."
+              RESULT=$(curl -s -w "\n%{http_code}" -X POST "http://keycloak:8080/admin/realms" \
+                -H "Authorization: Bearer $TOKEN" \
+                -H "Content-Type: application/json" \
+                -d @/realm-config/arc-saas-realm.json)
+
+              HTTP_CODE=$(echo "$RESULT" | tail -1)
+              BODY=$(echo "$RESULT" | head -n -1)
+
+              if [ "$HTTP_CODE" = "201" ] || [ "$HTTP_CODE" = "200" ]; then
+                echo "Realm import successful!"
+              else
+                echo "Realm import failed with status $HTTP_CODE: $BODY"
+                exit 1
+              fi
+          volumeMounts:
+            - name: realm-config
+              mountPath: /realm-config
+      volumes:
+        - name: realm-config
+          configMap:
+            name: keycloak-realm-config

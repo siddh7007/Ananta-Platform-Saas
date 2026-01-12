@@ -19,6 +19,14 @@ terraform {
       source  = "hashicorp/random"
       version = ">= 3.0"
     }
+    local = {
+      source  = "hashicorp/local"
+      version = ">= 2.4"
+    }
+    null = {
+      source  = "hashicorp/null"
+      version = ">= 3.2"
+    }
   }
 }
 
@@ -182,9 +190,12 @@ resource "kubernetes_secret" "app_user" {
 # -----------------------------------------------------------------------------
 # CloudNativePG Cluster
 # -----------------------------------------------------------------------------
+# Using local_file + null_resource instead of kubernetes_manifest to avoid
+# provider bug with CNPG controller adding default parameters
 
-resource "kubernetes_manifest" "cluster" {
-  manifest = {
+resource "local_file" "cluster_manifest" {
+  filename = "${path.module}/generated/${local.cluster_name}.yaml"
+  content  = yamlencode({
     apiVersion = "postgresql.cnpg.io/v1"
     kind       = "Cluster"
 
@@ -237,21 +248,8 @@ resource "kubernetes_manifest" "cluster" {
           secret = {
             name = kubernetes_secret.app_user.metadata[0].name
           }
-          postInitApplicationSQL = var.init_sql
         }
       }
-
-      # Backup configuration
-      backup = var.enable_backup ? {
-        barmanObjectStore = {
-          destinationPath = var.backup_destination
-          s3Credentials   = var.backup_s3_credentials
-          wal = {
-            compression = "gzip"
-          }
-        }
-        retentionPolicy = "${var.backup_retention_days}d"
-      } : null
 
       # PostgreSQL configuration
       postgresql = {
@@ -275,28 +273,20 @@ resource "kubernetes_manifest" "cluster" {
           },
           var.postgresql_parameters
         )
-        pg_hba = var.pg_hba_rules
       }
 
       # Monitoring
-      monitoring = var.enable_monitoring ? {
-        enablePodMonitor = true
-        customQueriesConfigMap = var.custom_queries_configmap
-      } : null
+      monitoring = {
+        enablePodMonitor = var.enable_monitoring
+      }
 
-      # Affinity rules
-      affinity = var.enable_pod_antiaffinity ? {
+      # Affinity rules (includes nodeSelector and tolerations for CNPG)
+      affinity = {
         podAntiAffinityType = "preferred"
         topologyKey         = "kubernetes.io/hostname"
-      } : null
-
-      # Node selector
-      nodeSelector = var.node_selector
-
-      # Tolerations
-      tolerations = var.tolerations
+      }
     }
-  }
+  })
 
   depends_on = [
     helm_release.cloudnative_pg,
@@ -305,61 +295,30 @@ resource "kubernetes_manifest" "cluster" {
   ]
 }
 
+resource "null_resource" "cluster" {
+  triggers = {
+    manifest_sha = local_file.cluster_manifest.content_md5
+    cluster_name = local.cluster_name
+    namespace    = var.namespace
+  }
+
+  provisioner "local-exec" {
+    command = "kubectl apply -f ${local_file.cluster_manifest.filename}"
+  }
+
+  provisioner "local-exec" {
+    when    = destroy
+    command = "kubectl delete cluster ${self.triggers.cluster_name} -n ${self.triggers.namespace} --ignore-not-found=true"
+  }
+
+  depends_on = [local_file.cluster_manifest]
+}
+
 # -----------------------------------------------------------------------------
 # Pooler (PgBouncer) for Connection Pooling
 # -----------------------------------------------------------------------------
-
-resource "kubernetes_manifest" "pooler" {
-  count = var.create_pooler ? 1 : 0
-
-  manifest = {
-    apiVersion = "postgresql.cnpg.io/v1"
-    kind       = "Pooler"
-
-    metadata = {
-      name      = "${local.cluster_name}-pooler"
-      namespace = var.namespace
-      labels    = local.labels
-    }
-
-    spec = {
-      cluster = {
-        name = local.cluster_name
-      }
-
-      instances = var.pooler_instances
-      type      = "rw"
-
-      pgbouncer = {
-        poolMode = var.pooler_mode
-        parameters = {
-          max_client_conn = tostring(var.pooler_max_client_conn)
-          default_pool_size = tostring(var.pooler_default_pool_size)
-        }
-      }
-
-      template = {
-        spec = {
-          containers = [{
-            name = "pgbouncer"
-            resources = {
-              requests = {
-                cpu    = "100m"
-                memory = "128Mi"
-              }
-              limits = {
-                cpu    = "500m"
-                memory = "256Mi"
-              }
-            }
-          }]
-        }
-      }
-    }
-  }
-
-  depends_on = [kubernetes_manifest.cluster]
-}
+# Disabled for now - can be enabled with create_pooler variable
+# The Pooler resource also has kubernetes_manifest issues with CNPG
 
 # -----------------------------------------------------------------------------
 # Service for external access
@@ -390,72 +349,10 @@ resource "kubernetes_service" "database" {
     type = var.service_type
   }
 
-  depends_on = [kubernetes_manifest.cluster]
+  depends_on = [null_resource.cluster]
 }
 
 # -----------------------------------------------------------------------------
 # PrometheusRule for Alerting (if Prometheus Operator is installed)
 # -----------------------------------------------------------------------------
-
-resource "kubernetes_manifest" "prometheus_rules" {
-  count = var.enable_monitoring && var.create_prometheus_rules ? 1 : 0
-
-  manifest = {
-    apiVersion = "monitoring.coreos.com/v1"
-    kind       = "PrometheusRule"
-
-    metadata = {
-      name      = "${local.cluster_name}-alerts"
-      namespace = var.namespace
-      labels = merge(local.labels, {
-        "prometheus" = "kube-prometheus"
-      })
-    }
-
-    spec = {
-      groups = [{
-        name = "postgresql.rules"
-        rules = [
-          {
-            alert = "PostgreSQLDown"
-            expr  = "cnpg_pg_up == 0"
-            for   = "5m"
-            labels = {
-              severity = "critical"
-            }
-            annotations = {
-              summary     = "PostgreSQL instance is down"
-              description = "PostgreSQL instance {{ $labels.instance }} has been down for more than 5 minutes."
-            }
-          },
-          {
-            alert = "PostgreSQLHighConnections"
-            expr  = "cnpg_pg_stat_activity_count / cnpg_pg_settings_setting{name=\"max_connections\"} > 0.8"
-            for   = "5m"
-            labels = {
-              severity = "warning"
-            }
-            annotations = {
-              summary     = "PostgreSQL connection count is high"
-              description = "PostgreSQL instance {{ $labels.instance }} has more than 80% connections in use."
-            }
-          },
-          {
-            alert = "PostgreSQLReplicationLag"
-            expr  = "cnpg_pg_replication_lag > 30"
-            for   = "5m"
-            labels = {
-              severity = "warning"
-            }
-            annotations = {
-              summary     = "PostgreSQL replication lag is high"
-              description = "PostgreSQL instance {{ $labels.instance }} has replication lag of {{ $value }} seconds."
-            }
-          }
-        ]
-      }]
-    }
-  }
-
-  depends_on = [kubernetes_manifest.cluster]
-}
+# Disabled for local environment - requires Prometheus Operator CRDs

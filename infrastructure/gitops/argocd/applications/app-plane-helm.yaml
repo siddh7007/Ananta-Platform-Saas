@@ -1,0 +1,198 @@
+# =============================================================================
+# ArgoCD Applications - App Plane Helm Charts
+# =============================================================================
+# These applications manage Helm-based deployments in app-plane:
+# - Redis (Bitnami)
+# - RabbitMQ (Bitnami with Stream)
+# - MinIO (Official)
+# =============================================================================
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: app-plane-redis
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: ananta-platform
+    app.kubernetes.io/component: cache
+    environment: local
+spec:
+  project: ananta-platform
+
+  source:
+    repoURL: https://charts.bitnami.com/bitnami
+    chart: redis
+    targetRevision: 20.6.0
+    helm:
+      releaseName: redis
+      values: |
+        image:
+          registry: docker.io
+          repository: bitnami/redis
+          tag: 7.4.2-debian-12-r0
+        architecture: standalone
+        auth:
+          enabled: true
+          password: ananta-redis-secret
+        master:
+          persistence:
+            enabled: true
+            storageClass: local-path
+            size: 1Gi
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
+        replica:
+          replicaCount: 0
+        commonLabels:
+          app.kubernetes.io/part-of: ananta-platform
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: app-plane
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: app-plane-rabbitmq
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: ananta-platform
+    app.kubernetes.io/component: messaging
+    environment: local
+spec:
+  project: ananta-platform
+
+  source:
+    repoURL: https://charts.bitnami.com/bitnami
+    chart: rabbitmq
+    targetRevision: 15.1.0
+    helm:
+      releaseName: rabbitmq
+      values: |
+        image:
+          registry: docker.io
+          repository: bitnami/rabbitmq
+          tag: 4.0.5-debian-12-r0
+        auth:
+          username: admin
+          password: ananta-rabbitmq-secret
+          erlangCookie: ananta-rabbitmq-erlang-cookie-secret
+        plugins: "rabbitmq_management rabbitmq_stream rabbitmq_stream_management rabbitmq_prometheus"
+        extraConfiguration: |
+          stream.listeners.tcp.default = 5552
+          vm_memory_high_watermark.relative = 0.7
+          channel_max = 2048
+          heartbeat = 60
+        persistence:
+          enabled: true
+          storageClass: local-path
+          size: 5Gi
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        service:
+          type: ClusterIP
+          extraPorts:
+            - name: stream
+              port: 5552
+              targetPort: 5552
+        commonLabels:
+          app.kubernetes.io/part-of: ananta-platform
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: app-plane
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: app-plane-minio
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: ananta-platform
+    app.kubernetes.io/component: storage
+    environment: local
+spec:
+  project: ananta-platform
+
+  source:
+    repoURL: https://charts.min.io/
+    chart: minio
+    targetRevision: 5.0.15
+    helm:
+      releaseName: minio
+      values: |
+        mode: standalone
+        rootUser: minioadmin
+        rootPassword: ananta-minio-secret
+        persistence:
+          enabled: true
+          storageClass: local-path
+          size: 10Gi
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        buckets:
+          - name: bom-uploads
+            policy: none
+            purge: false
+          - name: documents
+            policy: none
+            purge: false
+          - name: exports
+            policy: none
+            purge: false
+          - name: avatars
+            policy: download
+            purge: false
+          - name: enrichment-audit
+            policy: none
+            purge: false
+          - name: bulk-uploads
+            policy: none
+            purge: false
+        consoleService:
+          type: ClusterIP
+          port: 9001
+        commonLabels:
+          app.kubernetes.io/part-of: ananta-platform
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: app-plane
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

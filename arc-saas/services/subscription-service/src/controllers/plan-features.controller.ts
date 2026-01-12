@@ -52,11 +52,27 @@ export class PlanFeaturesController {
       },
     },
   })
-  async getPlanFeatures(@param.path.string('id') id: string): Promise<
-    DataObject<Plan> & {
-      features: DataObject<Feature & {values: FeatureValues[]}>[];
-    }
-  > {
+  async getPlanFeatures(@param.path.string('id') id: string): Promise<{
+    id: string;
+    name: string;
+    description?: string;
+    tier: string;
+    size?: string;
+    price: number;
+    trialEnabled?: boolean;
+    trialDuration?: number;
+    trialDurationUnit?: string;
+    limits?: object;
+    isPublic?: boolean;
+    isActive?: boolean;
+    sortOrder?: number;
+    metaData?: object;
+    stripePriceId?: string;
+    stripeProductId?: string;
+    billingCycleId: string;
+    currencyId: string;
+    features: DataObject<Feature & {value: FeatureValues}>[];
+  }> {
     return this.planFeaturesService.planFeatures(id);
   }
 

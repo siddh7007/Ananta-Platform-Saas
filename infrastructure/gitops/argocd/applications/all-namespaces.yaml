@@ -1,0 +1,130 @@
+# =============================================================================
+# ArgoCD Applications - All Platform Namespaces
+# =============================================================================
+# Imports all platform namespaces for visual representation in ArgoCD
+# =============================================================================
+
+---
+# Auth System (Keycloak)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: auth-system
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: ananta-platform
+    environment: local
+spec:
+  project: ananta-platform
+  source:
+    repoURL: https://github.com/siddh7007/Ananta-Platform-Saas.git
+    targetRevision: main
+    path: infrastructure/kubernetes/auth-system
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: auth-system
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+
+---
+# Temporal System
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: temporal-system
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: ananta-platform
+    environment: local
+spec:
+  project: ananta-platform
+  source:
+    repoURL: https://github.com/siddh7007/Ananta-Platform-Saas.git
+    targetRevision: main
+    path: infrastructure/kubernetes/temporal-system
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: temporal-system
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+
+---
+# Database System
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: database-system
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: ananta-platform
+    environment: local
+spec:
+  project: ananta-platform
+  source:
+    repoURL: https://github.com/siddh7007/Ananta-Platform-Saas.git
+    targetRevision: main
+    path: infrastructure/kubernetes/database-system
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: database-system
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+
+---
+# Cache System
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: cache-system
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: ananta-platform
+    environment: local
+spec:
+  project: ananta-platform
+  source:
+    repoURL: https://github.com/siddh7007/Ananta-Platform-Saas.git
+    targetRevision: main
+    path: infrastructure/kubernetes/cache-system
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cache-system
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true
+
+---
+# Monitoring System
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring-system
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: ananta-platform
+    environment: local
+spec:
+  project: ananta-platform
+  source:
+    repoURL: https://github.com/siddh7007/Ananta-Platform-Saas.git
+    targetRevision: main
+    path: infrastructure/kubernetes/monitoring-system
+    directory:
+      recurse: true
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring-system
+  syncPolicy:
+    syncOptions:
+      - CreateNamespace=true

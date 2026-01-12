@@ -19,6 +19,8 @@ export const keycloakConfig = {
 
 // Create Keycloak instance (singleton)
 let keycloakInstance: Keycloak | null = null;
+let initializationPromise: Promise<boolean> | null = null;
+let isInitialized = false;
 
 export const getKeycloak = (): Keycloak => {
   if (!keycloakInstance) {
@@ -58,45 +60,97 @@ const cleanOAuthParamsFromUrl = (): void => {
   console.log('[Keycloak] Cleaned OAuth params from URL, redirected to:', baseUrl);
 };
 
-// Initialize Keycloak with check-sso (silent SSO check)
+// Initialize Keycloak - handles both callback and fresh page loads
+// Prevents double-initialization which causes "can only be initialized once" error
 export const initKeycloak = async (): Promise<boolean> => {
-  const keycloak = getKeycloak();
-  const isCallback = hasOAuthCallback();
-  const baseUrl = getBaseUrl();
-
-  console.log('[Keycloak] Initializing...', { isCallback, baseUrl, url: window.location.href });
-
-  try {
-    const authenticated = await keycloak.init({
-      onLoad: 'check-sso', // Check SSO silently without redirect
-      silentCheckSsoRedirectUri: baseUrl + 'silent-check-sso.html',
-      pkceMethod: 'S256',
-      checkLoginIframe: false, // Disable iframe check for better cross-origin support
-      redirectUri: baseUrl, // Ensure redirect goes to base path (e.g., /cns/)
-      responseMode: 'query', // Use query params instead of hash fragment (avoids conflicts with HashRouter)
-    });
-
-    console.log('[Keycloak] Initialized, authenticated:', authenticated);
-
-    // Clean up OAuth params from URL after successful callback authentication
-    if (isCallback && authenticated) {
-      cleanOAuthParamsFromUrl();
-    }
-
-    // Setup token refresh
-    if (authenticated) {
-      setupTokenRefresh(keycloak);
-    }
-
-    return authenticated;
-  } catch (error) {
-    console.error('[Keycloak] Init error:', error);
-    // If callback failed, clean URL and return false
-    if (isCallback) {
-      cleanOAuthParamsFromUrl();
-    }
-    return false;
+  // If already initialized, return the cached result
+  if (isInitialized) {
+    const keycloak = getKeycloak();
+    console.log('[Keycloak] Already initialized, returning cached state:', keycloak.authenticated);
+    return keycloak.authenticated || false;
   }
+
+  // If initialization is in progress, wait for it
+  if (initializationPromise) {
+    console.log('[Keycloak] Initialization in progress, waiting...');
+    return initializationPromise;
+  }
+
+  // Start initialization
+  initializationPromise = (async () => {
+    const keycloak = getKeycloak();
+    const isCallback = hasOAuthCallback();
+    const baseUrl = getBaseUrl();
+
+    console.log('[Keycloak] Initializing...', { isCallback, baseUrl, url: window.location.href });
+
+    try {
+      // When handling OAuth callback, don't use check-sso (causes iframe timeout)
+      // Just initialize and let Keycloak process the auth code
+      const initOptions: Keycloak.KeycloakInitOptions = {
+        pkceMethod: 'S256',
+        checkLoginIframe: false, // Disable iframe check - causes timeouts
+        redirectUri: baseUrl,
+        responseMode: 'query',
+      };
+
+      // Don't auto-login - always show login page first
+      // Users must explicitly click "Sign In" to authenticate
+      // This prevents automatic SSO redirect and shows the login UI
+      // Note: Remove this block and use 'check-sso' if you want automatic SSO
+      // if (!isCallback) {
+      //   initOptions.onLoad = 'check-sso';
+      //   initOptions.silentCheckSsoRedirectUri = baseUrl + 'silent-check-sso.html';
+      // }
+
+      const authenticated = await keycloak.init(initOptions);
+
+      console.log('[Keycloak] Initialized, authenticated:', authenticated);
+      isInitialized = true;
+
+      // Log detailed info when OAuth callback fails
+      if (isCallback && !authenticated) {
+        console.error('[Keycloak] OAuth callback returned authenticated=false', {
+          // Check for Keycloak error properties
+          // @ts-expect-error Keycloak error properties may not be typed
+          error: keycloak.error,
+          // @ts-expect-error Keycloak error properties may not be typed
+          errorDescription: keycloak.errorDescription,
+          tokenParsed: keycloak.tokenParsed,
+          token: keycloak.token ? 'present' : 'missing',
+          refreshToken: keycloak.refreshToken ? 'present' : 'missing',
+          idToken: keycloak.idToken ? 'present' : 'missing',
+          responseMode: initOptions.responseMode,
+          pkceMethod: initOptions.pkceMethod,
+          redirectUri: initOptions.redirectUri,
+          currentUrl: window.location.href,
+        });
+        // Don't clean params yet - let user see what failed
+      }
+
+      // Clean up OAuth params from URL after successful callback authentication
+      if (isCallback && authenticated) {
+        cleanOAuthParamsFromUrl();
+      }
+
+      // Setup token refresh
+      if (authenticated) {
+        setupTokenRefresh(keycloak);
+      }
+
+      return authenticated;
+    } catch (error) {
+      console.error('[Keycloak] Init error:', error);
+      isInitialized = true; // Mark as initialized even on error to prevent retry loops
+      // If callback failed, clean URL and return false
+      if (isCallback) {
+        cleanOAuthParamsFromUrl();
+      }
+      return false;
+    }
+  })();
+
+  return initializationPromise;
 };
 
 // Setup automatic token refresh

@@ -1,0 +1,82 @@
+# =============================================================================
+# Infracost CI Configuration
+# =============================================================================
+# GitHub Actions / CI configuration for automated cost estimation
+# =============================================================================
+
+version: 0.1
+
+# CI/CD integration settings
+ci:
+  # GitHub integration
+  github:
+    # Auto-post cost comments on PRs
+    post_cost_to_pr: true
+    # Show cost diff in PR comments
+    show_cost_diff: true
+    # Collapse detailed breakdown
+    collapse_threshold: 5
+
+  # Policy checks
+  policy:
+    enabled: true
+    path: policies/cost-policy.rego
+    fail_on_deny: true
+    warn_on_warn: true
+
+  # Thresholds
+  thresholds:
+    # Fail if monthly cost exceeds this
+    max_monthly_cost: 15000
+    # Fail if cost increases more than this percentage
+    max_cost_increase_percentage: 25
+    # Warn if cost increases more than this percentage
+    warn_cost_increase_percentage: 10
+
+# Output formats
+output:
+  # Default format
+  format: table
+  # Additional outputs
+  formats:
+    - table
+    - json
+    - html
+
+# Report settings
+report:
+  # Include breakdown by resource
+  show_resources: true
+  # Include cost components
+  show_cost_components: true
+  # Include usage data
+  show_usage: false
+  # Group by project
+  group_by_project: true
+
+# Sync settings for team usage
+sync:
+  # Sync to Infracost Cloud
+  enabled: false
+  # API endpoint
+  endpoint: https://cloud.infracost.io
+
+# Currency settings
+currency: USD
+
+# Terraform settings
+terraform:
+  # Terraform binary
+  binary: terraform
+  # Terraform workspace
+  workspace: default
+  # Use remote state
+  use_state: false
+  # Init options
+  init_flags:
+    - "-input=false"
+    - "-no-color"
+  # Plan options
+  plan_flags:
+    - "-input=false"
+    - "-no-color"

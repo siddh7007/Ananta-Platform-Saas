@@ -1,0 +1,14 @@
+apiVersion: v2
+name: backend
+description: App Plane backend API service for Ananta Platform
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - ananta
+  - backend
+  - api
+  - app-plane
+maintainers:
+  - name: Platform Team
+    email: platform@ananta.io

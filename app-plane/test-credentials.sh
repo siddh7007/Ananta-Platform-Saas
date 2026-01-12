@@ -13,11 +13,11 @@ export KEYCLOAK_CLIENT="admin-cli"
 # Test Users (Keycloak ananta-saas realm)
 # =============================================================================
 
-# CNS Staff User (super_admin role)
+# CNS Staff User (engineer role)
 export CNS_STAFF_USER="cnsstaff"
 export CNS_STAFF_PASS="Test123!"
 
-# CBP Admin User (owner role)
+# CBP Admin User (super_admin role)
 export CBP_ADMIN_USER="cbpadmin"
 export CBP_ADMIN_PASS="Test123!"
 

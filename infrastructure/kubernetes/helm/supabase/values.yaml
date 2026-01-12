@@ -1,0 +1,248 @@
+# =============================================================================
+# Supabase - Infrastructure Service
+# =============================================================================
+# Note: This is a simplified wrapper. For production, consider using
+# supabase-kubernetes: https://github.com/supabase-community/supabase-kubernetes
+# =============================================================================
+
+# PostgreSQL Database
+db:
+  enabled: true
+  image:
+    repository: supabase/postgres
+    pullPolicy: IfNotPresent
+    tag: "15.1.0.117"
+
+  replicaCount: 1
+
+  service:
+    type: ClusterIP
+    port: 5432
+
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 4Gi
+    requests:
+      cpu: 500m
+      memory: 2Gi
+
+  persistence:
+    enabled: true
+    size: 100Gi
+    storageClass: ""
+
+  existingSecret: supabase-db-secrets
+
+# Studio (Web UI)
+studio:
+  enabled: true
+  image:
+    repository: supabase/studio
+    pullPolicy: IfNotPresent
+    tag: "20231123-64e9f5a"
+
+  replicaCount: 2
+
+  service:
+    type: ClusterIP
+    port: 3000
+
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+    hosts:
+      - host: supabase.ananta.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: supabase-studio-tls
+        hosts:
+          - supabase.ananta.local
+
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+# API (PostgREST)
+api:
+  enabled: true
+  image:
+    repository: postgrest/postgrest
+    pullPolicy: IfNotPresent
+    tag: "v11.2.2"
+
+  replicaCount: 3
+
+  service:
+    type: ClusterIP
+    port: 3000
+
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+      nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    hosts:
+      - host: supabase-api.ananta.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: supabase-api-tls
+        hosts:
+          - supabase-api.ananta.local
+
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 200m
+      memory: 512Mi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 70
+
+# Auth (GoTrue)
+auth:
+  enabled: true
+  image:
+    repository: supabase/gotrue
+    pullPolicy: IfNotPresent
+    tag: "v2.99.0"
+
+  replicaCount: 2
+
+  service:
+    type: ClusterIP
+    port: 9999
+
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+  existingSecret: supabase-auth-secrets
+
+# Realtime
+realtime:
+  enabled: true
+  image:
+    repository: supabase/realtime
+    pullPolicy: IfNotPresent
+    tag: "v2.25.35"
+
+  replicaCount: 2
+
+  service:
+    type: ClusterIP
+    port: 4000
+
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+# Storage API
+storage:
+  enabled: true
+  image:
+    repository: supabase/storage-api
+    pullPolicy: IfNotPresent
+    tag: "v0.43.11"
+
+  replicaCount: 2
+
+  service:
+    type: ClusterIP
+    port: 5000
+
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+
+  # S3-compatible backend (MinIO)
+  backend:
+    type: minio
+    endpoint: minio.storage-system.svc.cluster.local:9000
+
+# Kong API Gateway
+kong:
+  enabled: true
+  image:
+    repository: kong
+    pullPolicy: IfNotPresent
+    tag: "3.4.2"
+
+  replicaCount: 2
+
+  service:
+    type: ClusterIP
+    port: 8000
+    adminPort: 8001
+
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+    hosts:
+      - host: kong.ananta.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: supabase-kong-tls
+        hosts:
+          - kong.ananta.local
+
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 200m
+      memory: 512Mi
+
+# Analytics (LogFlare)
+analytics:
+  enabled: false
+
+# Common configuration
+config:
+  jwtSecret: ""  # From existingSecret
+  anonKey: ""    # From existingSecret
+  serviceKey: "" # From existingSecret
+  existingSecret: supabase-jwt-secrets
+
+# Service Monitor
+serviceMonitor:
+  enabled: true
+  interval: 30s
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1

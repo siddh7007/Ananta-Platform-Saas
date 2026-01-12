@@ -1,0 +1,108 @@
+# =============================================================================
+# Middleware API gateway
+# =============================================================================
+replicaCount: 2
+
+image:
+  repository: ghcr.io/ananta-platform/middleware-api
+  pullPolicy: IfNotPresent
+  tag: ""
+
+fullnameOverride: "middleware-api"
+
+serviceAccount:
+  create: true
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "27350"
+  prometheus.io/path: "/metrics"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+
+service:
+  type: ClusterIP
+  port: 27350
+  targetPort: 27350
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: middleware.ananta.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: middleware-api-tls
+      hosts:
+        - middleware.ananta.local
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+configMap:
+  LOG_LEVEL: info
+  NODE_ENV: production
+  PORT: "27350"
+
+secrets:
+  existingSecret: "middleware-api-secrets"
+
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 27350
+  initialDelaySeconds: 30
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 27350
+  initialDelaySeconds: 10
+  periodSeconds: 5
+
+serviceMonitor:
+  enabled: true
+  interval: 30s
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+volumes:
+  - name: tmp
+    emptyDir: {}
+
+volumeMounts:
+  - name: tmp
+    mountPath: /tmp
+
+extraEnv: []
+extraEnvFrom: []
+initContainers: []
+sidecars: []

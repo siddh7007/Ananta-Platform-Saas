@@ -1,0 +1,236 @@
+name: Infracost Cost Estimation
+
+on:
+  pull_request:
+    paths:
+      - 'infrastructure/terraform/**'
+      - 'infrastructure/infracost/**'
+      - '.github/workflows/infracost-ci.yml'
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - 'infrastructure/terraform/**'
+      - 'infrastructure/infracost/**'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  infracost:
+    name: Run Infracost
+    runs-on: ubuntu-latest
+
+    env:
+      INFRACOST_API_KEY: ${{ secrets.INFRACOST_API_KEY }}
+      INFRACOST_ENABLE_DASHBOARD: true
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Infracost
+        uses: infracost/actions/setup@v3
+        with:
+          api-key: ${{ secrets.INFRACOST_API_KEY }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.6.0
+
+      - name: Generate Infracost Cost Estimate
+        id: infracost
+        run: |
+          cd infrastructure/infracost
+          infracost breakdown --config-file infracost.yml \
+            --format json \
+            --out-file /tmp/infracost.json
+
+      - name: Post Infracost Comment (PR)
+        if: github.event_name == 'pull_request'
+        run: |
+          cd infrastructure/infracost
+          infracost comment github --path /tmp/infracost.json \
+            --repo ${{ github.repository }} \
+            --pull-request ${{ github.event.pull_request.number }} \
+            --github-token ${{ secrets.GITHUB_TOKEN }} \
+            --behavior update
+
+      - name: Upload Infracost JSON
+        uses: actions/upload-artifact@v4
+        with:
+          name: infracost-report
+          path: /tmp/infracost.json
+          retention-days: 30
+
+  policy-check:
+    name: Cost Policy Validation
+    runs-on: ubuntu-latest
+    needs: infracost
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download Infracost Report
+        uses: actions/download-artifact@v4
+        with:
+          name: infracost-report
+          path: /tmp
+
+      - name: Setup OPA
+        run: |
+          curl -L -o opa https://openpolicyagent.org/downloads/latest/opa_linux_amd64
+          chmod +x opa
+          sudo mv opa /usr/local/bin/
+
+      - name: Run Cost Policy Checks
+        id: policy
+        run: |
+          cd infrastructure/infracost
+          opa eval --data policies/cost-policy.rego \
+            --input /tmp/infracost.json \
+            --format pretty \
+            "data.infracost.deny" > /tmp/policy-violations.txt
+
+          opa eval --data policies/cost-policy.rego \
+            --input /tmp/infracost.json \
+            --format pretty \
+            "data.infracost.warn" > /tmp/policy-warnings.txt
+
+          if [ -s /tmp/policy-violations.txt ]; then
+            echo "POLICY_VIOLATIONS=true" >> $GITHUB_OUTPUT
+            echo "Cost policy violations found:"
+            cat /tmp/policy-violations.txt
+          else
+            echo "POLICY_VIOLATIONS=false" >> $GITHUB_OUTPUT
+          fi
+
+          if [ -s /tmp/policy-warnings.txt ]; then
+            echo "Cost policy warnings:"
+            cat /tmp/policy-warnings.txt
+          fi
+
+      - name: Fail on Policy Violations
+        if: steps.policy.outputs.POLICY_VIOLATIONS == 'true'
+        run: |
+          echo "Cost policy violations detected. Please review and adjust your infrastructure."
+          exit 1
+
+  budget-check:
+    name: Budget Threshold Validation
+    runs-on: ubuntu-latest
+    needs: infracost
+
+    strategy:
+      matrix:
+        environment:
+          - name: dev
+            threshold: 500
+            warning_pct: 80
+          - name: staging
+            threshold: 2000
+            warning_pct: 80
+          - name: prod
+            threshold: 10000
+            warning_pct: 90
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download Infracost Report
+        uses: actions/download-artifact@v4
+        with:
+          name: infracost-report
+          path: /tmp
+
+      - name: Check Budget for ${{ matrix.environment.name }}
+        run: |
+          COST=$(jq -r --arg env "ananta-${{ matrix.environment.name }}" \
+            '.projects[] | select(.name == $env) | .breakdown.totalMonthlyCost' \
+            /tmp/infracost.json)
+
+          THRESHOLD=${{ matrix.environment.threshold }}
+          WARNING_THRESHOLD=$(echo "$THRESHOLD * ${{ matrix.environment.warning_pct }} / 100" | bc)
+
+          echo "Environment: ${{ matrix.environment.name }}"
+          echo "Estimated Monthly Cost: \$$COST"
+          echo "Budget Threshold: \$$THRESHOLD"
+          echo "Warning Threshold: \$$WARNING_THRESHOLD"
+
+          if (( $(echo "$COST > $THRESHOLD" | bc -l) )); then
+            echo "ERROR: Cost (\$$COST) exceeds budget threshold (\$$THRESHOLD)"
+            exit 1
+          elif (( $(echo "$COST > $WARNING_THRESHOLD" | bc -l) )); then
+            echo "WARNING: Cost (\$$COST) exceeds ${{ matrix.environment.warning_pct }}% of budget threshold"
+          else
+            echo "OK: Cost within budget"
+          fi
+
+  cost-diff:
+    name: Cost Diff vs Base Branch
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+
+    steps:
+      - name: Checkout PR Branch
+        uses: actions/checkout@v4
+
+      - name: Setup Infracost
+        uses: infracost/actions/setup@v3
+        with:
+          api-key: ${{ secrets.INFRACOST_API_KEY }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Generate Cost Estimate for PR
+        run: |
+          cd infrastructure/infracost
+          infracost breakdown --config-file infracost.yml \
+            --format json \
+            --out-file /tmp/infracost-pr.json
+
+      - name: Checkout Base Branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+
+      - name: Generate Cost Estimate for Base
+        run: |
+          cd infrastructure/infracost
+          infracost breakdown --config-file infracost.yml \
+            --format json \
+            --out-file /tmp/infracost-base.json
+
+      - name: Generate Cost Diff
+        run: |
+          infracost diff \
+            --path /tmp/infracost-base.json \
+            --compare-to /tmp/infracost-pr.json \
+            --format table \
+            > /tmp/cost-diff.txt
+
+          cat /tmp/cost-diff.txt
+
+      - name: Comment Cost Diff on PR
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const diff = fs.readFileSync('/tmp/cost-diff.txt', 'utf8');
+
+            const body = `## Infracost Cost Diff\n\n\`\`\`\n${diff}\n\`\`\``;
+
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });

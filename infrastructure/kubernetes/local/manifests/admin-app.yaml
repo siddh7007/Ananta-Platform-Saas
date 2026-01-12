@@ -1,0 +1,60 @@
+---
+# Admin App Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: admin-app
+  namespace: control-plane
+  labels:
+    app: admin-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: admin-app
+  template:
+    metadata:
+      labels:
+        app: admin-app
+    spec:
+      containers:
+        - name: admin-app
+          image: ananta/admin-app:local
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 80
+              name: http
+          resources:
+            limits:
+              cpu: 200m
+              memory: 128Mi
+            requests:
+              cpu: 50m
+              memory: 64Mi
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 10
+            periodSeconds: 10
+---
+# Admin App Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: admin-app
+  namespace: control-plane
+spec:
+  selector:
+    app: admin-app
+  ports:
+    - port: 80
+      targetPort: 80
+      name: http
+  type: ClusterIP

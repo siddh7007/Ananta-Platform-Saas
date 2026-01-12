@@ -1,0 +1,139 @@
+infrastructure/terraform/modules/migrations/kubernetes/
+├── Core Module Files
+│   ├── main.tf                    (732 lines) - Main Terraform module with 3 Kubernetes Jobs
+│   ├── variables.tf               (199 lines) - 20+ input variables with validation
+│   ├── outputs.tf                 (127 lines) - Job status, names, and helpful commands
+│   └── README.md                  (321 lines) - Complete module documentation
+│
+├── Documentation
+│   ├── USAGE.md                   (400+ lines) - Detailed usage guide with examples
+│   ├── MODULE_SUMMARY.md          (200+ lines) - Complete feature summary
+│   ├── QUICK_REFERENCE.md         (150+ lines) - One-page cheat sheet
+│   └── TREE.txt                   (this file) - Module structure overview
+│
+└── Examples
+    └── basic/
+        ├── main.tf                - Complete working example
+        ├── variables.tf           - Example variables
+        ├── terraform.tfvars.example - Template for credentials
+        └── README.md              - Example documentation
+
+TOTAL: 2400+ lines of code and documentation
+
+Resources Created by Module:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Resource Type                    Count   Purpose
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+kubernetes_config_map            1       Database connection configuration
+kubernetes_secret                1       Database credentials (sensitive)
+kubernetes_job                   3       Migration jobs (conditional)
+  - control-plane-migrations     1       LoopBack db-migrate for Control Plane
+  - supabase-migrations          1       SQL migrations for Supabase
+  - components-v2-migrations     1       SQL migrations for Components-V2
+random_id                        3       Unique job name suffixes
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Module Features:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+✓ Idempotent job creation (random suffixes on each apply)
+✓ Database readiness checks (init containers with pg_isready)
+✓ Secure credential management (Kubernetes Secrets)
+✓ Resource limits (configurable CPU/memory)
+✓ Automatic retry with backoff (3 attempts)
+✓ Auto-cleanup (5 minute TTL after completion)
+✓ Security hardening (non-root, dropped capabilities)
+✓ Selective migration execution (enable/disable per database)
+✓ Comprehensive logging (structured output)
+✓ Status tracking (detailed outputs and kubectl commands)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Integration Points:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Database                 Container                           Port    Schema
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Control Plane            arc-saas-postgres                   5432    tenant_management
+Supabase (App Plane)     app-plane-supabase-db              27432   public
+Components-V2            app-plane-components-v2-postgres   27010   public
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Job Architecture:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+┌────────────────────────────────────────────────────────────────────┐
+│ Kubernetes Job: control-plane-migrations-{random-suffix}           │
+├────────────────────────────────────────────────────────────────────┤
+│ Init Container: wait-for-postgres                                  │
+│   - Image: postgres:15-alpine                                      │
+│   - Command: pg_isready -h $HOST -p $PORT -U $USER -d $DB         │
+│   - Retry: Every 2 seconds until database is ready                 │
+├────────────────────────────────────────────────────────────────────┤
+│ Main Container: run-migrations                                     │
+│   - Image: ananta/tenant-management-service:X.Y.Z                 │
+│   - Command: npm run migrate                                       │
+│   - Environment:                                                    │
+│     * DB_HOST, DB_PORT, DB_DATABASE                               │
+│     * DB_USER, DB_PASSWORD (from Secret)                          │
+│     * DB_SCHEMA=tenant_management                                 │
+│     * NODE_ENV=production                                         │
+│   - Resources:                                                      │
+│     * Requests: 100m CPU, 256Mi memory                            │
+│     * Limits: 500m CPU, 512Mi memory                              │
+│   - Security:                                                       │
+│     * Run as non-root (UID 1000)                                  │
+│     * Capabilities: ALL dropped                                    │
+│     * Read-only filesystem: false (needs write for migrations)    │
+├────────────────────────────────────────────────────────────────────┤
+│ Job Settings:                                                       │
+│   - Backoff Limit: 3 (max 3 retries)                              │
+│   - TTL After Finished: 300 seconds (5 minutes)                   │
+│   - Restart Policy: Never                                          │
+│   - Completions: 1                                                 │
+│   - Parallelism: 1                                                 │
+└────────────────────────────────────────────────────────────────────┘
+
+(Similar architecture for supabase-migrations and components-v2-migrations)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Usage Example:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+module "migrations" {
+  source = "./modules/migrations/kubernetes"
+
+  namespace = "ananta-platform"
+
+  # Control Plane database
+  control_plane_db_host     = "postgres-service"
+  control_plane_db_user     = "postgres"
+  control_plane_db_password = var.db_password
+
+  # Supabase database
+  supabase_db_host     = "app-plane-supabase-db"
+  supabase_db_user     = "postgres"
+  supabase_db_password = var.supabase_password
+
+  # Components-V2 database
+  components_v2_db_host     = "app-plane-components-v2-postgres"
+  components_v2_db_user     = "postgres"
+  components_v2_db_password = var.components_password
+}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Quick Commands:
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Apply migrations
+terraform apply -target=module.migrations
+
+# Check job status
+kubectl get jobs -n ananta-platform -l app.kubernetes.io/component=migrations
+
+# View logs
+kubectl logs -n ananta-platform -l app.kubernetes.io/name=control-plane-migrations
+
+# Get outputs
+terraform output migration_jobs_summary
+terraform output helpful_commands
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Created: 2026-01-08
+Status: Production-ready
+Terraform: >= 1.0
+Providers: kubernetes ~> 2.23, random ~> 3.5

@@ -1,0 +1,35 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: redis
+  namespace: argocd
+  labels:
+    app.kubernetes.io/component: cache
+spec:
+  project: ananta-platform
+
+  source:
+    repoURL: https://github.com/argoproj/argocd-example-apps.git
+    targetRevision: HEAD
+    path: helm-guestbook
+    helm:
+      releaseName: redis-test
+      values: |
+        replicaCount: 1
+        image:
+          repository: redis
+          tag: "7-alpine"
+        service:
+          type: ClusterIP
+          port: 6379
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: cache-system
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

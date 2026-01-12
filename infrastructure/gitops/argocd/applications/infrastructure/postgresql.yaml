@@ -1,0 +1,78 @@
+# =============================================================================
+# ArgoCD Application - PostgreSQL
+# =============================================================================
+# Shared PostgreSQL database for control plane and app plane
+# =============================================================================
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: postgresql-dev
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: postgresql
+    app.kubernetes.io/component: database
+    app.kubernetes.io/part-of: infrastructure
+    environment: dev
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: ananta-platform
+
+  source:
+    repoURL: https://charts.bitnami.com/bitnami
+    chart: postgresql
+    targetRevision: 13.2.24
+
+    helm:
+      releaseName: postgresql
+      values: |
+        auth:
+          username: postgres
+          database: arc_saas
+          existingSecret: postgresql-secrets
+
+        primary:
+          persistence:
+            enabled: true
+            size: 20Gi
+            storageClass: standard
+
+          resources:
+            requests:
+              memory: 512Mi
+              cpu: 250m
+            limits:
+              memory: 1Gi
+              cpu: 1000m
+
+        metrics:
+          enabled: true
+          serviceMonitor:
+            enabled: true
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: database-system
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 5m
+
+  revisionHistoryLimit: 5
+
+  info:
+    - name: Documentation
+      value: https://github.com/bitnami/charts/tree/main/bitnami/postgresql

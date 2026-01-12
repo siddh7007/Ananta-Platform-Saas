@@ -6,7 +6,9 @@ import { env } from './env';
  * Tokens must include at least one of these audiences
  */
 export const EXPECTED_AUDIENCES = [
-  env.keycloak.clientId,      // cbp-frontend
+  env.keycloak.clientId,      // cbp-frontend (or customer-portal if configured)
+  'customer-portal',          // Keycloak client name (Kubernetes deployment)
+  'cbp-frontend',             // Legacy client name (docker-compose)
   'cns-api',                  // CNS service API
   'account',                  // Keycloak account
 ];
@@ -14,7 +16,7 @@ export const EXPECTED_AUDIENCES = [
 /**
  * OIDC configuration for Keycloak authentication
  * Client: cbp-frontend
- * Scopes: openid profile email roles cns-api
+ * Scopes: openid profile email roles
  */
 export const oidcConfig: UserManagerSettings = {
   authority: `${env.keycloak.url}/realms/${env.keycloak.realm}`,
@@ -22,7 +24,7 @@ export const oidcConfig: UserManagerSettings = {
   redirect_uri: `${window.location.origin}/authentication/callback`,
   post_logout_redirect_uri: `${window.location.origin}/login`,
   response_type: 'code',
-  scope: 'openid profile email roles cns-api',
+  scope: 'openid profile email roles',
   automaticSilentRenew: true,
   loadUserInfo: true,
   userStore: new WebStorageStateStore({ store: window.localStorage }),
@@ -205,13 +207,22 @@ export function extractUserFromToken(profile: {
 /**
  * Validate that the token audience includes at least one expected value
  * @param aud - Audience claim from JWT (can be string or array)
+ * @param azp - Authorized party claim (optional, used as fallback when aud is missing)
  * @returns Object with valid flag and error message if invalid
  */
-export function validateAudience(aud: string | string[] | undefined): {
+export function validateAudience(
+  aud: string | string[] | undefined,
+  azp?: string
+): {
   valid: boolean;
   error?: string;
 } {
+  // If aud is missing, check if azp (authorized party) is a valid audience
+  // Keycloak uses azp for the client that requested the token
   if (!aud) {
+    if (azp && EXPECTED_AUDIENCES.includes(azp)) {
+      return { valid: true };
+    }
     return {
       valid: false,
       error: 'Token missing audience claim (aud)',
@@ -222,6 +233,10 @@ export function validateAudience(aud: string | string[] | undefined): {
   const hasValidAudience = audiences.some((a) => EXPECTED_AUDIENCES.includes(a));
 
   if (!hasValidAudience) {
+    // Also check azp as fallback
+    if (azp && EXPECTED_AUDIENCES.includes(azp)) {
+      return { valid: true };
+    }
     return {
       valid: false,
       error: `Invalid audience. Expected one of [${EXPECTED_AUDIENCES.join(', ')}], got [${audiences.join(', ')}]`,

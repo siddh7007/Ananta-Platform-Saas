@@ -1,0 +1,69 @@
+# Production environment overrides
+replicaCount: 3
+
+image:
+  pullPolicy: IfNotPresent
+
+ingress:
+  annotations:
+    nginx.ingress.kubernetes.io/rate-limit: "200"
+    nginx.ingress.kubernetes.io/limit-rps: "100"
+  hosts:
+    - host: cns.ananta.io
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: cns-service-prod-tls
+      hosts:
+        - cns.ananta.io
+
+resources:
+  limits:
+    cpu: 2000m
+    memory: 4Gi
+  requests:
+    cpu: 500m
+    memory: 1Gi
+
+autoscaling:
+  minReplicas: 3
+  maxReplicas: 30
+  targetCPUUtilizationPercentage: 50
+  targetMemoryUtilizationPercentage: 60
+
+configMap:
+  LOG_LEVEL: warn
+  PYTHON_ENV: production
+
+databases:
+  supabase:
+    host: supabase-db-prod.database-system.svc.cluster.local
+  componentsV2:
+    host: components-db-prod.database-system.svc.cluster.local
+
+serviceMonitor:
+  interval: 15s
+
+podDisruptionBudget:
+  minAvailable: 2
+
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values:
+                - cns-service
+        topologyKey: kubernetes.io/hostname
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        preference:
+          matchExpressions:
+            - key: node-role.kubernetes.io/worker
+              operator: In
+              values:
+                - "true"

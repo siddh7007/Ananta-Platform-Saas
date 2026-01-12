@@ -12,7 +12,7 @@ import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 
 import { authProvider, createKeycloakAuthProvider } from "./providers/auth-provider";
 import { dataProvider } from "./providers/data-provider";
-import { accessControlProvider } from "./providers/access-control-provider";
+import { accessControlProvider, setOidcAccessToken } from "./providers/access-control-provider";
 import { OnlineStatusProvider } from "./providers/online-status-provider";
 import { NotificationProvider } from "./providers/notification-provider";
 import { oidcConfig, isKeycloakConfigured } from "./lib/keycloak-config";
@@ -117,6 +117,26 @@ function CallbackPage() {
  */
 function AppContent() {
   const auth = useAuth();
+
+  // SYNCHRONOUSLY set the OIDC token before any access control checks
+  // This runs during the render phase, ensuring the token is available
+  // before Refine's accessControlProvider.can() is called
+  if (auth.isAuthenticated && auth.user?.access_token) {
+    setOidcAccessToken(auth.user.access_token);
+  }
+
+  // Also use useEffect for cleanup and logging
+  useEffect(() => {
+    if (auth.isAuthenticated && auth.user?.access_token) {
+      logger.info("OIDC token synced to access control provider", {
+        userId: auth.user.profile?.sub,
+        role: getRoleFromToken(auth.user.access_token),
+      });
+    } else if (!auth.isAuthenticated && !auth.isLoading) {
+      // Clear the token when logged out
+      setOidcAccessToken(null);
+    }
+  }, [auth.isAuthenticated, auth.user?.access_token, auth.isLoading]);
 
   // Create auth provider based on Keycloak state
   const currentAuthProvider = isKeycloakConfigured()

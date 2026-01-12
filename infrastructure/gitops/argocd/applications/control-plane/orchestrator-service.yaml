@@ -1,0 +1,100 @@
+# =============================================================================
+# ArgoCD Application - Orchestrator Service
+# =============================================================================
+# Workflow orchestration and coordination service
+# =============================================================================
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: orchestrator-service
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: orchestrator-service
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: control-plane
+    environment: '{{.Values.environment}}'
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: ananta-platform
+
+  source:
+    repoURL: https://github.com/ananta-platform/ananta-platform-saas.git
+    targetRevision: HEAD
+    path: infrastructure/kubernetes/helm/orchestrator-service
+
+    helm:
+      releaseName: orchestrator-service
+      valueFiles:
+        - values.yaml
+        - values-{{.Values.environment}}.yaml
+
+      values: |
+        fullnameOverride: orchestrator-service
+
+        image:
+          repository: ghcr.io/ananta-platform/orchestrator-service
+          pullPolicy: IfNotPresent
+
+        service:
+          type: ClusterIP
+          port: 3000
+
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+
+        autoscaling:
+          enabled: true
+          minReplicas: 2
+          maxReplicas: 6
+          targetCPUUtilizationPercentage: 70
+
+        # RabbitMQ connection
+        rabbitmq:
+          host: rabbitmq.rabbitmq-system.svc.cluster.local
+          port: 5672
+          vhost: ananta
+
+        configMap:
+          LOG_LEVEL: info
+          NODE_ENV: production
+
+        secrets:
+          existingSecret: orchestrator-secrets
+
+        serviceMonitor:
+          enabled: true
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ananta-{{.Values.environment}}
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  revisionHistoryLimit: 10
+
+  info:
+    - name: Documentation
+      value: https://docs.ananta-platform.io/services/orchestrator
+    - name: Team
+      value: platform-team

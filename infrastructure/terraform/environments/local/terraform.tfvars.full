@@ -1,0 +1,3 @@
+# Enable all services for full 40+ deployment
+deploy_novu = true
+deploy_observability = true

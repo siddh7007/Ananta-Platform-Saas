@@ -1,0 +1,203 @@
+# =============================================================================
+# ArgoCD ApplicationSet - Infrastructure Services
+# =============================================================================
+# Deploys shared infrastructure services (Keycloak, Temporal, Redis, etc.)
+# =============================================================================
+
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: infrastructure-services
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: infrastructure-services
+    app.kubernetes.io/part-of: ananta-platform
+spec:
+  generators:
+    - matrix:
+        generators:
+          # List of infrastructure services
+          - list:
+              elements:
+                - name: keycloak
+                  namespace: keycloak-system
+                  chartRepo: https://charts.bitnami.com/bitnami
+                  chartName: keycloak
+                  chartVersion: "18.4.0"
+                  chartPath: ""
+                  syncWave: "0"
+                  component: auth
+
+                - name: temporal
+                  namespace: temporal-system
+                  chartRepo: https://github.com/ananta-platform/ananta-platform-saas.git
+                  chartName: ""
+                  chartVersion: ""
+                  chartPath: infrastructure/kubernetes/helm/temporal
+                  syncWave: "0"
+                  component: workflow
+
+                - name: rabbitmq
+                  namespace: rabbitmq-system
+                  chartRepo: https://charts.bitnami.com/bitnami
+                  chartName: rabbitmq
+                  chartVersion: "12.10.0"
+                  chartPath: ""
+                  syncWave: "0"
+                  component: messaging
+
+                - name: redis
+                  namespace: cache-system
+                  chartRepo: https://charts.bitnami.com/bitnami
+                  chartName: redis
+                  chartVersion: "18.6.1"
+                  chartPath: ""
+                  syncWave: "0"
+                  component: cache
+
+                - name: novu
+                  namespace: novu-system
+                  chartRepo: https://github.com/ananta-platform/ananta-platform-saas.git
+                  chartName: ""
+                  chartVersion: ""
+                  chartPath: infrastructure/kubernetes/helm/novu
+                  syncWave: "5"
+                  component: notifications
+
+                - name: supabase
+                  namespace: database-system
+                  chartRepo: https://github.com/ananta-platform/ananta-platform-saas.git
+                  chartName: ""
+                  chartVersion: ""
+                  chartPath: infrastructure/kubernetes/helm/supabase
+                  syncWave: "0"
+                  component: database
+
+                - name: postgresql
+                  namespace: database-system
+                  chartRepo: https://charts.bitnami.com/bitnami
+                  chartName: postgresql
+                  chartVersion: "13.2.24"
+                  chartPath: ""
+                  syncWave: "0"
+                  component: database
+
+                - name: ingress-nginx
+                  namespace: ingress-nginx
+                  chartRepo: https://kubernetes.github.io/ingress-nginx
+                  chartName: ingress-nginx
+                  chartVersion: "4.8.3"
+                  chartPath: ""
+                  syncWave: "0"
+                  component: networking
+
+                - name: cert-manager
+                  namespace: cert-manager
+                  chartRepo: https://charts.jetstack.io
+                  chartName: cert-manager
+                  chartVersion: "v1.13.3"
+                  chartPath: ""
+                  syncWave: "0"
+                  component: security
+
+          # Environments - infrastructure is shared per cluster
+          - list:
+              elements:
+                - environment: dev
+                  cluster: https://kubernetes.default.svc
+                  domain: dev.ananta-platform.io
+                  autoSync: true
+                  targetRevision: develop
+
+                - environment: staging
+                  cluster: https://kubernetes.default.svc
+                  domain: staging.ananta-platform.io
+                  autoSync: true
+                  targetRevision: staging
+
+                - environment: prod
+                  cluster: https://kubernetes.default.svc
+                  domain: ananta-platform.io
+                  autoSync: false
+                  targetRevision: main
+
+  template:
+    metadata:
+      name: '{{name}}-{{environment}}'
+      namespace: argocd
+      labels:
+        app.kubernetes.io/name: '{{name}}'
+        app.kubernetes.io/component: '{{component}}'
+        app.kubernetes.io/part-of: infrastructure
+        environment: '{{environment}}'
+      annotations:
+        argocd.argoproj.io/sync-wave: '{{syncWave}}'
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+
+    spec:
+      project: ananta-platform
+
+      source:
+        repoURL: '{{chartRepo}}'
+        chart: '{{chartName}}'
+        path: '{{chartPath}}'
+        targetRevision: '{{chartVersion}}{{targetRevision}}'
+
+        helm:
+          releaseName: '{{name}}'
+          valueFiles:
+            - values.yaml
+            - 'values-{{environment}}.yaml'
+
+          parameters:
+            - name: domain
+              value: '{{domain}}'
+            - name: environment
+              value: '{{environment}}'
+
+      destination:
+        server: '{{cluster}}'
+        namespace: '{{namespace}}'
+
+      syncPolicy:
+        automated:
+          prune: '{{autoSync}}'
+          selfHeal: '{{autoSync}}'
+        syncOptions:
+          - CreateNamespace=true
+          - ServerSideApply=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 10s
+            factor: 2
+            maxDuration: 5m
+
+      revisionHistoryLimit: 5
+
+  syncPolicy:
+    preserveResourcesOnDeletion: true
+
+  strategy:
+    type: RollingSync
+    rollingSync:
+      steps:
+        - matchExpressions:
+            - key: environment
+              operator: In
+              values:
+                - dev
+          maxUpdate: 100%
+        - matchExpressions:
+            - key: environment
+              operator: In
+              values:
+                - staging
+          maxUpdate: 50%
+        - matchExpressions:
+            - key: environment
+              operator: In
+              values:
+                - prod
+          maxUpdate: 25%

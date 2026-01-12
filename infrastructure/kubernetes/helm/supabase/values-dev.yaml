@@ -1,0 +1,65 @@
+# Development environment overrides
+db:
+  replicaCount: 1
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 2Gi
+    requests:
+      cpu: 200m
+      memory: 1Gi
+  persistence:
+    size: 20Gi
+
+studio:
+  replicaCount: 1
+  ingress:
+    hosts:
+      - host: supabase-dev.ananta.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: supabase-studio-dev-tls
+        hosts:
+          - supabase-dev.ananta.local
+
+api:
+  replicaCount: 1
+  autoscaling:
+    enabled: false
+  ingress:
+    hosts:
+      - host: supabase-api-dev.ananta.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: supabase-api-dev-tls
+        hosts:
+          - supabase-api-dev.ananta.local
+
+auth:
+  replicaCount: 1
+
+realtime:
+  replicaCount: 1
+
+storage:
+  replicaCount: 1
+
+kong:
+  replicaCount: 1
+  ingress:
+    hosts:
+      - host: kong-dev.ananta.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: supabase-kong-dev-tls
+        hosts:
+          - kong-dev.ananta.local
+
+podDisruptionBudget:
+  enabled: false

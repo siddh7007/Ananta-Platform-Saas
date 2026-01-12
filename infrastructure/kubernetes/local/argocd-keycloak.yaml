@@ -1,0 +1,42 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: keycloak
+  namespace: argocd
+  labels:
+    app.kubernetes.io/component: auth
+spec:
+  project: ananta-platform
+
+  source:
+    repoURL: https://charts.bitnami.com/bitnami
+    targetRevision: 24.0.5
+    chart: keycloak
+    helm:
+      releaseName: keycloak
+      values: |
+        fullnameOverride: keycloak
+        auth:
+          adminUser: admin
+          adminPassword: admin123
+        postgresql:
+          enabled: false
+        externalDatabase:
+          host: postgresql.database-system.svc.cluster.local
+          port: 5432
+          user: postgres
+          password: localdevpassword123
+          database: keycloak
+        service:
+          type: ClusterIP
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: keycloak-system
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

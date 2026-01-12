@@ -1,0 +1,42 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cns-dashboard
+  namespace: app-plane
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cns-dashboard
+  template:
+    metadata:
+      labels:
+        app: cns-dashboard
+    spec:
+      containers:
+      - name: cns-dashboard
+        image: ananta/cns-dashboard:local
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 27810
+          name: http
+        env:
+        - name: CNS_DASHBOARD_PORT
+          value: "27810"
+        - name: CNS_PORT
+          value: "27800"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: cns-dashboard
+  namespace: app-plane
+spec:
+  type: ClusterIP
+  selector:
+    app: cns-dashboard
+  ports:
+  - name: http
+    port: 27250
+    targetPort: 27810
+    protocol: TCP

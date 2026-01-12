@@ -1,0 +1,115 @@
+# =============================================================================
+# ArgoCD Application - Audit Logger
+# =============================================================================
+# Centralized audit logging service
+# =============================================================================
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: audit-logger
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: audit-logger
+    app.kubernetes.io/component: service
+    app.kubernetes.io/part-of: app-plane
+    environment: '{{.Values.environment}}'
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: ananta-platform
+
+  source:
+    repoURL: https://github.com/ananta-platform/ananta-platform-saas.git
+    targetRevision: HEAD
+    path: infrastructure/kubernetes/helm/audit-logger
+
+    helm:
+      releaseName: audit-logger
+      valueFiles:
+        - values.yaml
+        - values-{{.Values.environment}}.yaml
+
+      values: |
+        fullnameOverride: audit-logger
+
+        image:
+          repository: ghcr.io/ananta-platform/audit-logger
+          pullPolicy: IfNotPresent
+
+        service:
+          type: ClusterIP
+          port: 3000
+
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+
+        autoscaling:
+          enabled: true
+          minReplicas: 2
+          maxReplicas: 10
+          targetCPUUtilizationPercentage: 60
+
+        # RabbitMQ consumer
+        rabbitmq:
+          host: rabbitmq.messaging-system.svc.cluster.local
+          port: 5672
+          vhost: audit
+          queues:
+            - audit-events
+            - security-events
+
+        # Database for audit logs
+        database:
+          host: audit-db.database-system.svc.cluster.local
+          port: 5432
+          database: audit_logs
+
+        # Elasticsearch for search
+        elasticsearch:
+          enabled: true
+          hosts:
+            - https://elasticsearch.logging-system.svc.cluster.local:9200
+          index: audit-logs
+
+        configMap:
+          LOG_LEVEL: info
+          RETENTION_DAYS: "365"
+
+        secrets:
+          existingSecret: audit-logger-secrets
+
+        serviceMonitor:
+          enabled: true
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ananta-{{.Values.environment}}
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  revisionHistoryLimit: 10
+
+  info:
+    - name: Documentation
+      value: https://docs.ananta-platform.io/services/audit-logger
+    - name: Team
+      value: security-team

@@ -1,0 +1,114 @@
+# =============================================================================
+# ArgoCD Application - Subscription Service
+# =============================================================================
+# Subscription and billing management service
+# =============================================================================
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: subscription-service
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: subscription-service
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: control-plane
+    environment: '{{.Values.environment}}'
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: ananta-platform
+
+  source:
+    repoURL: https://github.com/ananta-platform/ananta-platform-saas.git
+    targetRevision: HEAD
+    path: infrastructure/kubernetes/helm/subscription-service
+
+    helm:
+      releaseName: subscription-service
+      valueFiles:
+        - values.yaml
+        - values-{{.Values.environment}}.yaml
+
+      values: |
+        fullnameOverride: subscription-service
+
+        image:
+          repository: ghcr.io/ananta-platform/subscription-service
+          pullPolicy: IfNotPresent
+
+        service:
+          type: ClusterIP
+          port: 3000
+
+        ingress:
+          enabled: true
+          className: nginx
+          annotations:
+            cert-manager.io/cluster-issuer: letsencrypt-prod
+          hosts:
+            - host: subscriptions.api.{{.Values.domain}}
+              paths:
+                - path: /
+                  pathType: Prefix
+
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+
+        autoscaling:
+          enabled: true
+          minReplicas: 2
+          maxReplicas: 8
+          targetCPUUtilizationPercentage: 70
+
+        # Stripe/Paddle webhook endpoints
+        webhooks:
+          stripe:
+            enabled: true
+            path: /webhooks/stripe
+          paddle:
+            enabled: true
+            path: /webhooks/paddle
+
+        configMap:
+          LOG_LEVEL: info
+          NODE_ENV: production
+
+        secrets:
+          existingSecret: subscription-secrets
+
+        serviceMonitor:
+          enabled: true
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ananta-{{.Values.environment}}
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  revisionHistoryLimit: 10
+
+  info:
+    - name: Documentation
+      value: https://docs.ananta-platform.io/services/subscription
+    - name: Team
+      value: platform-team

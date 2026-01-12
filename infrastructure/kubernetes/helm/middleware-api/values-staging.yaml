@@ -1,0 +1,11 @@
+replicaCount: 2
+ingress:
+  hosts:
+    - host: middleware-staging.ananta.io
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: middleware-api-staging-tls
+      hosts:
+        - middleware-staging.ananta.io

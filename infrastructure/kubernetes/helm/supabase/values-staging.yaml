@@ -1,0 +1,44 @@
+# Staging environment overrides
+db:
+  persistence:
+    size: 50Gi
+
+studio:
+  ingress:
+    hosts:
+      - host: supabase-staging.ananta.io
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: supabase-studio-staging-tls
+        hosts:
+          - supabase-staging.ananta.io
+
+api:
+  replicaCount: 2
+  autoscaling:
+    minReplicas: 2
+    maxReplicas: 10
+  ingress:
+    hosts:
+      - host: supabase-api-staging.ananta.io
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: supabase-api-staging-tls
+        hosts:
+          - supabase-api-staging.ananta.io
+
+kong:
+  ingress:
+    hosts:
+      - host: kong-staging.ananta.io
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: supabase-kong-staging-tls
+        hosts:
+          - kong-staging.ananta.io

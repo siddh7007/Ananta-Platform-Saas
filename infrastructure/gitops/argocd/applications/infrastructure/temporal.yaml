@@ -1,0 +1,129 @@
+# =============================================================================
+# ArgoCD Application - Temporal
+# =============================================================================
+# Workflow orchestration engine
+# =============================================================================
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: temporal
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: temporal
+    app.kubernetes.io/component: workflow
+    app.kubernetes.io/part-of: infrastructure
+    environment: '{{.Values.environment}}'
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: ananta-platform
+
+  source:
+    repoURL: https://github.com/ananta-platform/ananta-platform-saas.git
+    targetRevision: HEAD
+    path: infrastructure/kubernetes/helm/temporal
+
+    helm:
+      releaseName: temporal
+      valueFiles:
+        - values.yaml
+        - values-{{.Values.environment}}.yaml
+
+      values: |
+        fullnameOverride: temporal
+
+        server:
+          replicaCount: 3
+
+          config:
+            persistence:
+              default:
+                driver: sql
+                sql:
+                  driver: postgres
+                  host: temporal-db.database-system.svc.cluster.local
+                  port: 5432
+                  database: temporal
+                  existingSecret: temporal-db-secret
+
+            # Namespaces to auto-create
+            namespaceDefaults:
+              retention: 7d
+
+          resources:
+            requests:
+              cpu: 500m
+              memory: 1Gi
+            limits:
+              cpu: 2000m
+              memory: 2Gi
+
+        admintools:
+          enabled: true
+
+        web:
+          enabled: true
+          replicaCount: 2
+          service:
+            type: ClusterIP
+            port: 8080
+          ingress:
+            enabled: true
+            className: nginx
+            annotations:
+              cert-manager.io/cluster-issuer: letsencrypt-prod
+            hosts:
+              - host: temporal.{{.Values.domain}}
+                paths:
+                  - path: /
+                    pathType: Prefix
+
+        prometheus:
+          enabled: true
+
+        grafana:
+          enabled: false  # Use shared Grafana
+
+        elasticsearch:
+          enabled: true
+          external:
+            host: elasticsearch.logging-system.svc.cluster.local
+            port: 9200
+
+        # Create namespaces
+        namespaces:
+          - name: arc-saas
+            retention: 30d
+          - name: enrichment
+            retention: 7d
+          - name: default
+            retention: 7d
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: temporal-system
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 5m
+
+  revisionHistoryLimit: 5
+
+  info:
+    - name: Documentation
+      value: https://docs.ananta-platform.io/infrastructure/temporal
+    - name: Team
+      value: platform-team

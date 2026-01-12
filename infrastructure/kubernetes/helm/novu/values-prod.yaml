@@ -1,0 +1,88 @@
+# Production environment overrides
+api:
+  replicaCount: 3
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+  autoscaling:
+    minReplicas: 3
+    maxReplicas: 20
+    targetCPUUtilizationPercentage: 60
+  ingress:
+    hosts:
+      - host: novu-api.ananta.io
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: novu-api-prod-tls
+        hosts:
+          - novu-api.ananta.io
+
+web:
+  replicaCount: 3
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 256Mi
+  ingress:
+    hosts:
+      - host: novu.ananta.io
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: novu-web-prod-tls
+        hosts:
+          - novu.ananta.io
+
+worker:
+  replicaCount: 5
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+  autoscaling:
+    minReplicas: 5
+    maxReplicas: 50
+    targetCPUUtilizationPercentage: 60
+
+ws:
+  replicaCount: 3
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 200m
+      memory: 512Mi
+
+mongodb:
+  host: mongodb-prod.database-system.svc.cluster.local
+
+redis:
+  host: redis-prod.cache-system.svc.cluster.local
+
+podDisruptionBudget:
+  minAvailable: 2
+
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchExpressions:
+            - key: app.kubernetes.io/name
+              operator: In
+              values:
+                - novu
+        topologyKey: kubernetes.io/hostname

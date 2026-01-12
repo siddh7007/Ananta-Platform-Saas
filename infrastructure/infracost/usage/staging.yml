@@ -1,0 +1,133 @@
+# =============================================================================
+# Infracost Usage File - Staging Environment
+# =============================================================================
+# Estimated usage for cost calculation in staging environment
+# =============================================================================
+
+version: 0.1
+
+resource_usage:
+  # ---------------------------------------------------------------------------
+  # AWS Resources
+  # ---------------------------------------------------------------------------
+
+  # NAT Gateway
+  aws_nat_gateway.main:
+    monthly_data_processed_gb: 200
+
+  # RDS PostgreSQL - Control Plane
+  aws_db_instance.control_plane:
+    monthly_standard_io_requests: 50000000  # 50M requests (staging load)
+    monthly_additional_backup_storage_gb: 25
+
+  # RDS PostgreSQL - App Plane (Supabase)
+  aws_db_instance.app_plane:
+    monthly_standard_io_requests: 30000000  # 30M requests
+    monthly_additional_backup_storage_gb: 20
+
+  # RDS PostgreSQL - Temporal
+  aws_db_instance.temporal:
+    monthly_standard_io_requests: 40000000  # 40M requests
+    monthly_additional_backup_storage_gb: 30
+
+  # RDS PostgreSQL - Keycloak
+  aws_db_instance.keycloak:
+    monthly_standard_io_requests: 20000000  # 20M requests
+    monthly_additional_backup_storage_gb: 15
+
+  # RDS PostgreSQL - Components V2
+  aws_db_instance.components:
+    monthly_standard_io_requests: 15000000  # 15M requests
+    monthly_additional_backup_storage_gb: 10
+
+  # ElastiCache Redis
+  aws_elasticache_replication_group.main:
+    snapshot_storage_size_gb: 15
+
+  # S3 Buckets
+  aws_s3_bucket.assets:
+    standard:
+      storage_gb: 200
+      monthly_tier_1_requests: 500000
+      monthly_tier_2_requests: 2500000
+      monthly_data_transfer_gb: 100
+    glacier_flexible_retrieval:
+      storage_gb: 100
+
+  aws_s3_bucket.backups:
+    standard:
+      storage_gb: 400
+      monthly_tier_1_requests: 50000
+      monthly_tier_2_requests: 250000
+      monthly_data_transfer_gb: 30
+
+  # CloudWatch Logs
+  aws_cloudwatch_log_group.application:
+    monthly_data_ingested_gb: 40
+    monthly_data_scanned_gb: 20
+
+  # ECS Fargate Services
+  aws_ecs_service.tenant_management:
+    monthly_cpu_hours: 1440             # 2 vCPU * 24h * 30 days
+    monthly_memory_gb_hours: 2880       # 4GB * 24h * 30 days
+
+  aws_ecs_service.temporal_worker:
+    monthly_cpu_hours: 1440
+    monthly_memory_gb_hours: 2880
+
+  aws_ecs_service.cns_service:
+    monthly_cpu_hours: 1440
+    monthly_memory_gb_hours: 2880
+
+  aws_ecs_service.customer_portal:
+    monthly_cpu_hours: 720
+    monthly_memory_gb_hours: 1440
+
+  aws_ecs_service.admin_app:
+    monthly_cpu_hours: 720
+    monthly_memory_gb_hours: 1440
+
+  # Application Load Balancer
+  aws_lb.main:
+    monthly_lcu_hours: 400
+
+  # Data Transfer
+  aws_data_transfer.cross_az:
+    monthly_gb: 200
+
+  aws_data_transfer.internet_egress:
+    monthly_gb: 500
+
+  # ---------------------------------------------------------------------------
+  # GCP Resources
+  # ---------------------------------------------------------------------------
+
+  # Cloud SQL
+  google_sql_database_instance.control_plane:
+    disk_size: 150
+
+  google_sql_database_instance.app_plane:
+    disk_size: 100
+
+  # Memorystore Redis
+  google_redis_instance.main:
+    storage_size_gb: 15
+
+  # GKE Cluster
+  google_container_cluster.main:
+    monthly_egress_data_transfer_gb:
+      same_continent: 200
+      worldwide: 50
+
+  # Cloud Storage
+  google_storage_bucket.assets:
+    storage_gb: 200
+    monthly_class_a_operations: 500000
+    monthly_class_b_operations: 2500000
+    monthly_egress_data_transfer_gb:
+      same_continent: 400
+      worldwide: 100
+
+  # Cloud NAT
+  google_compute_router_nat.main:
+    monthly_data_processed_gb: 200

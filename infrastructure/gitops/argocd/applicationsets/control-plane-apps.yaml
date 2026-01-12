@@ -1,0 +1,183 @@
+# =============================================================================
+# ArgoCD ApplicationSet - Control Plane Services
+# =============================================================================
+# Deploys all control plane services across environments
+# =============================================================================
+
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: control-plane-services
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: control-plane-services
+    app.kubernetes.io/part-of: ananta-platform
+spec:
+  generators:
+    # Matrix generator: services x environments
+    - matrix:
+        generators:
+          # List of control plane services
+          - list:
+              elements:
+                - name: tenant-management-service
+                  port: "14000"
+                  component: api
+                  syncWave: "10"
+                  minReplicas: "2"
+                  maxReplicas: "10"
+
+                - name: temporal-worker-service
+                  port: "0"
+                  component: worker
+                  syncWave: "15"
+                  minReplicas: "2"
+                  maxReplicas: "20"
+
+                - name: subscription-service
+                  port: "3000"
+                  component: api
+                  syncWave: "10"
+                  minReplicas: "2"
+                  maxReplicas: "8"
+
+                - name: orchestrator-service
+                  port: "3000"
+                  component: api
+                  syncWave: "10"
+                  minReplicas: "2"
+                  maxReplicas: "6"
+
+                - name: admin-app
+                  port: "80"
+                  component: frontend
+                  syncWave: "20"
+                  minReplicas: "2"
+                  maxReplicas: "6"
+
+                - name: customer-app
+                  port: "80"
+                  component: frontend
+                  syncWave: "20"
+                  minReplicas: "2"
+                  maxReplicas: "10"
+
+          # Environments
+          - list:
+              elements:
+                - environment: dev
+                  cluster: https://kubernetes.default.svc
+                  domain: dev.ananta-platform.io
+                  replicaCount: "1"
+                  autoSync: true
+                  targetRevision: develop
+
+                - environment: staging
+                  cluster: https://kubernetes.default.svc
+                  domain: staging.ananta-platform.io
+                  replicaCount: "2"
+                  autoSync: true
+                  targetRevision: staging
+
+                - environment: prod
+                  cluster: https://kubernetes.default.svc
+                  domain: ananta-platform.io
+                  replicaCount: "3"
+                  autoSync: false
+                  targetRevision: main
+
+  template:
+    metadata:
+      name: '{{name}}-{{environment}}'
+      namespace: argocd
+      labels:
+        app.kubernetes.io/name: '{{name}}'
+        app.kubernetes.io/component: '{{component}}'
+        app.kubernetes.io/part-of: control-plane
+        environment: '{{environment}}'
+      annotations:
+        argocd.argoproj.io/sync-wave: '{{syncWave}}'
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+
+    spec:
+      project: ananta-platform
+
+      source:
+        repoURL: https://github.com/ananta-platform/ananta-platform-saas.git
+        targetRevision: '{{targetRevision}}'
+        path: 'infrastructure/kubernetes/helm/{{name}}'
+
+        helm:
+          releaseName: '{{name}}'
+          valueFiles:
+            - values.yaml
+            - 'values-{{environment}}.yaml'
+
+          parameters:
+            - name: environment
+              value: '{{environment}}'
+            - name: replicaCount
+              value: '{{replicaCount}}'
+            - name: domain
+              value: '{{domain}}'
+            - name: autoscaling.minReplicas
+              value: '{{minReplicas}}'
+            - name: autoscaling.maxReplicas
+              value: '{{maxReplicas}}'
+
+      destination:
+        server: '{{cluster}}'
+        namespace: 'ananta-{{environment}}'
+
+      syncPolicy:
+        automated:
+          prune: '{{autoSync}}'
+          selfHeal: '{{autoSync}}'
+          allowEmpty: false
+        syncOptions:
+          - CreateNamespace=true
+          - PrunePropagationPolicy=foreground
+          - PruneLast=true
+          - ApplyOutOfSyncOnly=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 5s
+            factor: 2
+            maxDuration: 3m
+
+      revisionHistoryLimit: 10
+
+      ignoreDifferences:
+        - group: apps
+          kind: Deployment
+          jsonPointers:
+            - /spec/replicas
+        - group: autoscaling
+          kind: HorizontalPodAutoscaler
+          jsonPointers:
+            - /status
+
+  syncPolicy:
+    preserveResourcesOnDeletion: true
+
+  strategy:
+    type: RollingSync
+    rollingSync:
+      steps:
+        - matchExpressions:
+            - key: environment
+              operator: In
+              values:
+                - dev
+        - matchExpressions:
+            - key: environment
+              operator: In
+              values:
+                - staging
+        - matchExpressions:
+            - key: environment
+              operator: In
+              values:
+                - prod

@@ -1,0 +1,57 @@
+"apiVersion": "postgresql.cnpg.io/v1"
+"kind": "Cluster"
+"metadata":
+  "labels":
+    "app.kubernetes.io/component": "database"
+    "app.kubernetes.io/instance": "ananta-local-pg"
+    "app.kubernetes.io/managed-by": "terraform"
+    "app.kubernetes.io/name": "postgresql"
+    "app.kubernetes.io/part-of": "ananta-platform"
+    "environment": "local"
+  "name": "ananta-local-pg"
+  "namespace": "database-system"
+"spec":
+  "affinity":
+    "podAntiAffinityType": "preferred"
+    "topologyKey": "kubernetes.io/hostname"
+  "bootstrap":
+    "initdb":
+      "database": "ananta"
+      "owner": "ananta_app"
+      "secret":
+        "name": "ananta-local-pg-app"
+  "description": "PostgreSQL cluster for ananta local"
+  "imageName": "ghcr.io/cloudnative-pg/postgresql:15"
+  "instances": 1
+  "monitoring":
+    "enablePodMonitor": false
+  "postgresql":
+    "parameters":
+      "checkpoint_completion_target": "0.9"
+      "default_statistics_target": "100"
+      "effective_cache_size": "512MB"
+      "effective_io_concurrency": "200"
+      "log_checkpoints": "on"
+      "log_connections": "on"
+      "log_disconnections": "on"
+      "log_lock_waits": "on"
+      "maintenance_work_mem": "64MB"
+      "max_connections": "100"
+      "max_wal_size": "4GB"
+      "min_wal_size": "1GB"
+      "random_page_cost": "1.1"
+      "shared_buffers": "256MB"
+      "wal_buffers": "16MB"
+  "primaryUpdateStrategy": "unsupervised"
+  "resources":
+    "limits":
+      "cpu": "1"
+      "memory": "1Gi"
+    "requests":
+      "cpu": "500m"
+      "memory": "512Mi"
+  "storage":
+    "size": "10Gi"
+    "storageClass": "local-path"
+  "superuserSecret":
+    "name": "ananta-local-pg-superuser"

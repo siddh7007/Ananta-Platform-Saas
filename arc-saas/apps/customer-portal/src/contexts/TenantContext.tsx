@@ -83,13 +83,22 @@ export function TenantProvider({ children }: TenantProviderProps) {
       setError(null);
       setTenantError(null);
 
-      // Fetch user's tenants from platform API
-      const response = await fetch(`${env.api.platform}/tenants/my-tenants`, {
+      // Fetch user's assigned tenant (use my-tenants for all users)
+      // Super admin access to all tenants is handled separately in admin UI
+      const apiUrl = `${env.api.platform}/tenants/my-tenants`;
+      console.log('[TenantContext] Fetching from:', apiUrl);
+      console.log('[TenantContext] Token length:', token?.length);
+      console.log('[TenantContext] User role:', user?.role);
+
+      const response = await fetch(apiUrl, {
         headers: {
           Authorization: `Bearer ${token}`,
           'Content-Type': 'application/json',
         },
       });
+
+      console.log('[TenantContext] Response status:', response.status);
+      console.log('[TenantContext] Response ok:', response.ok);
 
       if (!response.ok) {
         // Handle different HTTP errors
@@ -179,7 +188,7 @@ export function TenantProvider({ children }: TenantProviderProps) {
     } finally {
       setIsLoading(false);
     }
-  }, [isAuthenticated, getAccessToken, user?.tenantId, user?.email, user?.id]);
+  }, [isAuthenticated, getAccessToken, isSuperAdmin, user?.tenantId, user?.email, user?.id]);
 
   useEffect(() => {
     fetchTenants();

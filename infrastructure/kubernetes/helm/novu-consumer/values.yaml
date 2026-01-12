@@ -1,0 +1,111 @@
+# =============================================================================
+# Novu Consumer Service - Notification event consumer (no HTTP server)
+# =============================================================================
+replicaCount: 2
+
+image:
+  repository: ghcr.io/ananta-platform/novu-consumer
+  pullPolicy: IfNotPresent
+  tag: ""
+
+fullnameOverride: "novu-consumer"
+
+serviceAccount:
+  create: true
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "9090"
+  prometheus.io/path: "/metrics"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+
+# Metrics port only
+service:
+  type: ClusterIP
+  port: 9090
+  targetPort: 9090
+
+# No ingress for consumer
+ingress:
+  enabled: false
+
+resources:
+  limits:
+    cpu: 300m
+    memory: 256Mi
+  requests:
+    cpu: 50m
+    memory: 128Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+configMap:
+  LOG_LEVEL: info
+  NODE_ENV: production
+
+secrets:
+  existingSecret: "novu-consumer-secrets"
+
+# Novu configuration
+novu:
+  apiUrl: https://api.novu.co
+  wsUrl: wss://ws.novu.co
+  # API key from secrets
+
+# RabbitMQ for event processing
+rabbitmq:
+  host: rabbitmq.messaging-system.svc.cluster.local
+  port: 5672
+  vhost: notifications
+  queue: novu-events
+
+# Health check on metrics port
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 9090
+  initialDelaySeconds: 30
+  periodSeconds: 30
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 9090
+  initialDelaySeconds: 10
+  periodSeconds: 10
+
+serviceMonitor:
+  enabled: true
+  interval: 30s
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+volumes:
+  - name: tmp
+    emptyDir: {}
+
+volumeMounts:
+  - name: tmp
+    mountPath: /tmp
+
+extraEnv: []
+extraEnvFrom: []
+initContainers: []
+sidecars: []

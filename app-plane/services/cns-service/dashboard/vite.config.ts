@@ -51,7 +51,7 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
     },
   },
-  base: '/cns/',  // Base path for Traefik routing at http://localhost:27500/cns
+  base: '/',  // Base path - standalone deployment at root
   server: {
     port: 27710,
     host: '0.0.0.0',

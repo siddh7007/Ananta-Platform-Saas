@@ -21,10 +21,36 @@ import { getRoleFromToken, hasMinimumRole, DEFAULT_ROLE, type AppRole } from "..
 import { logger } from "../lib/logger";
 
 /**
- * Get the current user's role from stored token
+ * Shared state for OIDC token - allows access control provider to use
+ * the OIDC token directly without waiting for localStorage sync
+ */
+let oidcAccessToken: string | null = null;
+
+/**
+ * Set the OIDC access token for the access control provider
+ * This should be called when OIDC authentication state changes
+ */
+export function setOidcAccessToken(token: string | null): void {
+  oidcAccessToken = token;
+  if (token) {
+    // Also sync to localStorage immediately to avoid race conditions
+    localStorage.setItem("arc_admin_token", token);
+    logger.debug("OIDC token set in access control provider", { hasToken: true });
+  }
+}
+
+/**
+ * Get the current user's role from OIDC token or stored token
+ * Prioritizes OIDC token over localStorage for freshness
  */
 function getCurrentUserRole(): AppRole {
-  // Try localStorage token first (synced from OIDC)
+  // Try OIDC token first (most up-to-date source)
+  if (oidcAccessToken) {
+    const role = getRoleFromToken(oidcAccessToken);
+    logger.debug("Role from OIDC token in access control", { role });
+    return role;
+  }
+  // Fall back to localStorage token (synced from OIDC)
   const token = localStorage.getItem("arc_admin_token");
   if (token) {
     return getRoleFromToken(token);

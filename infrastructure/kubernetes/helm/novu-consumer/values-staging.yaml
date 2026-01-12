@@ -1,0 +1,4 @@
+replicaCount: 2
+configMap:
+  LOG_LEVEL: info
+  NODE_ENV: staging

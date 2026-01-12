@@ -1,0 +1,23 @@
+# Staging environment overrides
+replicaCount: 2
+
+ingress:
+  hosts:
+    - host: cns-staging.ananta.io
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: cns-service-staging-tls
+      hosts:
+        - cns-staging.ananta.io
+
+autoscaling:
+  minReplicas: 2
+  maxReplicas: 10
+
+databases:
+  supabase:
+    host: supabase-db-staging.database-system.svc.cluster.local
+  componentsV2:
+    host: components-db-staging.database-system.svc.cluster.local

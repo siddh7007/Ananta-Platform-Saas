@@ -1,0 +1,13 @@
+variable "namespace" { type = string; default = "monitoring-system" }
+variable "create_namespace" { type = bool; default = true }
+variable "labels" { type = map(string); default = {} }
+variable "enable_jaeger" { type = bool; default = true }
+variable "jaeger_version" { type = string; default = "1.53" }
+variable "jaeger_node_port" { type = number; default = 31686 }
+variable "jaeger_cpu_request" { type = string; default = "100m" }
+variable "jaeger_memory_request" { type = string; default = "256Mi" }
+variable "jaeger_cpu_limit" { type = string; default = "500m" }
+variable "jaeger_memory_limit" { type = string; default = "512Mi" }
+variable "enable_redis_exporter" { type = bool; default = true }
+variable "redis_exporter_version" { type = string; default = "v1.55.0" }
+variable "redis_address" { type = string; default = "redis://redis-master.app-plane:6379" }

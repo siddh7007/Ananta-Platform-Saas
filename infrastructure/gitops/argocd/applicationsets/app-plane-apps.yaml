@@ -1,0 +1,220 @@
+# =============================================================================
+# ArgoCD ApplicationSet - App Plane Services
+# =============================================================================
+# Deploys all app plane services across environments
+# =============================================================================
+
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: app-plane-services
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: app-plane-services
+    app.kubernetes.io/part-of: ananta-platform
+spec:
+  generators:
+    - matrix:
+        generators:
+          # List of app plane services
+          - list:
+              elements:
+                - name: cns-service
+                  port: "27200"
+                  component: api
+                  syncWave: "10"
+                  minReplicas: "2"
+                  maxReplicas: "20"
+                  memory: 2Gi
+                  cpu: "1000m"
+
+                - name: cns-dashboard
+                  port: "80"
+                  component: frontend
+                  syncWave: "20"
+                  minReplicas: "2"
+                  maxReplicas: "4"
+                  memory: 128Mi
+                  cpu: "200m"
+
+                - name: customer-portal
+                  port: "80"
+                  component: frontend
+                  syncWave: "20"
+                  minReplicas: "3"
+                  maxReplicas: "10"
+                  memory: 128Mi
+                  cpu: "200m"
+
+                - name: backstage-portal
+                  port: "7007"
+                  component: frontend
+                  syncWave: "20"
+                  minReplicas: "2"
+                  maxReplicas: "6"
+                  memory: 1Gi
+                  cpu: "500m"
+
+                - name: audit-logger
+                  port: "3000"
+                  component: service
+                  syncWave: "5"
+                  minReplicas: "2"
+                  maxReplicas: "10"
+                  memory: 512Mi
+                  cpu: "500m"
+
+                - name: middleware-api
+                  port: "3000"
+                  component: api
+                  syncWave: "5"
+                  minReplicas: "3"
+                  maxReplicas: "20"
+                  memory: 512Mi
+                  cpu: "500m"
+
+                - name: novu-consumer
+                  port: "0"
+                  component: worker
+                  syncWave: "10"
+                  minReplicas: "2"
+                  maxReplicas: "10"
+                  memory: 512Mi
+                  cpu: "500m"
+
+                - name: backend
+                  port: "3000"
+                  component: api
+                  syncWave: "5"
+                  minReplicas: "2"
+                  maxReplicas: "20"
+                  memory: 1Gi
+                  cpu: "1000m"
+
+                - name: dashboard
+                  port: "80"
+                  component: frontend
+                  syncWave: "20"
+                  minReplicas: "2"
+                  maxReplicas: "8"
+                  memory: 256Mi
+                  cpu: "200m"
+
+          # Environments
+          - list:
+              elements:
+                - environment: dev
+                  cluster: https://kubernetes.default.svc
+                  domain: dev.ananta-platform.io
+                  replicaCount: "1"
+                  autoSync: true
+                  targetRevision: develop
+
+                - environment: staging
+                  cluster: https://kubernetes.default.svc
+                  domain: staging.ananta-platform.io
+                  replicaCount: "2"
+                  autoSync: true
+                  targetRevision: staging
+
+                - environment: prod
+                  cluster: https://kubernetes.default.svc
+                  domain: ananta-platform.io
+                  replicaCount: "3"
+                  autoSync: false
+                  targetRevision: main
+
+  template:
+    metadata:
+      name: '{{name}}-{{environment}}'
+      namespace: argocd
+      labels:
+        app.kubernetes.io/name: '{{name}}'
+        app.kubernetes.io/component: '{{component}}'
+        app.kubernetes.io/part-of: app-plane
+        environment: '{{environment}}'
+      annotations:
+        argocd.argoproj.io/sync-wave: '{{syncWave}}'
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+
+    spec:
+      project: ananta-platform
+
+      source:
+        repoURL: https://github.com/ananta-platform/ananta-platform-saas.git
+        targetRevision: '{{targetRevision}}'
+        path: 'infrastructure/kubernetes/helm/{{name}}'
+
+        helm:
+          releaseName: '{{name}}'
+          valueFiles:
+            - values.yaml
+            - 'values-{{environment}}.yaml'
+
+          parameters:
+            - name: environment
+              value: '{{environment}}'
+            - name: replicaCount
+              value: '{{replicaCount}}'
+            - name: domain
+              value: '{{domain}}'
+            - name: autoscaling.minReplicas
+              value: '{{minReplicas}}'
+            - name: autoscaling.maxReplicas
+              value: '{{maxReplicas}}'
+            - name: resources.limits.memory
+              value: '{{memory}}'
+            - name: resources.limits.cpu
+              value: '{{cpu}}'
+
+      destination:
+        server: '{{cluster}}'
+        namespace: 'ananta-{{environment}}'
+
+      syncPolicy:
+        automated:
+          prune: '{{autoSync}}'
+          selfHeal: '{{autoSync}}'
+          allowEmpty: false
+        syncOptions:
+          - CreateNamespace=true
+          - PrunePropagationPolicy=foreground
+          - PruneLast=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 5s
+            factor: 2
+            maxDuration: 3m
+
+      revisionHistoryLimit: 10
+
+      ignoreDifferences:
+        - group: apps
+          kind: Deployment
+          jsonPointers:
+            - /spec/replicas
+
+  syncPolicy:
+    preserveResourcesOnDeletion: true
+
+  strategy:
+    type: RollingSync
+    rollingSync:
+      steps:
+        - matchExpressions:
+            - key: environment
+              operator: In
+              values:
+                - dev
+        - matchExpressions:
+            - key: environment
+              operator: In
+              values:
+                - staging
+        - matchExpressions:
+            - key: environment
+              operator: In
+              values:
+                - prod

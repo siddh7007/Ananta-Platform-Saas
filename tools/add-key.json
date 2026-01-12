@@ -1,0 +1,5 @@
+{
+  "name": "github-deploy-key",
+  "description": "Deploy key for Ananta Platform GitHub repo",
+  "private_key": "-----BEGIN OPENSSH PRIVATE KEY-----\nb3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAABAAAAMwAAAAtzc2gtZW\nQyNTUxOQAAACDZOsawnimxTB/XGpOaVcxNLd6391yN+v6hoWIm9eX5PwAAAJB5aeDzeWng\n8wAAAAtzc2gtZWQyNTUxOQAAACDZOsawnimxTB/XGpOaVcxNLd6391yN+v6hoWIm9eX5Pw\nAAAEAeIbY4Zvh/+QHerggM+7I5jtTVl9Iy1P04o3jafeYjjdk6xrCeKbFMH9cak5pVzE0t\n3rf3XI36/qGhYib15fk/AAAADHJvb3RAU2V2YWRhcwE=\n-----END OPENSSH PRIVATE KEY-----"
+}

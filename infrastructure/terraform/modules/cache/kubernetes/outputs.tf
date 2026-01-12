@@ -7,6 +7,11 @@ output "endpoint" {
   value       = var.high_availability ? "${local.cluster_name}-redis.${var.namespace}.svc.cluster.local:6379" : "${local.cluster_name}.${var.namespace}.svc.cluster.local:6379"
 }
 
+output "host" {
+  description = "Redis hostname"
+  value       = var.high_availability ? "${local.cluster_name}-redis.${var.namespace}.svc.cluster.local" : "${local.cluster_name}.${var.namespace}.svc.cluster.local"
+}
+
 output "reader_endpoint" {
   description = "Redis reader endpoint (same as primary for K8s)"
   value       = var.high_availability ? "${local.cluster_name}-redis.${var.namespace}.svc.cluster.local:6379" : "${local.cluster_name}.${var.namespace}.svc.cluster.local:6379"

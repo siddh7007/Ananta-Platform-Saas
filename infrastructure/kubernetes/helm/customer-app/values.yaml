@@ -1,0 +1,85 @@
+# Default values for customer-app
+replicaCount: 2
+
+image:
+  repository: ananta/customer-app
+  pullPolicy: IfNotPresent
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext:
+  fsGroup: 101
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 101
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: app.ananta-platform.io
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: customer-app-tls
+      hosts:
+        - app.ananta-platform.io
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 128Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+tolerations: []
+affinity: {}
+
+# Environment configuration
+environment: dev
+domain: ananta-platform.io
+
+# API endpoints
+api:
+  controlPlaneUrl: http://tenant-management-service:14000
+  appPlaneUrl: http://middleware-api:3000
+
+# Keycloak configuration
+keycloak:
+  url: http://keycloak:8080
+  realm: ananta
+  clientId: customer-app
+
+# Feature flags
+features:
+  analytics: true
+  notifications: true

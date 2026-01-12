@@ -1,0 +1,11 @@
+replicaCount: 2
+ingress:
+  hosts:
+    - host: orchestrator-staging.ananta.io
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: orchestrator-service-staging-tls
+      hosts:
+        - orchestrator-staging.ananta.io

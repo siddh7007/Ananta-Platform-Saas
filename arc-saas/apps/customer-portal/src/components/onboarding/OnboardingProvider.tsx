@@ -57,7 +57,7 @@ const STORAGE_KEY = 'cbp-onboarding-completed';
 const ONBOARDING_STEPS: OnboardingStep[] = [
   {
     id: 'welcome',
-    title: 'Welcome to CBP',
+    title: 'Welcome to Ananta Platform',
     description: 'Your intelligent electronics BOM management platform. Let us show you around in just a few steps.',
     position: 'center',
   },

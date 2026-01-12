@@ -1,0 +1,50 @@
+# =============================================================================
+# Staging environment overrides
+# =============================================================================
+
+replicaCount: 2
+
+image:
+  pullPolicy: IfNotPresent
+
+ingress:
+  hosts:
+    - host: api-staging.ananta.io
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: tenant-management-staging-tls
+      hosts:
+        - api-staging.ananta.io
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+
+configMap:
+  LOG_LEVEL: info
+  NODE_ENV: staging
+
+database:
+  host: postgres-staging.database-system.svc.cluster.local
+
+keycloak:
+  url: https://auth-staging.ananta.io
+
+serviceMonitor:
+  enabled: true
+  interval: 30s
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1

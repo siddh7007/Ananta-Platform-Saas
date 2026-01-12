@@ -1,53 +1,35 @@
-# =============================================================================
-# Temporal Worker Service - Docker Build
-# =============================================================================
-# Multi-stage build for Temporal workflow workers
-#
-# Build:   docker build -t arc-saas-temporal-worker .
-# Run:     docker run arc-saas-temporal-worker
-# =============================================================================
-
-# Build stage - Use debian-based image for glibc compatibility with Temporal SDK
+# Build stage - use glibc-based image (Temporal native modules require glibc)
 FROM node:20-slim AS builder
 
 WORKDIR /app
 
-# Install build dependencies for native modules
-RUN apt-get update && apt-get install -y python3 make g++ && rm -rf /var/lib/apt/lists/*
-
-# Install dependencies
+# Copy package files
 COPY package*.json ./
+
+# Install all dependencies (including dev dependencies for build)
 RUN npm install
 
-# Copy source and build
+# Copy source code
 COPY . .
+
+# Build the application
 RUN npm run build
 
-# Production stage - Use debian-based image for glibc compatibility
+# Production stage - use glibc-based image for Temporal native modules
 FROM node:20-slim AS production
 
 WORKDIR /app
 
-# Install tini for proper process management
-RUN apt-get update && apt-get install -y tini && rm -rf /var/lib/apt/lists/*
+# Copy package files and install production dependencies
+COPY package*.json ./
+# Note: Temporal needs its native binaries, so we can't skip scripts
+RUN npm install --omit=dev
 
-# Create non-root user
-RUN groupadd -g 1001 nodejs && useradd -u 1001 -g nodejs nodejs
-
-# Copy built assets and dependencies
-COPY --from=builder /app/package*.json ./
-COPY --from=builder /app/node_modules ./node_modules
+# Copy built files from builder
 COPY --from=builder /app/dist ./dist
 
-# Set ownership
-RUN chown -R nodejs:nodejs /app
+# Set environment variables
+ENV NODE_ENV=production
 
-USER nodejs
-
-ENV NODE_ENV=production \
-    TEMPORAL_ADDRESS=temporal:7233 \
-    TEMPORAL_NAMESPACE=arc-saas \
-    TEMPORAL_TASK_QUEUE=tenant-provisioning
-
-ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["node", "dist/index.js"]
+# Start the worker
+CMD ["node", "./dist/index.js"]

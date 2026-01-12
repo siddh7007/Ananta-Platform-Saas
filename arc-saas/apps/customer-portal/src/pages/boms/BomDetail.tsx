@@ -81,6 +81,7 @@ import type {
 import { formatPrice } from '@/types/supplier';
 import { useEnrichmentSSE } from '@/hooks/useEnrichmentSSE';
 import { useProcessingStatus } from '@/hooks/useProcessingStatus';
+import { useWorkflowStatePersistence } from '@/hooks/useWorkflowStatePersistence';
 import { ProcessingQueueView } from '@/components/bom/ProcessingQueueView';
 
 // Helper to find best pricing option from a line item's pricing array
@@ -286,6 +287,26 @@ export function BomDetailPage() {
       refetchLineItems();
     },
   });
+
+  // Load persisted workflow state from S3/MinIO
+  const {
+    state: persistedState,
+    isLoading: isLoadingPersistedState,
+    error: persistedStateError,
+    loadState: loadPersistedState,
+  } = useWorkflowStatePersistence({
+    autoSave: false, // Detail page is read-only
+    enableFallback: true,
+  });
+
+  // Load persisted state on mount
+  useEffect(() => {
+    if (id) {
+      loadPersistedState().catch(err => {
+        console.error('[BomDetail] Failed to load persisted workflow state:', err);
+      });
+    }
+  }, [id, loadPersistedState]);
 
   // Determine if we should show the processing queue view
   const showProcessingView = useMemo(() => {

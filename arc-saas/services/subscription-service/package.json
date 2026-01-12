@@ -55,7 +55,7 @@
     "preopenapi-spec": "npm run build",
     "openapi-spec": "node ./dist/openapi-spec",
     "prestart": "npm run clean && npm run openapi-spec",
-    "start": "node -r ./dist/opentelemetry-registry.js -r source-map-support/register .",
+    "start": "node -r ./dist/opentelemetry-registry.js -r source-map-support/register ./dist/__main__.js",
     "dev": "nodemon --watch src -e ts --exec \"npm run start\"",
     "clean": "lb-clean dist *.tsbuildinfo .eslintcache",
     "rebuild": "npm run clean && npm run build",

@@ -1,0 +1,121 @@
+# =============================================================================
+# ArgoCD Application - Customer Portal
+# =============================================================================
+# Customer-facing portal for tenant users
+# =============================================================================
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: customer-portal
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: customer-portal
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: app-plane
+    environment: '{{.Values.environment}}'
+  annotations:
+    argocd.argoproj.io/sync-wave: "20"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: ananta-platform
+
+  source:
+    repoURL: https://github.com/ananta-platform/ananta-platform-saas.git
+    targetRevision: HEAD
+    path: infrastructure/kubernetes/helm/customer-portal
+
+    helm:
+      releaseName: customer-portal
+      valueFiles:
+        - values.yaml
+        - values-{{.Values.environment}}.yaml
+
+      values: |
+        fullnameOverride: customer-portal
+
+        image:
+          repository: ghcr.io/ananta-platform/customer-portal
+          pullPolicy: IfNotPresent
+
+        service:
+          type: ClusterIP
+          port: 80
+
+        ingress:
+          enabled: true
+          className: nginx
+          annotations:
+            cert-manager.io/cluster-issuer: letsencrypt-prod
+            nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+            nginx.ingress.kubernetes.io/configuration-snippet: |
+              add_header X-Frame-Options "SAMEORIGIN" always;
+              add_header X-Content-Type-Options "nosniff" always;
+              add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+          hosts:
+            - host: app.{{.Values.domain}}
+              paths:
+                - path: /
+                  pathType: Prefix
+          tls:
+            - secretName: customer-portal-tls
+              hosts:
+                - app.{{.Values.domain}}
+
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+
+        autoscaling:
+          enabled: true
+          minReplicas: 3
+          maxReplicas: 10
+          targetCPUUtilizationPercentage: 70
+
+        # PWA configuration
+        pwa:
+          enabled: true
+          manifest:
+            name: Ananta Platform
+            short_name: Ananta
+            theme_color: "#1976d2"
+            background_color: "#ffffff"
+
+        runtimeConfig:
+          VITE_API_URL: https://api.{{.Values.domain}}
+          VITE_CNS_API_URL: https://cns.{{.Values.domain}}
+          VITE_SUPABASE_URL: https://supabase.{{.Values.domain}}
+          VITE_KEYCLOAK_URL: https://auth.{{.Values.domain}}
+          VITE_KEYCLOAK_REALM: ananta
+          VITE_KEYCLOAK_CLIENT_ID: customer-portal
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ananta-{{.Values.environment}}
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  revisionHistoryLimit: 10
+
+  info:
+    - name: Documentation
+      value: https://docs.ananta-platform.io/apps/customer-portal
+    - name: Team
+      value: frontend-team

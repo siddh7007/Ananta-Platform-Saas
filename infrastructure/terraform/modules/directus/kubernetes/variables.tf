@@ -1,0 +1,19 @@
+variable "namespace" { type = string; default = "app-plane" }
+variable "labels" { type = map(string); default = {} }
+variable "service_type" { type = string; default = "NodePort" }
+variable "directus_version" { type = string; default = "latest" }
+variable "directus_key" { type = string; sensitive = true }
+variable "directus_secret" { type = string; sensitive = true }
+variable "admin_email" { type = string; default = "admin@example.com" }
+variable "admin_password" { type = string; sensitive = true }
+variable "db_host" { type = string }
+variable "db_password" { type = string; sensitive = true }
+variable "redis_url" { type = string; default = "redis://redis-master:6379/4" }
+variable "replicas" { type = number; default = 1 }
+variable "node_port" { type = number; default = 31060 }
+variable "storage_class" { type = string; default = "local-path" }
+variable "storage_size" { type = string; default = "5Gi" }
+variable "cpu_request" { type = string; default = "100m" }
+variable "memory_request" { type = string; default = "256Mi" }
+variable "cpu_limit" { type = string; default = "500m" }
+variable "memory_limit" { type = string; default = "512Mi" }

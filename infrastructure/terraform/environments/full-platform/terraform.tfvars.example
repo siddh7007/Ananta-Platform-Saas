@@ -1,0 +1,513 @@
+#
+# Ananta Platform SaaS - Example Configuration
+# Copy this file to terraform.tfvars and customize values
+#
+
+#==============================================================================
+# ENVIRONMENT & CLUSTER
+#==============================================================================
+
+# Environment: dev, staging, or prod
+environment = "dev"
+
+# Kubernetes context (from ~/.kube/config)
+kubernetes_context = "docker-desktop"
+
+# Storage class for persistent volumes
+storage_class = "standard"  # Use "gp3" for AWS, "pd-ssd" for GCP, "managed-premium" for Azure
+
+#==============================================================================
+# NETWORK CONFIGURATION
+#==============================================================================
+
+# Enable network policies for security
+enable_network_policies = true
+
+# Enable ingress controller
+enable_ingress = true
+ingress_class  = "nginx"
+
+# Domain configuration
+domain_name = "ananta-platform.local"  # Change to your domain
+enable_tls  = true
+tls_secret_name = "ananta-platform-tls"
+
+#==============================================================================
+# DATABASE (PostgreSQL)
+#==============================================================================
+
+postgres_version = "15.4.0"
+
+# PostgreSQL admin password (CHANGE THIS!)
+postgres_password = "your-strong-postgres-password-here"
+
+# Storage configuration
+postgres_storage_size = "20Gi"
+
+# High availability
+postgres_enable_replication = true
+postgres_replica_count      = 2
+
+# Backups
+postgres_enable_backup  = true
+postgres_backup_schedule = "0 2 * * *"  # Daily at 2 AM
+
+# Resource limits
+postgres_cpu_request    = "500m"
+postgres_memory_request = "1Gi"
+postgres_cpu_limit      = "2"
+postgres_memory_limit   = "4Gi"
+
+#------------------------------------------------------------------------------
+# Database Credentials (CHANGE ALL PASSWORDS!)
+#------------------------------------------------------------------------------
+
+# Control Plane
+control_plane_database     = "arc_saas"
+control_plane_db_user      = "arc_saas_user"
+control_plane_db_password  = "your-strong-control-plane-password"
+
+# Supabase (App Plane)
+supabase_database  = "postgres"
+supabase_db_user   = "postgres"
+supabase_db_password = "your-strong-supabase-password"
+
+# Components V2
+components_database  = "components_v2"
+components_db_user   = "components_user"
+components_db_password = "your-strong-components-password"
+
+# Keycloak
+keycloak_database  = "keycloak"
+keycloak_db_user   = "keycloak_user"
+keycloak_db_password = "your-strong-keycloak-db-password"
+
+# Temporal
+temporal_database  = "temporal"
+temporal_db_user   = "temporal_user"
+temporal_db_password = "your-strong-temporal-password"
+
+# Novu
+novu_database  = "novu"
+novu_db_user   = "novu_user"
+novu_db_password = "your-strong-novu-password"
+
+# Directus
+directus_database  = "directus"
+directus_db_user   = "directus_user"
+directus_db_password = "your-strong-directus-password"
+
+#==============================================================================
+# CACHE (Redis)
+#==============================================================================
+
+redis_version = "7.2.0"
+
+# Redis password (CHANGE THIS!)
+redis_password = "your-strong-redis-password"
+
+# Storage
+redis_storage_size = "5Gi"
+
+# High availability
+redis_enable_sentinel = true
+redis_replica_count   = 3
+
+# Memory configuration
+redis_max_memory        = "2gb"
+redis_max_memory_policy = "allkeys-lru"
+
+# Resource limits
+redis_cpu_request    = "100m"
+redis_memory_request = "256Mi"
+redis_cpu_limit      = "500m"
+redis_memory_limit   = "2Gi"
+
+#==============================================================================
+# RABBITMQ
+#==============================================================================
+
+rabbitmq_version = "3.12.0"
+
+# RabbitMQ credentials (CHANGE THIS!)
+rabbitmq_user     = "rabbitmq"
+rabbitmq_password = "your-strong-rabbitmq-password"
+
+# Storage
+rabbitmq_storage_size = "5Gi"
+rabbitmq_replica_count = 3
+
+# Monitoring
+rabbitmq_enable_metrics = true
+
+# Resource limits
+rabbitmq_cpu_request    = "200m"
+rabbitmq_memory_request = "512Mi"
+rabbitmq_cpu_limit      = "1"
+rabbitmq_memory_limit   = "2Gi"
+
+#==============================================================================
+# MINIO (Object Storage)
+#==============================================================================
+
+minio_version = "RELEASE.2024-01-01T00-00-00Z"
+
+# MinIO credentials (CHANGE THIS!)
+minio_access_key = "your-minio-access-key"
+minio_secret_key = "your-strong-minio-secret-key"
+
+# Storage
+minio_storage_size  = "10Gi"
+minio_replica_count = 4
+
+# Console
+minio_enable_console = true
+
+# Default buckets
+minio_default_buckets = ["directus", "supabase-storage", "backups", "uploads"]
+
+# Resource limits
+minio_cpu_request    = "200m"
+minio_memory_request = "512Mi"
+minio_cpu_limit      = "1"
+minio_memory_limit   = "2Gi"
+
+#==============================================================================
+# VAULT (Secrets Management)
+#==============================================================================
+
+vault_version = "1.15.0"
+
+# Vault root token (CHANGE THIS!)
+vault_root_token = "your-vault-root-token"
+
+# Storage
+vault_storage_size  = "5Gi"
+vault_replica_count = 3
+
+# UI and backend
+vault_enable_ui   = true
+vault_enable_raft = true
+
+# Unseal keys (leave empty for manual unseal)
+vault_unseal_keys = []
+
+# Resource limits
+vault_cpu_request    = "200m"
+vault_memory_request = "256Mi"
+vault_cpu_limit      = "1"
+vault_memory_limit   = "1Gi"
+
+#==============================================================================
+# KEYCLOAK (Identity & Access)
+#==============================================================================
+
+keycloak_version = "22.0.0"
+
+# Keycloak admin credentials (CHANGE THIS!)
+keycloak_admin_user     = "admin"
+keycloak_admin_password = "your-strong-keycloak-admin-password"
+
+# Realm and clients
+keycloak_realm = "ananta"
+
+# Control Plane client
+keycloak_client_id     = "ananta-control-plane"
+keycloak_client_secret = "your-control-plane-client-secret"
+
+# App Plane client
+keycloak_client_id_app     = "ananta-app-plane"
+keycloak_client_secret_app = "your-app-plane-client-secret"
+
+# Frontend client (public)
+keycloak_client_id_frontend = "ananta-frontend"
+
+# Configuration
+keycloak_replica_count  = 2
+keycloak_enable_metrics = true
+keycloak_themes         = []
+
+# Resource limits
+keycloak_cpu_request    = "500m"
+keycloak_memory_request = "1Gi"
+keycloak_cpu_limit      = "2"
+keycloak_memory_limit   = "2Gi"
+
+#==============================================================================
+# TEMPORAL (Workflow Engine)
+#==============================================================================
+
+temporal_version = "1.22.0"
+
+# Namespaces
+temporal_default_namespace = "arc-saas"
+temporal_additional_namespaces = ["enrichment", "workflows"]
+temporal_task_queue = "tenant-provisioning"
+
+# UI
+temporal_enable_ui  = true
+temporal_enable_web = true
+
+# Replicas
+temporal_frontend_replicas = 2
+temporal_history_replicas  = 3
+temporal_matching_replicas = 3
+temporal_worker_replicas   = 3
+
+# Resource limits
+temporal_cpu_request    = "500m"
+temporal_memory_request = "1Gi"
+temporal_cpu_limit      = "2"
+temporal_memory_limit   = "4Gi"
+
+#==============================================================================
+# SUPABASE (App Plane Database & APIs)
+#==============================================================================
+
+supabase_version = "v2.38.0"
+
+# JWT configuration (CHANGE ALL SECRETS!)
+supabase_jwt_secret  = "your-supabase-jwt-secret-32-chars-min"
+supabase_anon_key    = "your-supabase-anon-key"
+supabase_service_key = "your-supabase-service-key"
+
+# Features
+supabase_enable_studio  = true
+supabase_enable_storage = true
+
+# Resource limits
+supabase_cpu_request    = "200m"
+supabase_memory_request = "512Mi"
+supabase_cpu_limit      = "1"
+supabase_memory_limit   = "2Gi"
+
+#==============================================================================
+# DIRECTUS (Content Management)
+#==============================================================================
+
+directus_version = "10.8.0"
+
+# Admin credentials (CHANGE THIS!)
+directus_admin_email    = "admin@ananta-platform.local"
+directus_admin_password = "your-strong-directus-password"
+directus_secret_key     = "your-directus-secret-key-32-chars-min"
+
+# Configuration
+directus_replica_count = 2
+
+# Resource limits
+directus_cpu_request    = "200m"
+directus_memory_request = "512Mi"
+directus_cpu_limit      = "1"
+directus_memory_limit   = "2Gi"
+
+#==============================================================================
+# NOVU (Notifications)
+#==============================================================================
+
+novu_version = "0.21.0"
+
+# JWT and API key (CHANGE THIS!)
+novu_jwt_secret = "your-novu-jwt-secret"
+novu_api_key    = "your-novu-api-key"
+
+# Features
+novu_enable_api    = true
+novu_enable_worker = true
+novu_enable_ws     = true
+novu_enable_web    = true
+
+# Replicas
+novu_api_replicas    = 2
+novu_worker_replicas = 3
+novu_ws_replicas     = 2
+
+# Resource limits
+novu_cpu_request    = "200m"
+novu_memory_request = "512Mi"
+novu_cpu_limit      = "1"
+novu_memory_limit   = "2Gi"
+
+#==============================================================================
+# OBSERVABILITY (Prometheus, Grafana, Loki, Tempo)
+#==============================================================================
+
+# Enable components
+enable_prometheus = true
+enable_grafana    = true
+enable_loki       = true
+enable_tempo      = true
+
+# Grafana admin (CHANGE THIS!)
+grafana_admin_user     = "admin"
+grafana_admin_password = "your-strong-grafana-password"
+
+# Storage
+prometheus_storage_size = "20Gi"
+loki_storage_size       = "20Gi"
+tempo_storage_size      = "20Gi"
+
+# Retention
+metrics_retention_days = 30
+
+# Resource limits
+monitoring_cpu_request    = "200m"
+monitoring_memory_request = "512Mi"
+monitoring_cpu_limit      = "1"
+monitoring_memory_limit   = "2Gi"
+
+#==============================================================================
+# MIGRATIONS
+#==============================================================================
+
+migration_image_tag = "latest"
+
+#==============================================================================
+# JWT CONFIGURATION
+#==============================================================================
+
+# Control Plane JWT (CHANGE THIS!)
+jwt_secret     = "your-jwt-secret-32-characters-minimum"
+jwt_issuer     = "ananta-platform"
+jwt_expires_in = "24h"
+
+#==============================================================================
+# CONTROL PLANE SERVICES
+#==============================================================================
+
+# Docker images
+tenant_management_image = "ananta/tenant-management-service:latest"
+orchestrator_image      = "ananta/orchestrator-service:latest"
+subscription_image      = "ananta/subscription-service:latest"
+temporal_worker_image   = "ananta/temporal-worker-service:latest"
+
+# Replicas
+tenant_management_replicas = 2
+orchestrator_replicas      = 2
+subscription_replicas      = 2
+temporal_worker_replicas_cp = 3
+
+# Resource limits
+control_plane_cpu_request    = "200m"
+control_plane_memory_request = "512Mi"
+control_plane_cpu_limit      = "1"
+control_plane_memory_limit   = "2Gi"
+
+#==============================================================================
+# APP PLANE SERVICES
+#==============================================================================
+
+# Docker images
+cns_service_image        = "ananta/cns-service:latest"
+enrichment_service_image = "ananta/enrichment-service:latest"
+bom_service_image        = "ananta/bom-service:latest"
+analytics_service_image  = "ananta/analytics-service:latest"
+
+# Replicas
+cns_service_replicas        = 2
+enrichment_service_replicas = 3
+bom_service_replicas        = 2
+analytics_service_replicas  = 2
+
+# Resource limits
+app_plane_cpu_request    = "200m"
+app_plane_memory_request = "512Mi"
+app_plane_cpu_limit      = "1"
+app_plane_memory_limit   = "2Gi"
+
+#==============================================================================
+# FRONTEND APPLICATIONS
+#==============================================================================
+
+# Docker images
+admin_app_image         = "ananta/admin-app:latest"
+customer_portal_image   = "ananta/customer-portal:latest"
+backstage_portal_image  = "ananta/backstage-portal:latest"
+cns_dashboard_image     = "ananta/cns-dashboard:latest"
+dashboard_image         = "ananta/dashboard:latest"
+
+# Replicas
+admin_app_replicas         = 2
+customer_portal_replicas   = 2
+backstage_portal_replicas  = 2
+cns_dashboard_replicas     = 2
+dashboard_replicas         = 2
+
+# Resource limits
+frontend_cpu_request    = "100m"
+frontend_memory_request = "256Mi"
+frontend_cpu_limit      = "500m"
+frontend_memory_limit   = "1Gi"
+
+#==============================================================================
+# ARGOCD (GitOps)
+#==============================================================================
+
+argocd_version = "v2.9.0"
+
+# Admin password (CHANGE THIS!)
+argocd_admin_password = "your-strong-argocd-password"
+
+# Git repository configuration
+argocd_git_repo_url    = "https://github.com/your-org/ananta-platform-saas.git"
+argocd_git_repo_path   = "infrastructure/gitops"
+argocd_git_repo_branch = "main"
+
+# Git credentials secret (must exist in argocd namespace)
+argocd_git_credentials_secret = "argocd-git-creds"
+
+# Auto-sync (set to true in prod after testing)
+argocd_auto_sync = false
+
+# Notifications
+argocd_enable_notifications = true
+argocd_slack_webhook        = ""  # Optional: Add Slack webhook URL
+
+# Resource limits
+argocd_cpu_request    = "200m"
+argocd_memory_request = "512Mi"
+argocd_cpu_limit      = "1"
+argocd_memory_limit   = "2Gi"
+
+#==============================================================================
+# NOTES
+#==============================================================================
+
+# SECURITY CHECKLIST:
+# [ ] Change ALL passwords and secrets above
+# [ ] Use a secrets manager (Vault, AWS Secrets Manager, etc.) for production
+# [ ] Enable TLS for all services
+# [ ] Configure proper ingress rules
+# [ ] Set up monitoring alerts
+# [ ] Configure backup schedules
+# [ ] Review resource limits for your cluster size
+# [ ] Update domain_name to your actual domain
+# [ ] Configure proper storage classes for your cloud provider
+# [ ] Set up ArgoCD git credentials
+# [ ] Import Keycloak realm configuration after deployment
+
+# RESOURCE SCALING:
+# Development (docker-desktop):
+#   - Use default values in this file
+#   - Single replicas for most services
+#   - Reduced resource limits
+#
+# Staging:
+#   - Increase replicas to 2
+#   - Enable high availability features
+#   - Increase storage sizes
+#
+# Production:
+#   - 3+ replicas for critical services
+#   - Enable all HA features
+#   - Use cloud-native storage classes
+#   - Enable backups and disaster recovery
+#   - Use remote state backend (S3, GCS, Azure Blob)
+
+# DEPLOYMENT ORDER:
+# 1. terraform init
+# 2. terraform plan -out=tfplan
+# 3. terraform apply tfplan
+# 4. Wait for all pods to be ready (can take 10-15 minutes)
+# 5. Import Keycloak realm: infrastructure/keycloak/realm-ananta.json
+# 6. Access services via ingress or port-forward

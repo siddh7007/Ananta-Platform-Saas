@@ -1,0 +1,48 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: postgresql
+  namespace: argocd
+  labels:
+    app.kubernetes.io/component: database
+spec:
+  project: ananta-platform
+
+  source:
+    repoURL: https://charts.bitnami.com/bitnami
+    targetRevision: 16.4.0
+    chart: postgresql
+    helm:
+      releaseName: postgresql
+      values: |
+        fullnameOverride: postgresql
+        image:
+          tag: "16"
+        auth:
+          postgresPassword: "localdev123"
+          username: ananta
+          password: "localdev123"
+          database: ananta
+        primary:
+          persistence:
+            enabled: false
+          resources:
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+            requests:
+              cpu: 250m
+              memory: 256Mi
+        readReplicas:
+          replicaCount: 0
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: database-system
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true

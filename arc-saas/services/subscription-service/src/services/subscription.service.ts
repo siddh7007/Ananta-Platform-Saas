@@ -606,10 +606,12 @@ export class SubscriptionService {
 
     const plan = await this.planRepository.findById(subscription.planId);
 
+    // Cast to satisfy TypeScript - the spread creates a plain object
+    // but the model methods are not required for the return type
     return {
       ...subscription,
       plan,
-    };
+    } as Subscription & {plan: Plan};
   }
 
   // ============================================

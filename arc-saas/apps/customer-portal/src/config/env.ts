@@ -6,7 +6,7 @@ export const env = {
   keycloak: {
     url: import.meta.env.VITE_KEYCLOAK_URL || 'http://localhost:8180',
     realm: import.meta.env.VITE_KEYCLOAK_REALM || 'ananta-saas',
-    clientId: import.meta.env.VITE_KEYCLOAK_CLIENT_ID || 'cbp-frontend',
+    clientId: import.meta.env.VITE_KEYCLOAK_CLIENT_ID || 'customer-portal',
   },
 
   // API URLs
@@ -32,9 +32,17 @@ export const env = {
     mockData: import.meta.env.VITE_ENABLE_MOCK_DATA === 'true',
   },
 
+  // Auth overrides (development only)
+  auth: {
+    superAdminEmails: (import.meta.env.VITE_SUPER_ADMIN_EMAILS || '')
+      .split(',')
+      .map((email: string) => email.trim().toLowerCase())
+      .filter(Boolean),
+  },
+
   // App Info
   app: {
-    name: import.meta.env.VITE_APP_NAME || 'Component Platform',
+    name: import.meta.env.VITE_APP_NAME || 'Ananta Platform',
     version: import.meta.env.VITE_APP_VERSION || '0.1.0',
   },
 

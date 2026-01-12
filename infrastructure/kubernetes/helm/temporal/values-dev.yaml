@@ -1,0 +1,47 @@
+# Development environment overrides
+server:
+  replicaCount: 1
+  frontend:
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+  history:
+    replicaCount: 1
+  matching:
+    replicaCount: 1
+  worker:
+    replicaCount: 1
+
+web:
+  replicaCount: 1
+  ingress:
+    hosts:
+      - host: temporal-dev.ananta.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: temporal-ui-dev-tls
+        hosts:
+          - temporal-dev.ananta.local
+
+postgresql:
+  host: postgres-dev.database-system.svc.cluster.local
+
+elasticsearch:
+  enabled: false
+
+podDisruptionBudget:
+  enabled: false
+
+namespaces:
+  - name: default
+    retention: 3d
+  - name: arc-saas
+    retention: 7d
+  - name: enrichment
+    retention: 7d

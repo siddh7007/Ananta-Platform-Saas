@@ -1,0 +1,108 @@
+# =============================================================================
+# ArgoCD Application - Temporal Worker Service
+# =============================================================================
+# Temporal workflow workers for tenant provisioning and automation
+# =============================================================================
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: temporal-worker-service
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: temporal-worker-service
+    app.kubernetes.io/component: worker
+    app.kubernetes.io/part-of: control-plane
+    environment: '{{.Values.environment}}'
+  annotations:
+    argocd.argoproj.io/sync-wave: "15"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: ananta-platform
+
+  source:
+    repoURL: https://github.com/ananta-platform/ananta-platform-saas.git
+    targetRevision: HEAD
+    path: infrastructure/kubernetes/helm/temporal-worker-service
+
+    helm:
+      releaseName: temporal-worker-service
+      valueFiles:
+        - values.yaml
+        - values-{{.Values.environment}}.yaml
+
+      values: |
+        fullnameOverride: temporal-worker-service
+
+        image:
+          repository: ghcr.io/ananta-platform/temporal-worker-service
+          pullPolicy: IfNotPresent
+
+        # No HTTP service - workers connect to Temporal
+        service:
+          enabled: false
+
+        # Worker configuration
+        worker:
+          taskQueue: tenant-provisioning
+          namespace: arc-saas
+          maxConcurrentActivities: 10
+          maxConcurrentWorkflows: 100
+
+        resources:
+          requests:
+            cpu: 200m
+            memory: 512Mi
+          limits:
+            cpu: 1000m
+            memory: 1Gi
+
+        autoscaling:
+          enabled: true
+          minReplicas: 2
+          maxReplicas: 20
+          targetCPUUtilizationPercentage: 60
+
+        # Connect to shared Temporal
+        temporal:
+          address: temporal.temporal-system.svc.cluster.local:7233
+          namespace: arc-saas
+          taskQueue: tenant-provisioning
+
+        configMap:
+          LOG_LEVEL: info
+          NODE_ENV: production
+
+        secrets:
+          existingSecret: temporal-worker-secrets
+
+        serviceMonitor:
+          enabled: true
+          interval: 30s
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ananta-{{.Values.environment}}
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  revisionHistoryLimit: 10
+
+  info:
+    - name: Documentation
+      value: https://docs.ananta-platform.io/services/temporal-worker
+    - name: Team
+      value: platform-team

@@ -304,8 +304,19 @@ async def get_current_user(
     auth0_user_id = claims.get("sub")
     email = claims.get("email")
 
-    # Auth0 access tokens don't include email by default, only ID tokens do.
-    # Fall back to X-User-Email header sent by frontend.
+    # Try multiple fallbacks for email:
+    # 1. Standard email claim (Auth0 ID tokens, some Keycloak configs)
+    # 2. preferred_username (Keycloak default - often the email)
+    # 3. X-User-Email header sent by frontend
+    if not email:
+        # Keycloak often uses preferred_username as the email
+        email = claims.get("preferred_username")
+        if email and "@" in email:
+            logger.info(f"[Auth] Email from preferred_username claim: {email}")
+        elif email:
+            # preferred_username exists but isn't an email - clear it
+            email = None
+
     if not email:
         email = request.headers.get("X-User-Email")
         if email:
@@ -317,11 +328,19 @@ async def get_current_user(
             detail="Invalid token: missing sub claim"
         )
 
+    # For staff/platform users, email is optional - use a placeholder
+    # This allows super_admin users without email in token to authenticate
     if not email:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token: missing email claim (provide X-User-Email header or configure Auth0 to include email in access token)"
-        )
+        # Check if this is a staff user (from auth middleware context)
+        auth_context = getattr(request.state, 'auth_context', None)
+        if auth_context and auth_context.role in ('super_admin', 'platform_admin', 'staff'):
+            email = f"{auth0_user_id}@platform.internal"
+            logger.info(f"[Auth] Using placeholder email for staff user: {email}")
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token: missing email claim (provide X-User-Email header or configure Auth0/Keycloak to include email in access token)"
+            )
 
     # Look up or provision user
     with get_supabase_session() as session:

@@ -21,7 +21,7 @@ import {
   Storage as StorageIcon,
   CloudQueue as CloudQueueIcon,
 } from '@mui/icons-material';
-import { CNS_API_BASE_URL, getAuthHeaders } from '../config/api';
+import { CNS_API_BASE_URL, getAuthHeadersAsync } from '../config/api';
 import { qualityColors, enrichmentStatusColors } from '../theme';
 import { WorkspaceLayout, Panel, GridLayout, StackLayout } from '../layout';
 import { PageHeader, ErrorBoundary } from '../components/shared';
@@ -146,8 +146,11 @@ export const AnalyticsDashboard: React.FC = () => {
       setLoading(true);
       setError(null);
 
+      // Wait for Keycloak authentication to complete before making API calls
+      const headers = await getAuthHeadersAsync();
+
       const response = await fetch(`${CNS_API_BASE_URL}/analytics/dashboard?days=${days}`, {
-        headers: getAuthHeaders(),
+        headers,
       });
 
       if (!response.ok) {

@@ -1,0 +1,83 @@
+---
+# Subscription Service Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: subscription-service
+  namespace: control-plane
+  labels:
+    app: subscription-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: subscription-service
+  template:
+    metadata:
+      labels:
+        app: subscription-service
+    spec:
+      containers:
+        - name: subscription-service
+          image: ananta/subscription-service:local
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 3002
+              name: http
+          env:
+            - name: NODE_ENV
+              value: "development"
+            - name: PORT
+              value: "3002"
+            - name: HOST
+              value: "0.0.0.0"
+            - name: DB_HOST
+              value: "postgresql.database-system.svc.cluster.local"
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_DATABASE
+              value: "ananta"
+            - name: DB_USER
+              value: "postgres"
+            - name: DB_PASSWORD
+              value: "localdev123"
+            - name: DB_SCHEMA
+              value: "main"
+            - name: REDIS_HOST
+              value: "redis.cache-system.svc.cluster.local"
+            - name: REDIS_PORT
+              value: "6379"
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 256Mi
+          readinessProbe:
+            httpGet:
+              path: /ping
+              port: 3002
+            initialDelaySeconds: 10
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /ping
+              port: 3002
+            initialDelaySeconds: 30
+            periodSeconds: 10
+---
+# Subscription Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: subscription-service
+  namespace: control-plane
+spec:
+  selector:
+    app: subscription-service
+  ports:
+    - port: 3002
+      targetPort: 3002
+      name: http
+  type: ClusterIP

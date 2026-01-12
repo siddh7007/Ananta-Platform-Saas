@@ -1,0 +1,128 @@
+# =============================================================================
+# ArgoCD Application - Novu
+# =============================================================================
+# Open-source notification infrastructure
+# =============================================================================
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: novu-dev
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: novu
+    app.kubernetes.io/component: notifications
+    app.kubernetes.io/part-of: infrastructure
+    environment: dev
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: ananta-platform
+
+  source:
+    repoURL: https://github.com/ananta-platform/ananta-platform-saas.git
+    targetRevision: develop
+    path: infrastructure/kubernetes/helm/novu
+
+    helm:
+      releaseName: novu
+      valueFiles:
+        - values.yaml
+        - values-dev.yaml
+
+      values: |
+        api:
+          replicaCount: 2
+          image:
+            repository: ghcr.io/novuhq/novu/api
+            tag: 0.21.0
+
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+
+          env:
+            NODE_ENV: production
+            PORT: "3000"
+
+        worker:
+          replicaCount: 2
+          image:
+            repository: ghcr.io/novuhq/novu/worker
+            tag: 0.21.0
+
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              cpu: 1000m
+              memory: 1Gi
+
+        ws:
+          replicaCount: 2
+          image:
+            repository: ghcr.io/novuhq/novu/ws
+            tag: 0.21.0
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+
+        web:
+          replicaCount: 2
+          image:
+            repository: ghcr.io/novuhq/novu/web
+            tag: 0.21.0
+
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+
+        redis:
+          enabled: false
+          external:
+            host: redis-master.cache-system.svc.cluster.local
+
+        mongodb:
+          enabled: false
+          external:
+            connectionString: mongodb://mongodb.database-system.svc.cluster.local:27017/novu
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: novu-system
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 5m
+
+  revisionHistoryLimit: 5
+
+  info:
+    - name: Documentation
+      value: https://docs.novu.co/

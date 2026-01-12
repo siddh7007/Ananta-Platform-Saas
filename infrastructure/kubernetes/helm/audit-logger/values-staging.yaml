@@ -1,0 +1,11 @@
+replicaCount: 2
+ingress:
+  hosts:
+    - host: audit-staging.ananta.io
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: audit-logger-staging-tls
+      hosts:
+        - audit-staging.ananta.io

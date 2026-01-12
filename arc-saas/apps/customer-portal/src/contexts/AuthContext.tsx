@@ -8,6 +8,7 @@ import {
   validateExpiration,
   AppRole,
 } from '@/config/auth';
+import { env } from '@/config/env';
 
 interface AuthUser {
   id: string;
@@ -89,7 +90,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
     // Validate audience claim - CRITICAL for security
     // Token must include cbp-frontend, cns-api, or account
-    const audValidation = validateAudience(accessTokenPayload.aud as string | string[] | undefined);
+    // Also check azp (authorized party) as fallback - Keycloak uses this for the requesting client
+    const audValidation = validateAudience(
+      accessTokenPayload.aud as string | string[] | undefined,
+      accessTokenPayload.azp as string | undefined
+    );
     if (!audValidation.valid) {
       console.error('[Auth] Audience validation failed:', audValidation.error);
       setAuthError({
@@ -100,15 +105,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
     }
 
     if (import.meta.env.DEV) {
-      console.debug('[Auth] Token validated - aud:', accessTokenPayload.aud);
+      console.debug('[Auth] Token validated - aud:', accessTokenPayload.aud, 'azp:', accessTokenPayload.azp);
     }
 
-    const role = parseKeycloakRoles({
+    let role = parseKeycloakRoles({
       realm_access: accessTokenPayload?.realm_access as { roles?: string[] } | undefined,
       resource_access: accessTokenPayload?.resource_access as Record<string, { roles?: string[] }> | undefined,
       roles: idTokenPayload?.roles as string[] | undefined,
       groups: idTokenPayload?.groups as string[] | undefined,
     });
+
+    const email = (idTokenPayload.email || '').toLowerCase();
+    if (email && env.auth.superAdminEmails.includes(email)) {
+      role = 'super_admin';
+    }
 
     // Clear any previous auth errors on successful validation
     setAuthError(null);

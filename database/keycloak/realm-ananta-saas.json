@@ -1,0 +1,672 @@
+{
+  "realm": "ananta-saas",
+  "enabled": true,
+  "displayName": "Ananta SaaS Platform",
+  "displayNameHtml": "<div class=\"kc-logo-text\"><span>Ananta SaaS</span></div>",
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": true,
+  "permanentLockout": false,
+  "maxFailureWaitSeconds": 900,
+  "minimumQuickLoginWaitSeconds": 60,
+  "waitIncrementSeconds": 60,
+  "quickLoginCheckMilliSeconds": 1000,
+  "maxDeltaTimeSeconds": 43200,
+  "failureFactor": 5,
+  "defaultSignatureAlgorithm": "RS256",
+  "accessTokenLifespan": 300,
+  "accessTokenLifespanForImplicitFlow": 900,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "offlineSessionIdleTimeout": 2592000,
+  "accessCodeLifespan": 60,
+  "accessCodeLifespanUserAction": 300,
+  "accessCodeLifespanLogin": 1800,
+  "actionTokenGeneratedByAdminLifespan": 43200,
+  "actionTokenGeneratedByUserLifespan": 300,
+  "roles": {
+    "realm": [
+      {
+        "name": "super_admin",
+        "description": "Platform administrator with full access",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "owner",
+        "description": "Organization owner with billing access",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "admin",
+        "description": "Organization admin for user management",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "engineer",
+        "description": "Technical user for managing BOMs and components",
+        "composite": false,
+        "clientRole": false
+      },
+      {
+        "name": "analyst",
+        "description": "Read-only user for viewing data and reports",
+        "composite": false,
+        "clientRole": false
+      }
+    ],
+    "client": {
+      "ananta-saas-admin": [
+        {
+          "name": "manage-realm",
+          "description": "Manage realm configuration",
+          "composite": false,
+          "clientRole": true
+        }
+      ]
+    }
+  },
+  "groups": [
+    {
+      "name": "Platform Admins",
+      "path": "/Platform Admins",
+      "realmRoles": ["super_admin"]
+    },
+    {
+      "name": "Organization Owners",
+      "path": "/Organization Owners",
+      "realmRoles": ["owner"]
+    },
+    {
+      "name": "Organization Admins",
+      "path": "/Organization Admins",
+      "realmRoles": ["admin"]
+    },
+    {
+      "name": "Engineers",
+      "path": "/Engineers",
+      "realmRoles": ["engineer"]
+    },
+    {
+      "name": "Analysts",
+      "path": "/Analysts",
+      "realmRoles": ["analyst"]
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "ananta-saas-admin",
+      "name": "Ananta SaaS Admin Portal",
+      "description": "Admin application for platform management",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "authorizationServicesEnabled": false,
+      "fullScopeAllowed": true,
+      "rootUrl": "http://localhost:27555",
+      "baseUrl": "/",
+      "adminUrl": "",
+      "redirectUris": [
+        "http://localhost:27555/*",
+        "http://localhost:14000/*",
+        "http://localhost:3000/*"
+      ],
+      "webOrigins": [
+        "http://localhost:27555",
+        "http://localhost:14000",
+        "http://localhost:3000"
+      ],
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "email"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access",
+        "microprofile-jwt"
+      ],
+      "protocolMappers": [
+        {
+          "name": "tenant-id-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "tenant_id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "tenant_id",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "ananta-saas-api",
+      "name": "Ananta SaaS Backend API",
+      "description": "Backend API service",
+      "enabled": true,
+      "publicClient": false,
+      "bearerOnly": true,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "fullScopeAllowed": true
+    },
+    {
+      "clientId": "ananta-saas-customer-portal",
+      "name": "Customer Portal (Legacy)",
+      "description": "Customer-facing portal (legacy client ID)",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": true,
+      "rootUrl": "http://localhost:27100",
+      "redirectUris": [
+        "http://localhost:27100/*"
+      ],
+      "webOrigins": [
+        "http://localhost:27100"
+      ],
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "email"
+      ]
+    },
+    {
+      "clientId": "cbp-frontend",
+      "name": "Customer Business Portal Frontend",
+      "description": "Customer Portal SPA (arc-saas/apps/customer-portal)",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "authorizationServicesEnabled": false,
+      "fullScopeAllowed": true,
+      "rootUrl": "http://localhost:27100",
+      "baseUrl": "/",
+      "adminUrl": "",
+      "redirectUris": [
+        "http://localhost:27100/*",
+        "http://localhost:27100/authentication/callback",
+        "http://localhost:27100/silent-refresh.html"
+      ],
+      "webOrigins": [
+        "http://localhost:27100",
+        "+"
+      ],
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "email",
+        "tenant"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access",
+        "microprofile-jwt"
+      ],
+      "protocolMappers": [
+        {
+          "name": "tenant-id-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "tenant_id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "tenant_id",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "tenant-key-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "tenant_key",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "tenant_key",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "audience-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "cbp-frontend",
+            "id.token.claim": "true",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "admin-app",
+      "name": "Admin App (Default)",
+      "description": "Admin application using default client ID (arc-saas/apps/admin-app)",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "authorizationServicesEnabled": false,
+      "fullScopeAllowed": true,
+      "rootUrl": "http://localhost:27555",
+      "baseUrl": "/",
+      "adminUrl": "",
+      "redirectUris": [
+        "http://localhost:27555/*",
+        "http://localhost:27555/authentication/callback",
+        "http://localhost:14000/*",
+        "http://localhost:3000/*"
+      ],
+      "webOrigins": [
+        "http://localhost:27555",
+        "http://localhost:14000",
+        "http://localhost:3000",
+        "+"
+      ],
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "email",
+        "tenant"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access",
+        "microprofile-jwt"
+      ],
+      "protocolMappers": [
+        {
+          "name": "tenant-id-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "tenant_id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "tenant_id",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "tenant-key-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "tenant_key",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "tenant_key",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "audience-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "admin-app",
+            "id.token.claim": "true",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "clientScopes": [
+    {
+      "name": "roles",
+      "description": "OpenID Connect scope for add user roles to the access token",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "true",
+        "consent.screen.text": "${rolesScopeConsentText}"
+      },
+      "protocolMappers": [
+        {
+          "name": "realm roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "realm_access.roles",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "client roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-client-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "multivalued": "true",
+            "userinfo.token.claim": "true",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "resource_access.${client_id}.roles",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    },
+    {
+      "name": "tenant",
+      "description": "Tenant context scope",
+      "protocol": "openid-connect",
+      "attributes": {
+        "include.in.token.scope": "true",
+        "display.on.consent.screen": "false"
+      },
+      "protocolMappers": [
+        {
+          "name": "tenant_id",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "tenant_id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "tenant_id",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "tenant_key",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "tenant_key",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "tenant_key",
+            "jsonType.label": "String"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "id": "c0000000-0000-0000-0000-000000000001",
+      "username": "superadmin",
+      "email": "superadmin@ananta.dev",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Platform",
+      "lastName": "Admin",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Test1234!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["super_admin"],
+      "groups": ["/Platform Admins"],
+      "attributes": {
+        "tenant_id": ["a0000000-0000-0000-0000-000000000001"],
+        "tenant_key": ["platform"]
+      }
+    },
+    {
+      "id": "c0000000-0000-0000-0000-000000000002",
+      "username": "cns-lead",
+      "email": "cns-lead@ananta.dev",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "CNS",
+      "lastName": "Lead",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Test1234!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["owner"],
+      "groups": ["/Organization Owners"],
+      "attributes": {
+        "tenant_id": ["a0000000-0000-0000-0000-000000000002"],
+        "tenant_key": ["cns-staff"]
+      }
+    },
+    {
+      "id": "c0000000-0000-0000-0000-000000000003",
+      "username": "cns-engineer",
+      "email": "cns-engineer@ananta.dev",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "CNS",
+      "lastName": "Engineer",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Test1234!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["engineer"],
+      "groups": ["/Engineers"],
+      "attributes": {
+        "tenant_id": ["a0000000-0000-0000-0000-000000000002"],
+        "tenant_key": ["cns-staff"]
+      }
+    },
+    {
+      "id": "c0000000-0000-0000-0000-000000000004",
+      "username": "demo-owner",
+      "email": "demo-owner@example.com",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Demo",
+      "lastName": "Owner",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Test1234!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["owner"],
+      "groups": ["/Organization Owners"],
+      "attributes": {
+        "tenant_id": ["a0000000-0000-0000-0000-000000000000"],
+        "tenant_key": ["demo-org"]
+      }
+    },
+    {
+      "id": "c0000000-0000-0000-0000-000000000005",
+      "username": "demo-engineer",
+      "email": "demo-engineer@example.com",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Demo",
+      "lastName": "Engineer",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Test1234!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["engineer"],
+      "groups": ["/Engineers"],
+      "attributes": {
+        "tenant_id": ["a0000000-0000-0000-0000-000000000000"],
+        "tenant_key": ["demo-org"]
+      }
+    },
+    {
+      "id": "c0000000-0000-0000-0000-000000000010",
+      "username": "cbpadmin",
+      "email": "cbpadmin@ananta.dev",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "CBP",
+      "lastName": "Admin",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Test1234!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["super_admin"],
+      "groups": ["/Platform Admins"],
+      "attributes": {
+        "tenant_id": ["a0000000-0000-0000-0000-000000000001"],
+        "tenant_key": ["platform"]
+      }
+    },
+    {
+      "id": "c0000000-0000-0000-0000-000000000011",
+      "username": "cnsstaff",
+      "email": "cnsstaff@ananta.dev",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "CNS",
+      "lastName": "Staff",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Test1234!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["engineer"],
+      "groups": ["/Engineers"],
+      "attributes": {
+        "tenant_id": ["a0000000-0000-0000-0000-000000000002"],
+        "tenant_key": ["cns-staff"]
+      }
+    },
+    {
+      "id": "c0000000-0000-0000-0000-000000000012",
+      "username": "backstage-admin",
+      "email": "backstage-admin@ananta.dev",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Backstage",
+      "lastName": "Admin",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Test1234!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["admin"],
+      "groups": ["/Organization Admins"],
+      "attributes": {
+        "tenant_id": ["a0000000-0000-0000-0000-000000000001"],
+        "tenant_key": ["platform"]
+      }
+    },
+    {
+      "id": "c0000000-0000-0000-0000-000000000013",
+      "username": "demo-analyst",
+      "email": "demo-analyst@example.com",
+      "enabled": true,
+      "emailVerified": true,
+      "firstName": "Demo",
+      "lastName": "Analyst",
+      "credentials": [
+        {
+          "type": "password",
+          "value": "Test1234!",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["analyst"],
+      "groups": ["/Analysts"],
+      "attributes": {
+        "tenant_id": ["a0000000-0000-0000-0000-000000000000"],
+        "tenant_key": ["demo-org"]
+      }
+    }
+  ],
+  "identityProviders": [],
+  "components": {
+    "org.keycloak.keys.KeyProvider": [
+      {
+        "name": "rsa-generated",
+        "providerId": "rsa-generated",
+        "subComponents": {},
+        "config": {
+          "priority": ["100"],
+          "keySize": ["2048"]
+        }
+      },
+      {
+        "name": "hmac-generated",
+        "providerId": "hmac-generated",
+        "subComponents": {},
+        "config": {
+          "priority": ["100"],
+          "algorithm": ["HS256"]
+        }
+      }
+    ]
+  },
+  "browserSecurityHeaders": {
+    "contentSecurityPolicyReportOnly": "",
+    "xContentTypeOptions": "nosniff",
+    "xRobotsTag": "none",
+    "xFrameOptions": "SAMEORIGIN",
+    "contentSecurityPolicy": "frame-src 'self'; frame-ancestors 'self'; object-src 'none';",
+    "xXSSProtection": "1; mode=block",
+    "strictTransportSecurity": "max-age=31536000; includeSubDomains"
+  }
+}
+

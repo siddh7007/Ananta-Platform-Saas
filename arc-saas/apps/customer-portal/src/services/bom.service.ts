@@ -84,23 +84,27 @@ export async function uploadBom(request: BomUploadRequest): Promise<BomUploadRes
     throw new Error('No tenant/organization selected. Please select a tenant before uploading.');
   }
 
+  if (!request.projectId) {
+    console.error('[bom.service] No project_id provided - required for unified BOM upload flow');
+    throw new Error('Project ID is required for BOM upload. Please select a project.');
+  }
+
   const formData = new FormData();
   formData.append('file', request.file);
-  formData.append('organization_id', organizationId);
-  console.log('[bom.service] FormData organization_id appended:', organizationId);
-  if (request.name) formData.append('name', request.name);
+  // Note: organization_id is derived server-side from project validation, no need to send it
+  if (request.name) formData.append('bom_name', request.name);
   if (request.description) formData.append('description', request.description);
-  if (request.projectId) {
-    formData.append('project_id', request.projectId);
-    console.log('[bom.service] FormData project_id appended:', request.projectId);
-  } else {
-    console.warn('[bom.service] No project_id provided - BOM will use default project assignment');
-  }
+  // Add start_enrichment flag (default: true for automatic workflow start)
+  formData.append('start_enrichment', 'true');
+  console.log('[bom.service] Using unified upload endpoint for project:', request.projectId);
 
   // Don't set Content-Type header manually - let axios detect FormData and set it
   // with the proper multipart/form-data boundary. Setting it manually without
   // the boundary causes the server to fail to parse the form fields.
-  const response = await cnsApi.post('/boms/upload', formData, {
+
+  // UNIFIED ENDPOINT: /boms/projects/{project_id}/boms/upload
+  // This endpoint handles the complete workflow: parse → S3 storage → DB insert → Temporal workflow trigger
+  const response = await cnsApi.post(`/boms/projects/${request.projectId}/boms/upload`, formData, {
     timeout: 60000, // 60 second timeout for file uploads
   });
 

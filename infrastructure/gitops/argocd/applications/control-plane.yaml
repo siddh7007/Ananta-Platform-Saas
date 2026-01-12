@@ -1,0 +1,45 @@
+# =============================================================================
+# ArgoCD Application - Control Plane
+# =============================================================================
+# This application manages the control-plane namespace including:
+# - Tenant Management Service
+# - Temporal Worker Service
+# - Admin App
+# - Keycloak
+# - Temporal
+# =============================================================================
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: control-plane
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: ananta-platform
+    environment: local
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: ananta-platform
+
+  source:
+    repoURL: https://github.com/siddh7007/Ananta-Platform-Saas.git
+    targetRevision: main
+    path: infrastructure/kubernetes/control-plane
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: control-plane
+
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m

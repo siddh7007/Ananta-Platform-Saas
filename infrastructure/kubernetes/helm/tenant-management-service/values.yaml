@@ -1,0 +1,219 @@
+# =============================================================================
+# Default values for tenant-management-service
+# =============================================================================
+
+replicaCount: 2
+
+image:
+  repository: ghcr.io/ananta-platform/tenant-management-service
+  pullPolicy: IfNotPresent
+  tag: ""  # Overrides the image tag whose default is the chart appVersion
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: "tenant-management-service"
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "14000"
+  prometheus.io/path: "/metrics"
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+
+service:
+  type: ClusterIP
+  port: 14000
+  targetPort: 14000
+  annotations: {}
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "50m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+  hosts:
+    - host: api.ananta.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: tenant-management-tls
+      hosts:
+        - api.ananta.local
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - tenant-management-service
+          topologyKey: kubernetes.io/hostname
+
+# Liveness probe
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 14000
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  successThreshold: 1
+  failureThreshold: 3
+
+# Readiness probe
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 14000
+  initialDelaySeconds: 10
+  periodSeconds: 5
+  timeoutSeconds: 3
+  successThreshold: 1
+  failureThreshold: 3
+
+# Startup probe (for slow-starting apps)
+startupProbe:
+  httpGet:
+    path: /health
+    port: 14000
+  initialDelaySeconds: 0
+  periodSeconds: 10
+  timeoutSeconds: 3
+  successThreshold: 1
+  failureThreshold: 30
+
+# Environment variables from ConfigMap
+configMap:
+  LOG_LEVEL: info
+  NODE_ENV: production
+  PORT: "14000"
+  HOST: "0.0.0.0"
+
+# Secret management
+secrets:
+  # Use existing secret created separately
+  existingSecret: "tenant-management-secrets"
+  # Or define inline (not recommended for production)
+  create: false
+  data: {}
+
+# Database configuration
+database:
+  host: postgres.database-system.svc.cluster.local
+  port: 5432
+  database: arc_saas
+  # Credentials come from secrets
+
+# Redis configuration
+redis:
+  host: redis.cache-system.svc.cluster.local
+  port: 6379
+
+# Temporal configuration
+temporal:
+  address: temporal.temporal-system.svc.cluster.local:7233
+  namespace: arc-saas
+  taskQueue: tenant-provisioning
+
+# Keycloak configuration
+keycloak:
+  url: https://auth.ananta.local
+  realm: ananta
+  clientId: tenant-management-service
+
+# Novu configuration
+novu:
+  apiUrl: https://api.novu.co
+  # API key comes from secrets
+
+# Service Monitor for Prometheus
+serviceMonitor:
+  enabled: true
+  interval: 30s
+  scrapeTimeout: 10s
+  labels: {}
+  honorLabels: true
+
+# Pod Disruption Budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Volume mounts for tmp and cache
+volumes:
+  - name: tmp
+    emptyDir: {}
+  - name: cache
+    emptyDir: {}
+
+volumeMounts:
+  - name: tmp
+    mountPath: /tmp
+  - name: cache
+    mountPath: /app/.cache
+
+# Extra environment variables
+extraEnv: []
+# - name: CUSTOM_VAR
+#   value: "value"
+
+# Extra environment from secrets/configmaps
+extraEnvFrom: []
+# - secretRef:
+#     name: extra-secrets
+
+# Init containers
+initContainers: []
+# - name: wait-for-db
+#   image: busybox:1.35
+#   command: ['sh', '-c', 'until nc -z postgres 5432; do echo waiting for db; sleep 2; done;']
+
+# Sidecar containers
+sidecars: []

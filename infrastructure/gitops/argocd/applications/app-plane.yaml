@@ -1,0 +1,92 @@
+# =============================================================================
+# ArgoCD Application - App Plane
+# =============================================================================
+# This application manages the entire app-plane namespace including:
+# - Databases (Supabase DB, Components DB)
+# - Cache (Redis)
+# - Message Queue (RabbitMQ with Stream)
+# - Object Storage (MinIO)
+# - Services (CNS Service, Customer Portal, Supabase API)
+# =============================================================================
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: app-plane
+  namespace: argocd
+  labels:
+    app.kubernetes.io/part-of: ananta-platform
+    environment: local
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  # Source - Point to the Kubernetes manifests in the repo
+  source:
+    repoURL: https://github.com/siddh7007/Ananta-Platform-Saas.git
+    targetRevision: main
+    path: infrastructure/kubernetes/app-plane
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: app-plane
+
+  syncPolicy:
+    automated:
+      prune: false
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+---
+# =============================================================================
+# ArgoCD AppProject for Ananta Platform
+# =============================================================================
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: ananta-platform
+  namespace: argocd
+spec:
+  description: Ananta Platform SaaS Project
+
+  # Source repos allowed
+  sourceRepos:
+    - 'https://github.com/siddh7007/Ananta-Platform-Saas.git'
+    - 'https://charts.bitnami.com/bitnami'
+    - 'https://charts.min.io/'
+    - 'https://helm.releases.hashicorp.com'
+
+  # Destination clusters and namespaces
+  destinations:
+    - namespace: '*'
+      server: https://kubernetes.default.svc
+
+  # Cluster resource whitelist
+  clusterResourceWhitelist:
+    - group: '*'
+      kind: '*'
+
+  # Namespace resource whitelist
+  namespaceResourceWhitelist:
+    - group: '*'
+      kind: '*'
+
+  # Roles
+  roles:
+    - name: admin
+      description: Admin privileges on the project
+      policies:
+        - p, proj:ananta-platform:admin, applications, *, ananta-platform/*, allow
+      groups:
+        - platform-admins

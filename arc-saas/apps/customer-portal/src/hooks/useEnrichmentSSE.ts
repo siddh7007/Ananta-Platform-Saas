@@ -135,12 +135,35 @@ export function useEnrichmentSSE(
     apiLogger.info(`[SSE] Disconnected from enrichment stream for BOM ${bomId}`);
   }, [bomId, cleanup]);
 
-  // Connect to SSE stream
-  const connect = useCallback(() => {
-    const token = getAccessToken();
+  // Helper to wait for token (async retry logic)
+  const waitForToken = useCallback(async (maxWaitMs = 5000): Promise<string | null> => {
+    let token = getAccessToken();
+    if (token) return token;
+
+    // Wait briefly for token to become available (auth may be in progress)
+    const checkIntervalMs = 100;
+    let waited = 0;
+    while (!token && waited < maxWaitMs) {
+      await new Promise(resolve => setTimeout(resolve, checkIntervalMs));
+      waited += checkIntervalMs;
+      token = getAccessToken();
+    }
+
+    if (!token) {
+      console.warn(`[SSE] No token available after ${maxWaitMs}ms`);
+    }
+    return token;
+  }, [getAccessToken]);
+
+  // Connect to SSE stream (now async with token wait)
+  const connect = useCallback(async () => {
+    // Wait for token with retry logic (auth may still be initializing)
+    const token = await waitForToken();
     if (!token || !bomId) {
       console.warn('[SSE] Cannot connect: missing token or bomId', { token: !!token, bomId });
       apiLogger.warn('[SSE] Cannot connect: missing token or bomId');
+      setConnectionStatus('error');
+      setError('Authentication required');
       return;
     }
 
@@ -293,7 +316,7 @@ export function useEnrichmentSSE(
     }
   // Note: Removed isComplete/isFailed from deps - using refs instead to avoid stale closures
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bomId, bomStatus, getAccessToken, cleanup, disconnect, onProgress, onComplete, onError]);
+  }, [bomId, bomStatus, waitForToken, cleanup, disconnect, onProgress, onComplete, onError]);
 
   // Retry connection
   const retry = useCallback(() => {

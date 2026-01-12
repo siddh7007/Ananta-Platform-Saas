@@ -1,0 +1,208 @@
+# =============================================================================
+# Default values for admin-app (React Frontend)
+# =============================================================================
+
+replicaCount: 2
+
+image:
+  repository: ghcr.io/ananta-platform/admin-app
+  pullPolicy: IfNotPresent
+  tag: ""
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: "admin-app"
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 101  # nginx user
+  fsGroup: 101
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+
+service:
+  type: ClusterIP
+  port: 80
+  targetPort: 80
+  annotations: {}
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      add_header X-Frame-Options "SAMEORIGIN" always;
+      add_header X-Content-Type-Options "nosniff" always;
+      add_header X-XSS-Protection "1; mode=block" always;
+      add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+  hosts:
+    - host: admin.ananta.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: admin-app-tls
+      hosts:
+        - admin.ananta.local
+
+resources:
+  limits:
+    cpu: 200m
+    memory: 128Mi
+  requests:
+    cpu: 50m
+    memory: 64Mi
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 6
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - admin-app
+          topologyKey: kubernetes.io/hostname
+
+# Health probes for nginx
+livenessProbe:
+  httpGet:
+    path: /health
+    port: 80
+  initialDelaySeconds: 10
+  periodSeconds: 10
+  timeoutSeconds: 3
+  successThreshold: 1
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: 80
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
+  successThreshold: 1
+  failureThreshold: 3
+
+startupProbe:
+  httpGet:
+    path: /health
+    port: 80
+  initialDelaySeconds: 0
+  periodSeconds: 5
+  timeoutSeconds: 3
+  successThreshold: 1
+  failureThreshold: 12
+
+# Runtime configuration (injected as env vars at build time)
+configMap:
+  VITE_API_URL: https://api.ananta.local
+  VITE_KEYCLOAK_URL: https://auth.ananta.local
+  VITE_KEYCLOAK_REALM: ananta
+  VITE_KEYCLOAK_CLIENT_ID: admin-app
+  VITE_CUSTOMER_APP_URL: https://portal.ananta.local
+  VITE_ENABLE_WORKFLOWS: "true"
+  VITE_ENABLE_BILLING: "true"
+  VITE_ENABLE_AUDIT_LOGS: "true"
+  VITE_ENABLE_MONITORING: "true"
+
+secrets:
+  existingSecret: ""
+  create: false
+  data: {}
+
+# Service Monitor for nginx metrics (if nginx-exporter sidecar is enabled)
+serviceMonitor:
+  enabled: false
+  interval: 30s
+  scrapeTimeout: 10s
+  labels: {}
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Nginx configuration volumes
+volumes:
+  - name: tmp
+    emptyDir: {}
+  - name: cache
+    emptyDir: {}
+  - name: run
+    emptyDir: {}
+
+volumeMounts:
+  - name: tmp
+    mountPath: /tmp
+  - name: cache
+    mountPath: /var/cache/nginx
+  - name: run
+    mountPath: /var/run
+
+# Nginx config customization
+nginx:
+  config: |
+    server {
+      listen 80;
+      root /usr/share/nginx/html;
+      index index.html;
+
+      # SPA routing
+      location / {
+        try_files $uri $uri/ /index.html;
+      }
+
+      # Health check endpoint
+      location /health {
+        access_log off;
+        return 200 'OK';
+        add_header Content-Type text/plain;
+      }
+
+      # Static assets caching
+      location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+      }
+
+      # Gzip compression
+      gzip on;
+      gzip_vary on;
+      gzip_min_length 1024;
+      gzip_types text/plain text/css text/xml text/javascript application/javascript application/xml+rss application/json;
+    }
+
+extraEnv: []
+extraEnvFrom: []
+initContainers: []
+sidecars: []

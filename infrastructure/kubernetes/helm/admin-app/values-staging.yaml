@@ -1,0 +1,18 @@
+# Staging environment overrides
+replicaCount: 2
+
+ingress:
+  hosts:
+    - host: admin-staging.ananta.io
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: admin-app-staging-tls
+      hosts:
+        - admin-staging.ananta.io
+
+configMap:
+  VITE_API_URL: https://api-staging.ananta.io
+  VITE_KEYCLOAK_URL: https://auth-staging.ananta.io
+  VITE_CUSTOMER_APP_URL: https://portal-staging.ananta.io

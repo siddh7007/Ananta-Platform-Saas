@@ -7,6 +7,7 @@ interface TokenPayload {
   sub?: string; // Keycloak uses 'sub' for subject/user ID
   userTenantId?: string;
   tenantId?: string;
+  tenant_id?: string; // Keycloak uses snake_case for custom claims
   permissions?: string[];
   realm_access?: {
     roles?: string[];
@@ -86,7 +87,7 @@ export class BearerTokenVerifierProvider
           algorithms: ['HS256'],
         }) as TokenPayload;
 
-        const tenantIdValue = decoded.tenantId ?? decoded.userTenantId ?? decoded.id ?? decoded.sub;
+        const tenantIdValue = decoded.tenantId ?? decoded.tenant_id ?? decoded.userTenantId ?? decoded.id ?? decoded.sub;
         return {
           id: decoded.id ?? decoded.sub ?? '',
           username: decoded.id ?? decoded.sub ?? '',
@@ -155,7 +156,7 @@ export class BearerTokenVerifierProvider
 
         console.log(`Keycloak token verified for user: ${userId}, permissions: ${permissions.length}`);
 
-        const kcTenantId = decoded.tenantId ?? decoded.userTenantId ?? userId;
+        const kcTenantId = decoded.tenantId ?? decoded.tenant_id ?? decoded.userTenantId ?? userId;
         return {
           id: userId,
           username: userId,

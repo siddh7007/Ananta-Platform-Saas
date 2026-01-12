@@ -1,0 +1,118 @@
+---
+# Control Plane Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: control-plane
+  labels:
+    app.kubernetes.io/part-of: ananta-platform
+---
+# ConfigMap for tenant-management-service
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: tenant-management-config
+  namespace: control-plane
+data:
+  NODE_ENV: "development"
+  LOG_LEVEL: "debug"
+  PORT: "14000"
+  HOST: "0.0.0.0"
+  # Database
+  DB_HOST: "postgresql.database-system.svc.cluster.local"
+  DB_PORT: "5432"
+  DB_DATABASE: "ananta"
+  DB_USER: "postgres"
+  # Redis
+  REDIS_HOST: "redis.cache-system.svc.cluster.local"
+  REDIS_PORT: "6379"
+  # Temporal (optional - not deployed yet)
+  TEMPORAL_ADDRESS: "temporal.temporal-system.svc.cluster.local:7233"
+  TEMPORAL_NAMESPACE: "arc-saas"
+  TEMPORAL_TASK_QUEUE: "tenant-provisioning"
+  # Keycloak (mock for local)
+  KEYCLOAK_URL: "http://keycloak.auth-system.svc.cluster.local:8080"
+  KEYCLOAK_REALM: "ananta"
+  KEYCLOAK_CLIENT_ID: "tenant-management-service"
+---
+# Secret for tenant-management-service
+apiVersion: v1
+kind: Secret
+metadata:
+  name: tenant-management-secrets
+  namespace: control-plane
+type: Opaque
+stringData:
+  DB_PASSWORD: "localdev123"
+  REDIS_PASSWORD: ""
+  JWT_SECRET: "local-dev-jwt-secret-change-in-production"
+  KEYCLOAK_CLIENT_SECRET: "local-dev-secret"
+---
+# Deployment for tenant-management-service
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tenant-management-service
+  namespace: control-plane
+  labels:
+    app: tenant-management-service
+    app.kubernetes.io/name: tenant-management-service
+    app.kubernetes.io/component: api
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: tenant-management-service
+  template:
+    metadata:
+      labels:
+        app: tenant-management-service
+    spec:
+      containers:
+        - name: tenant-management-service
+          image: ananta/tenant-management-service:local
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 14000
+              name: http
+          envFrom:
+            - configMapRef:
+                name: tenant-management-config
+            - secretRef:
+                name: tenant-management-secrets
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 256Mi
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 14000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 14000
+            initialDelaySeconds: 10
+            periodSeconds: 5
+---
+# Service for tenant-management-service
+apiVersion: v1
+kind: Service
+metadata:
+  name: tenant-management-service
+  namespace: control-plane
+  labels:
+    app: tenant-management-service
+spec:
+  selector:
+    app: tenant-management-service
+  ports:
+    - port: 14000
+      targetPort: 14000
+      name: http
+  type: ClusterIP

@@ -12,6 +12,11 @@ output "address" {
   value       = "${local.cluster_name}-rw.${var.namespace}.svc.cluster.local"
 }
 
+output "host" {
+  description = "Database hostname (alias for address)"
+  value       = "${local.cluster_name}-rw.${var.namespace}.svc.cluster.local"
+}
+
 output "port" {
   description = "Database port"
   value       = 5432
@@ -95,4 +100,9 @@ output "replica_service" {
 output "pooler_service" {
   description = "Connection pooler service name"
   value       = var.create_pooler ? "${local.cluster_name}-pooler" : null
+}
+
+output "app_username" {
+  description = "Application database username"
+  value       = var.app_username
 }

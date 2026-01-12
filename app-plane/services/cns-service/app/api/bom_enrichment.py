@@ -27,7 +27,7 @@ from app.utils.activity_log import record_audit_log_entry
 from shared.event_bus import EventPublisher
 
 # CNS Projects Alignment - Scope Validation Decorators
-from app.core.scope_decorators import require_bom
+from app.core.scope_decorators import require_bom, staff_can_cross_scope
 from app.dependencies.scope_deps import get_supabase_session
 from app.auth.dependencies import get_current_user, User
 
@@ -888,6 +888,7 @@ async def delete_enrichment_job(bom_id: str):
 # ============================================================================
 
 @router.get("/boms/{bom_id}/enrichment/status")
+@staff_can_cross_scope  # Allow super_admin/platform staff to access any BOM
 @require_bom(enforce=True, log_access=True)  # Phase 2: Automatic scope validation
 async def get_enrichment_status(
     bom_id: str,  # Path parameter

@@ -1,117 +1,191 @@
 # =============================================================================
-# Network Module Outputs
+# Cloud-Agnostic Network Module Outputs
 # =============================================================================
 
+# -----------------------------------------------------------------------------
+# Common Outputs (Provider-Agnostic)
+# -----------------------------------------------------------------------------
+
 output "vpc_id" {
-  description = "The ID of the VPC"
-  value       = aws_vpc.main.id
+  description = "VPC/Network ID"
+  value = (
+    var.cloud_provider == "aws" ? try(module.aws[0].vpc_id, null) :
+    var.cloud_provider == "gcp" ? try(module.gcp[0].vpc_id, null) :
+    null
+  )
 }
 
-output "vpc_cidr" {
-  description = "The CIDR block of the VPC"
-  value       = aws_vpc.main.cidr_block
+output "vpc_name" {
+  description = "VPC/Network name"
+  value = (
+    var.cloud_provider == "gcp" ? try(module.gcp[0].vpc_name, null) :
+    null
+  )
 }
 
 output "public_subnet_ids" {
   description = "List of public subnet IDs"
-  value       = aws_subnet.public[*].id
+  value = (
+    var.cloud_provider == "aws" ? try(module.aws[0].public_subnet_ids, []) :
+    var.cloud_provider == "gcp" ? try(module.gcp[0].public_subnet_ids, []) :
+    []
+  )
 }
 
 output "private_subnet_ids" {
   description = "List of private subnet IDs"
-  value       = aws_subnet.private[*].id
+  value = (
+    var.cloud_provider == "aws" ? try(module.aws[0].private_subnet_ids, []) :
+    var.cloud_provider == "gcp" ? try(module.gcp[0].private_subnet_ids, []) :
+    []
+  )
 }
 
 output "database_subnet_ids" {
   description = "List of database subnet IDs"
-  value       = aws_subnet.database[*].id
+  value = (
+    var.cloud_provider == "aws" ? try(module.aws[0].database_subnet_ids, []) :
+    var.cloud_provider == "gcp" ? try(module.gcp[0].database_subnet_ids, []) :
+    []
+  )
 }
 
-output "db_subnet_group_name" {
-  description = "Name of the database subnet group"
-  value       = aws_db_subnet_group.database.name
+# -----------------------------------------------------------------------------
+# AWS-Specific Outputs
+# -----------------------------------------------------------------------------
+
+output "aws_vpc_cidr" {
+  description = "AWS VPC CIDR block"
+  value       = var.cloud_provider == "aws" ? try(module.aws[0].vpc_cidr, null) : null
 }
 
-output "cache_subnet_group_name" {
-  description = "Name of the ElastiCache subnet group"
-  value       = aws_elasticache_subnet_group.cache.name
+output "aws_db_subnet_group_name" {
+  description = "AWS database subnet group name"
+  value       = var.cloud_provider == "aws" ? try(module.aws[0].db_subnet_group_name, null) : null
 }
 
-output "nat_gateway_ips" {
-  description = "List of NAT Gateway public IPs"
-  value       = aws_eip.nat[*].public_ip
+output "aws_cache_subnet_group_name" {
+  description = "AWS ElastiCache subnet group name"
+  value       = var.cloud_provider == "aws" ? try(module.aws[0].cache_subnet_group_name, null) : null
 }
 
-output "internet_gateway_id" {
-  description = "ID of the Internet Gateway"
-  value       = aws_internet_gateway.main.id
+output "aws_nat_gateway_ips" {
+  description = "AWS NAT Gateway public IPs"
+  value       = var.cloud_provider == "aws" ? try(module.aws[0].nat_gateway_ips, []) : []
 }
 
-output "public_route_table_id" {
-  description = "ID of the public route table"
-  value       = aws_route_table.public.id
+output "aws_internet_gateway_id" {
+  description = "AWS Internet Gateway ID"
+  value       = var.cloud_provider == "aws" ? try(module.aws[0].internet_gateway_id, null) : null
 }
 
-output "private_route_table_ids" {
-  description = "IDs of the private route tables"
-  value       = aws_route_table.private[*].id
+output "aws_vpc_endpoint_s3_id" {
+  description = "AWS S3 VPC endpoint ID"
+  value       = var.cloud_provider == "aws" ? try(module.aws[0].vpc_endpoint_s3_id, null) : null
 }
 
-# =============================================================================
-# VPC Endpoint Outputs
-# =============================================================================
-
-output "vpc_endpoint_s3_id" {
-  description = "ID of the S3 VPC endpoint (Gateway endpoint for free S3 access)"
-  value       = var.enable_vpc_endpoints ? aws_vpc_endpoint.s3[0].id : null
+output "aws_vpc_endpoint_security_group_id" {
+  description = "AWS VPC endpoint security group ID"
+  value       = var.cloud_provider == "aws" ? try(module.aws[0].vpc_endpoint_security_group_id, null) : null
 }
 
-output "vpc_endpoint_dynamodb_id" {
-  description = "ID of the DynamoDB VPC endpoint (Gateway endpoint for free DynamoDB access)"
-  value       = var.enable_vpc_endpoints ? aws_vpc_endpoint.dynamodb[0].id : null
+# -----------------------------------------------------------------------------
+# GCP-Specific Outputs
+# -----------------------------------------------------------------------------
+
+output "gcp_vpc_self_link" {
+  description = "GCP VPC self link"
+  value       = var.cloud_provider == "gcp" ? try(module.gcp[0].vpc_self_link, null) : null
 }
 
-output "vpc_endpoint_ecr_api_id" {
-  description = "ID of the ECR API VPC endpoint (Interface endpoint for container registry)"
-  value       = var.enable_vpc_endpoints ? aws_vpc_endpoint.ecr_api[0].id : null
+output "gcp_public_subnet_self_links" {
+  description = "GCP public subnet self links"
+  value       = var.cloud_provider == "gcp" ? try(module.gcp[0].public_subnet_self_links, []) : []
 }
 
-output "vpc_endpoint_ecr_dkr_id" {
-  description = "ID of the ECR DKR VPC endpoint (Interface endpoint for Docker operations)"
-  value       = var.enable_vpc_endpoints ? aws_vpc_endpoint.ecr_dkr[0].id : null
+output "gcp_private_subnet_self_links" {
+  description = "GCP private subnet self links"
+  value       = var.cloud_provider == "gcp" ? try(module.gcp[0].private_subnet_self_links, []) : []
 }
 
-output "vpc_endpoint_secretsmanager_id" {
-  description = "ID of the Secrets Manager VPC endpoint (Interface endpoint for secrets)"
-  value       = var.enable_vpc_endpoints ? aws_vpc_endpoint.secretsmanager[0].id : null
+output "gcp_database_subnet_self_links" {
+  description = "GCP database subnet self links"
+  value       = var.cloud_provider == "gcp" ? try(module.gcp[0].database_subnet_self_links, []) : []
 }
 
-output "vpc_endpoint_logs_id" {
-  description = "ID of the CloudWatch Logs VPC endpoint (Interface endpoint for logging)"
-  value       = var.enable_vpc_endpoints ? aws_vpc_endpoint.logs[0].id : null
+output "gcp_gke_subnet_ids" {
+  description = "GCP GKE subnet IDs"
+  value       = var.cloud_provider == "gcp" ? try(module.gcp[0].gke_subnet_ids, []) : []
 }
 
-output "vpc_endpoint_ssm_id" {
-  description = "ID of the SSM VPC endpoint (Interface endpoint for Systems Manager)"
-  value       = var.enable_vpc_endpoints ? aws_vpc_endpoint.ssm[0].id : null
+output "gcp_gke_subnet_self_links" {
+  description = "GCP GKE subnet self links"
+  value       = var.cloud_provider == "gcp" ? try(module.gcp[0].gke_subnet_self_links, []) : []
 }
 
-output "vpc_endpoint_ssmmessages_id" {
-  description = "ID of the SSM Messages VPC endpoint (Interface endpoint for Session Manager)"
-  value       = var.enable_vpc_endpoints ? aws_vpc_endpoint.ssmmessages[0].id : null
+output "gcp_gke_pod_ranges" {
+  description = "GCP GKE pod secondary IP ranges"
+  value       = var.cloud_provider == "gcp" ? try(module.gcp[0].gke_pod_ranges, {}) : {}
 }
 
-output "vpc_endpoint_ec2messages_id" {
-  description = "ID of the EC2 Messages VPC endpoint (Interface endpoint for SSM agent)"
-  value       = var.enable_vpc_endpoints ? aws_vpc_endpoint.ec2messages[0].id : null
+output "gcp_gke_service_ranges" {
+  description = "GCP GKE service secondary IP ranges"
+  value       = var.cloud_provider == "gcp" ? try(module.gcp[0].gke_service_ranges, {}) : {}
 }
 
-output "vpc_endpoint_sts_id" {
-  description = "ID of the STS VPC endpoint (Interface endpoint for IAM role assumption)"
-  value       = var.enable_vpc_endpoints ? aws_vpc_endpoint.sts[0].id : null
+output "gcp_router_ids" {
+  description = "GCP Cloud Router IDs"
+  value       = var.cloud_provider == "gcp" ? try(module.gcp[0].router_ids, []) : []
 }
 
-output "vpc_endpoint_security_group_id" {
-  description = "Security group ID for VPC interface endpoints"
-  value       = var.enable_vpc_endpoints ? aws_security_group.vpc_endpoints[0].id : null
+output "gcp_nat_ids" {
+  description = "GCP Cloud NAT IDs"
+  value       = var.cloud_provider == "gcp" ? try(module.gcp[0].nat_ids, []) : []
+}
+
+output "gcp_private_service_range_name" {
+  description = "GCP private service access IP range name"
+  value       = var.cloud_provider == "gcp" ? try(module.gcp[0].private_service_range_name, null) : null
+}
+
+output "gcp_serverless_connector_ids" {
+  description = "GCP VPC Access Connector IDs"
+  value       = var.cloud_provider == "gcp" ? try(module.gcp[0].serverless_connector_ids, []) : []
+}
+
+output "gcp_network_config" {
+  description = "GCP consolidated network configuration"
+  value       = var.cloud_provider == "gcp" ? try(module.gcp[0].network_config, null) : null
+}
+
+# -----------------------------------------------------------------------------
+# Consolidated Network Configuration
+# -----------------------------------------------------------------------------
+
+output "network_config" {
+  description = "Consolidated network configuration for use by other modules"
+  value = {
+    provider    = var.cloud_provider
+    vpc_id      = (
+      var.cloud_provider == "aws" ? try(module.aws[0].vpc_id, null) :
+      var.cloud_provider == "gcp" ? try(module.gcp[0].vpc_id, null) :
+      null
+    )
+    public_subnets = (
+      var.cloud_provider == "aws" ? try(module.aws[0].public_subnet_ids, []) :
+      var.cloud_provider == "gcp" ? try(module.gcp[0].public_subnet_ids, []) :
+      []
+    )
+    private_subnets = (
+      var.cloud_provider == "aws" ? try(module.aws[0].private_subnet_ids, []) :
+      var.cloud_provider == "gcp" ? try(module.gcp[0].private_subnet_ids, []) :
+      []
+    )
+    database_subnets = (
+      var.cloud_provider == "aws" ? try(module.aws[0].database_subnet_ids, []) :
+      var.cloud_provider == "gcp" ? try(module.gcp[0].database_subnet_ids, []) :
+      []
+    )
+    nat_enabled = var.enable_nat_gateway
+  }
 }

@@ -1,0 +1,151 @@
+# Stack 4: Local Build - App Services (run from coolify directory)
+# Uses absolute Windows paths for Docker Desktop on Windows
+
+services:
+  # ===========================================================================
+  # CONTROL PLANE BACKEND SERVICES
+  # ===========================================================================
+
+  tenant-management-service:
+    build:
+      context: ../arc-saas/services/tenant-management-service
+      dockerfile: Dockerfile
+    image: ananta/tenant-management-service:latest
+    container_name: tenant-management-service
+    environment:
+      NODE_ENV: production
+      PORT: 14000
+      HOST: 0.0.0.0
+      DB_HOST: control-plane-postgres-dsw0gog8sswc08s8ss088ssw-212222349718
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: ${CONTROL_PLANE_DB_PASSWORD}
+      DB_DATABASE: arc_saas
+      DB_SCHEMA: main
+      REDIS_HOST: control-plane-redis-dsw0gog8sswc08s8ss088ssw-212222359076
+      REDIS_PORT: 6379
+      TEMPORAL_ADDRESS: temporal-dsw0gog8sswc08s8ss088ssw-manual:7233
+      TEMPORAL_NAMESPACE: arc-saas
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_ISSUER: ${KEYCLOAK_URL}/realms/${KEYCLOAK_REALM}
+      KEYCLOAK_ENABLED: "true"
+      KEYCLOAK_URL: http://keycloak-dsw0gog8sswc08s8ss088ssw-212222367304:8080
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-ananta-saas}
+      NOVU_ENABLED: "true"
+      NOVU_API_KEY: ${NOVU_API_KEY:-}
+      NOVU_BACKEND_URL: http://novu-api:3000
+    networks:
+      - coolify-network
+    restart: unless-stopped
+
+  temporal-worker-service:
+    build:
+      context: ../arc-saas/services/temporal-worker-service
+      dockerfile: Dockerfile
+    image: ananta/temporal-worker-service:latest
+    container_name: temporal-worker-service
+    environment:
+      NODE_ENV: production
+      TEMPORAL_ADDRESS: temporal-dsw0gog8sswc08s8ss088ssw-manual:7233
+      TEMPORAL_NAMESPACE: arc-saas
+      TEMPORAL_TASK_QUEUE: tenant-provisioning
+      DB_HOST: control-plane-postgres-dsw0gog8sswc08s8ss088ssw-212222349718
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: ${CONTROL_PLANE_DB_PASSWORD}
+      DB_DATABASE: arc_saas
+      KEYCLOAK_ENABLED: "true"
+      KEYCLOAK_URL: http://keycloak-dsw0gog8sswc08s8ss088ssw-212222367304:8080
+      KEYCLOAK_REALM: ${KEYCLOAK_REALM:-ananta-saas}
+      KEYCLOAK_ADMIN_USER: ${KEYCLOAK_ADMIN:-admin}
+      KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+    networks:
+      - coolify-network
+    restart: unless-stopped
+
+  subscription-service:
+    build:
+      context: ../arc-saas/services/subscription-service
+      dockerfile: Dockerfile
+    image: ananta/subscription-service:latest
+    container_name: subscription-service
+    environment:
+      NODE_ENV: production
+      PORT: 3002
+      DB_HOST: control-plane-postgres-dsw0gog8sswc08s8ss088ssw-212222349718
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: ${CONTROL_PLANE_DB_PASSWORD}
+      DB_DATABASE: arc_saas
+      DB_SCHEMA: subscription
+      REDIS_HOST: control-plane-redis-dsw0gog8sswc08s8ss088ssw-212222359076
+      REDIS_PORT: 6379
+    networks:
+      - coolify-network
+    restart: unless-stopped
+
+  # ===========================================================================
+  # APP PLANE BACKEND SERVICES
+  # ===========================================================================
+
+  cns-service:
+    build:
+      context: ../app-plane/services/cns-service
+      dockerfile: Dockerfile
+      target: application
+    image: ananta/cns-service:latest
+    container_name: cns-service
+    environment:
+      NODE_ENV: production
+      CNS_PORT: 8000
+      CNS_HOST: 0.0.0.0
+      LOG_LEVEL: INFO
+      ENVIRONMENT: production
+      DATABASE_URL: postgresql://postgres:${COMPONENTS_V2_DB_PASSWORD}@app-plane-components-v2-postgres-dsw0gog8sswc08s8ss088ssw-212222375380:5432/components_v2
+      SUPABASE_DATABASE_URL: postgresql://postgres:${SUPABASE_DB_PASSWORD}@app-plane-supabase-db-dsw0gog8sswc08s8ss088ssw-212222372488:5432/postgres
+      COMPONENTS_V2_DATABASE_URL: postgresql://postgres:${COMPONENTS_V2_DB_PASSWORD}@app-plane-components-v2-postgres-dsw0gog8sswc08s8ss088ssw-212222375380:5432/components_v2
+      DATABASE_POOL_SIZE: 20
+      REDIS_URL: redis://app-plane-redis-dsw0gog8sswc08s8ss088ssw-212222370068:6379/2
+      JWT_SECRET_KEY: ${JWT_SECRET}
+      ADMIN_API_TOKEN: ${ADMIN_API_TOKEN}
+      ALLOW_DEV_DEFAULTS: "false"
+      TEMPORAL_ENABLED: "true"
+      TEMPORAL_HOST: temporal-dsw0gog8sswc08s8ss088ssw-manual:7233
+      TEMPORAL_NAMESPACE: enrichment
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_PASS: ${RABBITMQ_PASSWORD}
+    networks:
+      - coolify-network
+    restart: unless-stopped
+
+  cns-worker:
+    build:
+      context: ../app-plane/services/cns-service
+      dockerfile: Dockerfile
+      target: application
+    image: ananta/cns-service:latest
+    container_name: cns-worker
+    command: python -m app.workers.bom_worker
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgresql://postgres:${COMPONENTS_V2_DB_PASSWORD}@app-plane-components-v2-postgres-dsw0gog8sswc08s8ss088ssw-212222375380:5432/components_v2
+      SUPABASE_DATABASE_URL: postgresql://postgres:${SUPABASE_DB_PASSWORD}@app-plane-supabase-db-dsw0gog8sswc08s8ss088ssw-212222372488:5432/postgres
+      REDIS_URL: redis://app-plane-redis-dsw0gog8sswc08s8ss088ssw-212222370068:6379/2
+      JWT_SECRET_KEY: ${JWT_SECRET}
+      TEMPORAL_ENABLED: "true"
+      TEMPORAL_HOST: temporal-dsw0gog8sswc08s8ss088ssw-manual:7233
+      TEMPORAL_NAMESPACE: enrichment
+      RABBITMQ_HOST: rabbitmq
+      RABBITMQ_PORT: 5672
+      RABBITMQ_USER: ${RABBITMQ_USER:-admin}
+      RABBITMQ_PASS: ${RABBITMQ_PASSWORD}
+    networks:
+      - coolify-network
+    restart: unless-stopped
+
+networks:
+  coolify-network:
+    name: dsw0gog8sswc08s8ss088ssw
+    external: true

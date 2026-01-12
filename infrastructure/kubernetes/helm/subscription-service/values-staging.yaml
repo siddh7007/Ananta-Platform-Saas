@@ -1,0 +1,11 @@
+replicaCount: 2
+ingress:
+  hosts:
+    - host: subscription-staging.ananta.io
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: subscription-service-staging-tls
+      hosts:
+        - subscription-staging.ananta.io

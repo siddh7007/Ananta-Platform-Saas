@@ -31,7 +31,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { cnsApi } from '@/lib/axios';
-import { useOrganizationId } from '@/contexts/TenantContext';
+import { useTenant } from '@/contexts/TenantContext';
 import { createLogger } from '@/lib/utils';
 import type {
   ProcessingStage,
@@ -602,7 +602,9 @@ export function useProcessingStatus(
   const { bomId, enabled = true, pollInterval = 2000, onComplete, onError } = options;
 
   // CRITICAL: Get organization_id for CNS API calls (tenant_id = organization_id in our architecture)
-  const organizationId = useOrganizationId();
+  // Also get isLoading to wait for tenant context initialization before showing errors
+  const { currentTenant, isLoading: tenantLoading } = useTenant();
+  const organizationId = currentTenant?.id ?? null;
 
   const [status, setStatus] = useState<ProcessingStatusAPI | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -657,10 +659,16 @@ export function useProcessingStatus(
       return;
     }
 
-    // Ensure organization_id is available
+    // Wait for organization_id - tenant context may still be loading during auth init
+    // Don't set error if tenant is still loading, just wait for next call
     if (!organizationId) {
+      if (tenantLoading) {
+        log.debug('Waiting for tenant context to load', { bomId, tenantLoading });
+        return; // Will retry when organizationId becomes available via useEffect dependency
+      }
+      // Tenant loaded but no organization - this is a real error
       const err = new Error('No organization selected. Please select a workspace.');
-      log.error('Missing organization ID', err, { bomId });
+      log.error('Missing organization ID after tenant loaded', err, { bomId });
       if (mountedRef.current) {
         setError(err);
         setIsLoading(false);
@@ -752,7 +760,7 @@ export function useProcessingStatus(
         onErrorRef.current?.(error);
       }
     }
-  }, [bomId, enabled, organizationId, stopPolling, status?.current_stage]);
+  }, [bomId, enabled, organizationId, tenantLoading, stopPolling, status?.current_stage]);
 
   /**
    * Fetch enhanced data: line items, BOM risk summary, and risk stats
@@ -913,9 +921,13 @@ export function useProcessingStatus(
       return;
     }
 
-    // Ensure organization_id is available
+    // Wait for organization_id - tenant context may still be loading during auth init
     if (!organizationId) {
-      log.warn('Cannot setup SSE - no organization ID');
+      if (tenantLoading) {
+        log.debug('Waiting for tenant context before SSE setup', { bomId, tenantLoading });
+        return; // Will retry when organizationId becomes available
+      }
+      log.warn('Cannot setup SSE - no organization ID after tenant loaded');
       setConnectionStatus('error');
       return;
     }
@@ -1009,7 +1021,7 @@ export function useProcessingStatus(
         startPolling();
       }
     }
-  }, [bomId, enabled, organizationId, startPolling, stopPolling]);
+  }, [bomId, enabled, organizationId, tenantLoading, startPolling, stopPolling]);
 
   /**
    * Pause processing with mounted check

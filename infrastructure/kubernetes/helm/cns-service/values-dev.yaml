@@ -1,0 +1,46 @@
+# Development environment overrides
+replicaCount: 1
+
+image:
+  pullPolicy: Always
+
+ingress:
+  hosts:
+    - host: cns-dev.ananta.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: cns-service-dev-tls
+      hosts:
+        - cns-dev.ananta.local
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 1Gi
+  requests:
+    cpu: 100m
+    memory: 256Mi
+
+autoscaling:
+  enabled: false
+
+configMap:
+  LOG_LEVEL: debug
+  PYTHON_ENV: development
+
+databases:
+  supabase:
+    host: supabase-db-dev.database-system.svc.cluster.local
+  componentsV2:
+    host: components-db-dev.database-system.svc.cluster.local
+
+podDisruptionBudget:
+  enabled: false
+
+extraEnv:
+  - name: DEBUG
+    value: "true"
+  - name: ENABLE_SWAGGER
+    value: "true"

@@ -1,0 +1,8 @@
+replicaCount: 1
+autoscaling:
+  enabled: false
+configMap:
+  LOG_LEVEL: debug
+  NODE_ENV: development
+podDisruptionBudget:
+  enabled: false

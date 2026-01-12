@@ -1,0 +1,65 @@
+---
+# Temporal Worker Service Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: temporal-worker-service
+  namespace: control-plane
+  labels:
+    app: temporal-worker-service
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: temporal-worker-service
+  template:
+    metadata:
+      labels:
+        app: temporal-worker-service
+    spec:
+      containers:
+        - name: temporal-worker-service
+          image: ananta/temporal-worker-service:local
+          imagePullPolicy: Never
+          env:
+            - name: NODE_ENV
+              value: "development"
+            - name: TEMPORAL_ADDRESS
+              value: "temporal.temporal-system.svc.cluster.local:7233"
+            - name: TEMPORAL_NAMESPACE
+              value: "arc-saas"
+            - name: TEMPORAL_TASK_QUEUE
+              value: "tenant-provisioning"
+            - name: DB_HOST
+              value: "postgresql.database-system.svc.cluster.local"
+            - name: DB_PORT
+              value: "5432"
+            - name: DB_DATABASE
+              value: "ananta"
+            - name: DB_USER
+              value: "postgres"
+            - name: DB_PASSWORD
+              value: "localdev123"
+            - name: DB_SCHEMA
+              value: "main"
+            - name: REDIS_HOST
+              value: "redis.cache-system.svc.cluster.local"
+            - name: REDIS_PORT
+              value: "6379"
+            - name: KEYCLOAK_URL
+              value: "http://keycloak.auth-system.svc.cluster.local:8080"
+            - name: KEYCLOAK_REALM
+              value: "ananta"
+            - name: KEYCLOAK_CLIENT_ID
+              value: "admin-app"
+            - name: KEYCLOAK_ADMIN_USER
+              value: "admin"
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              value: "admin123"
+          resources:
+            limits:
+              cpu: 500m
+              memory: 512Mi
+            requests:
+              cpu: 100m
+              memory: 256Mi

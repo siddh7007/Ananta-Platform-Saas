@@ -1,0 +1,110 @@
+# Production environment overrides
+db:
+  replicaCount: 1  # Use external managed PostgreSQL in production
+  resources:
+    limits:
+      cpu: 4000m
+      memory: 8Gi
+    requests:
+      cpu: 1000m
+      memory: 4Gi
+  persistence:
+    size: 500Gi
+    storageClass: fast-ssd
+
+studio:
+  replicaCount: 3
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 200m
+      memory: 512Mi
+  ingress:
+    hosts:
+      - host: supabase.ananta.io
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: supabase-studio-prod-tls
+        hosts:
+          - supabase.ananta.io
+
+api:
+  replicaCount: 5
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+  autoscaling:
+    minReplicas: 5
+    maxReplicas: 50
+    targetCPUUtilizationPercentage: 60
+  ingress:
+    hosts:
+      - host: supabase-api.ananta.io
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: supabase-api-prod-tls
+        hosts:
+          - supabase-api.ananta.io
+
+auth:
+  replicaCount: 3
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 200m
+      memory: 512Mi
+
+realtime:
+  replicaCount: 3
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 200m
+      memory: 512Mi
+
+storage:
+  replicaCount: 3
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 200m
+      memory: 512Mi
+
+kong:
+  replicaCount: 3
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+    requests:
+      cpu: 500m
+      memory: 1Gi
+  ingress:
+    hosts:
+      - host: kong.ananta.io
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: supabase-kong-prod-tls
+        hosts:
+          - kong.ananta.io
+
+podDisruptionBudget:
+  minAvailable: 2

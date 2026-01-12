@@ -1,0 +1,33 @@
+# Simplified Kind cluster configuration for faster startup
+# Single node cluster with essential port mappings
+
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: ananta-local
+
+nodes:
+  # Single control plane node (acts as both control-plane and worker)
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      # ArgoCD UI
+      - containerPort: 30080
+        hostPort: 30080
+        protocol: TCP
+      # Keycloak
+      - containerPort: 30180
+        hostPort: 8180
+        protocol: TCP
+      # HTTP for Ingress
+      - containerPort: 80
+        hostPort: 80
+        protocol: TCP
+      # HTTPS for Ingress
+      - containerPort: 443
+        hostPort: 443
+        protocol: TCP

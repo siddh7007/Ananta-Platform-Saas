@@ -1,0 +1,27 @@
+# Staging environment overrides
+server:
+  replicaCount: 2
+
+web:
+  replicaCount: 2
+  ingress:
+    hosts:
+      - host: temporal-staging.ananta.io
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: temporal-ui-staging-tls
+        hosts:
+          - temporal-staging.ananta.io
+
+postgresql:
+  host: postgres-staging.database-system.svc.cluster.local
+
+namespaces:
+  - name: default
+    retention: 7d
+  - name: arc-saas
+    retention: 14d
+  - name: enrichment
+    retention: 14d

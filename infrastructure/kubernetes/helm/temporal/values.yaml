@@ -1,0 +1,179 @@
+# =============================================================================
+# Temporal Workflow Engine - Infrastructure Service
+# =============================================================================
+# Note: This is a simplified wrapper. For production, consider using the
+# official temporal-helm-charts: https://github.com/temporalio/helm-charts
+# =============================================================================
+
+# Server configuration
+server:
+  replicaCount: 3
+
+  image:
+    repository: temporalio/server
+    pullPolicy: IfNotPresent
+    tag: "1.22.4"
+
+  serviceAccount:
+    create: true
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+      - ALL
+
+  # Frontend service (gRPC)
+  frontend:
+    service:
+      type: ClusterIP
+      port: 7233
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+      requests:
+        cpu: 200m
+        memory: 512Mi
+
+  # History service
+  history:
+    replicaCount: 3
+    resources:
+      limits:
+        cpu: 1000m
+        memory: 1Gi
+      requests:
+        cpu: 200m
+        memory: 512Mi
+
+  # Matching service
+  matching:
+    replicaCount: 3
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+
+  # Worker service
+  worker:
+    replicaCount: 2
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 100m
+        memory: 256Mi
+
+# Web UI
+web:
+  enabled: true
+  replicaCount: 2
+
+  image:
+    repository: temporalio/ui
+    pullPolicy: IfNotPresent
+    tag: "2.21.3"
+
+  service:
+    type: ClusterIP
+    port: 8080
+    targetPort: 8080
+
+  ingress:
+    enabled: true
+    className: nginx
+    annotations:
+      cert-manager.io/cluster-issuer: letsencrypt-prod
+    hosts:
+      - host: temporal.ananta.local
+        paths:
+          - path: /
+            pathType: Prefix
+    tls:
+      - secretName: temporal-ui-tls
+        hosts:
+          - temporal.ananta.local
+
+  resources:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 50m
+      memory: 128Mi
+
+# Database configuration (PostgreSQL)
+postgresql:
+  enabled: true
+  host: postgres.database-system.svc.cluster.local
+  port: 5432
+  database: temporal
+  existingSecret: temporal-db-secrets
+  # Keys: postgresql-user, postgresql-password
+
+# Elasticsearch for visibility (optional)
+elasticsearch:
+  enabled: true
+  host: elasticsearch.observability-system.svc.cluster.local
+  port: 9200
+  scheme: http
+  version: "v7"
+  logLevel: error
+  existingSecret: temporal-es-secrets
+
+# Prometheus metrics
+prometheus:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+
+# Namespaces to create
+namespaces:
+  - name: default
+    retention: 7d
+  - name: arc-saas
+    retention: 30d
+  - name: enrichment
+    retention: 14d
+
+# Dynamic config
+dynamicConfig:
+  enabled: true
+  pollInterval: 10s
+  values:
+    system.forceSearchAttributesCacheRefreshOnRead:
+      - value: true
+        constraints: {}
+    limit.maxIDLength:
+      - value: 255
+        constraints: {}
+
+# High availability
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Affinity rules
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - temporal
+          topologyKey: kubernetes.io/hostname

@@ -1,23 +1,25 @@
 -- ============================================================================
--- COMPLETE MASTER MIGRATION: Supabase Database (App-Plane)
+-- MASTER MIGRATION V3 - Components Platform V2
 -- ============================================================================
--- Version: 6.0.0
--- Created: 2025-12-27
--- Database: app-plane-supabase-db (port 27432)
+-- Version: 3.2
+-- Created: 2025-12-01
+-- Consolidated From: Migrations 001-080
 --
--- This is a COMPLETE snapshot of the live Supabase database schema including:
--- - ALL tables (82+ tables from live database)
--- - ALL columns, indexes, constraints
--- - ALL functions, triggers
--- - ALL extensions
--- - SEED organizations and users
+-- Purpose: Complete database schema for fresh database initialization
 --
--- USE THIS FOR:
--- - Fresh database setup
--- - Complete schema verification
--- - Reference documentation
+-- SECURITY UPDATES (from 077 + 078 + 080):
+-- - No service_role policies (Supabase service key bypasses RLS automatically)
+-- - Consolidated super_admin into main policies (OR is_super_admin())
+-- - organization_memberships: Admin-only writes (prevents privilege escalation)
+-- - alerts: User-scoped UPDATE/DELETE (prevents editing others' alerts)
+-- - System insert tables use SECURITY DEFINER functions
+-- - Last owner protection trigger
 --
--- IMPORTANT: Fully idempotent. Safe to run multiple times.
+-- AUTH0 ONLY (080):
+-- - ELIMINATED 4-fallback chain - now single explicit path
+-- - org_id: Auth0 JWT org_id → organizations.auth0_org_id lookup
+-- - role: From Auth0 JWT roles array (first element, "platform:" prefix stripped)
+-- - NO database lookups for user identity - only org mapping
 -- ============================================================================
 
 BEGIN;
@@ -25,1500 +27,1344 @@ BEGIN;
 -- ============================================================================
 -- EXTENSIONS
 -- ============================================================================
-CREATE EXTENSION IF NOT EXISTS pgcrypto WITH SCHEMA public;
+
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+CREATE EXTENSION IF NOT EXISTS "pg_trgm";
 
 -- ============================================================================
--- HELPER FUNCTIONS (must be created first)
+-- ENUMS
 -- ============================================================================
 
--- Slugify function
-CREATE OR REPLACE FUNCTION public.slugify(text_to_slug text)
-RETURNS text
-LANGUAGE plpgsql
-IMMUTABLE
-AS $_$
-DECLARE
-    slugged text;
+-- Subscription tiers
+DO $$ BEGIN
+    CREATE TYPE subscription_tier AS ENUM ('free', 'starter', 'professional', 'enterprise');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- Subscription status
+DO $$ BEGIN
+    CREATE TYPE subscription_status AS ENUM ('trialing', 'active', 'past_due', 'canceled', 'expired', 'paused');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- Payment status
+DO $$ BEGIN
+    CREATE TYPE payment_status AS ENUM ('pending', 'processing', 'succeeded', 'failed', 'refunded', 'partially_refunded', 'disputed', 'canceled');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- Invoice status
+DO $$ BEGIN
+    CREATE TYPE invoice_status AS ENUM ('draft', 'open', 'paid', 'void', 'uncollectible');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- ============================================================================
+-- SECTION 1: CORE TABLES
+-- ============================================================================
+
+-- Trigger function for updated_at timestamps
+CREATE OR REPLACE FUNCTION public.trigger_set_timestamp()
+RETURNS TRIGGER AS $$
 BEGIN
-    slugged := lower(text_to_slug);
-    slugged := regexp_replace(slugged, '[\s_]+', '-', 'g');
-    slugged := regexp_replace(slugged, '[^a-z0-9\-]', '', 'g');
-    slugged := regexp_replace(slugged, '-+', '-', 'g');
-    slugged := regexp_replace(slugged, '^-|-$', '', 'g');
-    IF slugged IS NULL OR slugged = '' THEN
-        slugged := 'entity-' || substring(gen_random_uuid()::text from 1 for 8);
-    END IF;
-    RETURN slugged;
+  NEW.updated_at = NOW();
+  RETURN NEW;
 END;
-$_$;
+$$ LANGUAGE plpgsql;
 
--- Normalize role function
-CREATE OR REPLACE FUNCTION public.normalize_role(input_role text)
-RETURNS text
-LANGUAGE plpgsql
-IMMUTABLE
-AS $$
-DECLARE
-    normalized TEXT;
-    lower_role TEXT;
-BEGIN
-    lower_role := LOWER(COALESCE(input_role, ''));
-
-    IF lower_role IN ('platform:super_admin', 'platform-super-admin', 'realm-admin', 'platform_admin') THEN
-        normalized := 'super_admin';
-    ELSIF lower_role IN ('org-owner', 'organization-owner', 'billing_admin') THEN
-        normalized := 'owner';
-    ELSIF lower_role IN ('administrator', 'org_admin', 'tenant-admin', 'org-admin') THEN
-        normalized := 'admin';
-    ELSIF lower_role IN ('staff', 'developer', 'support', 'operator', 'platform:engineer', 'platform:staff') THEN
-        normalized := 'engineer';
-    ELSIF lower_role IN ('user', 'customer', 'viewer', 'member', 'read-only', '') THEN
-        normalized := 'analyst';
-    ELSIF lower_role IN ('super_admin', 'owner', 'admin', 'engineer', 'analyst') THEN
-        normalized := lower_role;
-    ELSE
-        normalized := 'analyst';
-    END IF;
-
-    RETURN normalized;
-END;
-$$;
-
-COMMENT ON FUNCTION public.normalize_role(input_role text) IS 'Normalizes legacy role names to unified 5-level hierarchy';
-
--- ============================================================================
--- CORE TABLES
--- ============================================================================
-
--- Organizations (Multi-tenant anchor)
+-- TABLE: organizations
 CREATE TABLE IF NOT EXISTS public.organizations (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name TEXT NOT NULL,
-    slug TEXT UNIQUE,
-    description TEXT,
-    subscription_status TEXT DEFAULT 'trial' CHECK (subscription_status IN ('trial', 'active', 'past_due', 'canceled', 'suspended')),
-    plan_tier TEXT DEFAULT 'standard',
-    billing_email TEXT,
-    timezone TEXT DEFAULT 'UTC',
-    region TEXT DEFAULT 'us-east-1',
-    max_users INTEGER DEFAULT 10,
-    max_components INTEGER DEFAULT 50000,
-    max_storage_gb INTEGER DEFAULT 100,
-    current_users_count INTEGER DEFAULT 0,
-    current_components_count INTEGER DEFAULT 0,
-    current_storage_gb NUMERIC(12,2) DEFAULT 0,
-    trial_ends_at TIMESTAMPTZ,
-    deleted_at TIMESTAMPTZ,
-    created_by UUID,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  slug TEXT UNIQUE NOT NULL,
+  -- Profile fields
+  email TEXT,
+  phone TEXT,
+  address TEXT,
+  logo_url TEXT,
+  billing_email TEXT,
+  -- Security policy fields
+  require_mfa BOOLEAN DEFAULT false,
+  session_timeout_minutes INTEGER DEFAULT 30 CHECK (session_timeout_minutes >= 5 AND session_timeout_minutes <= 480),
+  password_policy TEXT DEFAULT 'strong' CHECK (password_policy IN ('basic', 'strong', 'enterprise')),
+  -- API & Integration fields
+  api_access_enabled BOOLEAN DEFAULT true,
+  webhooks_enabled BOOLEAN DEFAULT false,
+  webhook_url TEXT,
+  -- Data retention
+  data_retention_days INTEGER DEFAULT 365 CHECK (data_retention_days >= 30 AND data_retention_days <= 3650),
+  audit_log_retention_days INTEGER DEFAULT 90 CHECK (audit_log_retention_days >= 30 AND audit_log_retention_days <= 365),
+  -- SSO
+  sso_enabled BOOLEAN DEFAULT false,
+  sso_provider TEXT DEFAULT 'saml' CHECK (sso_provider IN ('saml', 'okta', 'azure', 'google')),
+  -- Onboarding
+  onboarding_completed_at TIMESTAMPTZ,
+  onboarding_checklist JSONB DEFAULT '{"first_bom_uploaded": false, "first_enrichment_complete": false, "team_member_invited": false, "alert_preferences_configured": false, "risk_thresholds_set": false}'::jsonb,
+  -- Timestamps
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  deleted_at TIMESTAMPTZ
 );
+
+CREATE TRIGGER set_timestamp_organizations
+  BEFORE UPDATE ON public.organizations
+  FOR EACH ROW EXECUTE FUNCTION trigger_set_timestamp();
 
 CREATE INDEX IF NOT EXISTS idx_organizations_slug ON public.organizations(slug);
-CREATE INDEX IF NOT EXISTS idx_organizations_status ON public.organizations(subscription_status);
-CREATE INDEX IF NOT EXISTS idx_organizations_deleted ON public.organizations(deleted_at) WHERE deleted_at IS NULL;
 
--- Users (Multi-org, Auth0/Keycloak compatible)
+-- TABLE: users
 CREATE TABLE IF NOT EXISTS public.users (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    email TEXT NOT NULL UNIQUE,
-    email_verified BOOLEAN DEFAULT false,
-    first_name TEXT,
-    last_name TEXT,
-    full_name TEXT,
-    avatar_url TEXT,
-    auth0_user_id TEXT UNIQUE,
-    keycloak_user_id TEXT,
-    role TEXT NOT NULL DEFAULT 'analyst' CHECK (role IN ('super_admin', 'owner', 'admin', 'engineer', 'analyst')),
-    is_platform_admin BOOLEAN DEFAULT false,
-    is_active BOOLEAN DEFAULT true,
-    last_login_at TIMESTAMPTZ,
-    metadata JSONB DEFAULT '{}'::jsonb,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  email TEXT UNIQUE NOT NULL,
+  full_name TEXT,
+  organization_id UUID REFERENCES public.organizations(id) ON DELETE SET NULL,
+  auth0_user_id TEXT,
+  -- Timestamps
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+CREATE TRIGGER set_timestamp_users
+  BEFORE UPDATE ON public.users
+  FOR EACH ROW EXECUTE FUNCTION trigger_set_timestamp();
 
 CREATE INDEX IF NOT EXISTS idx_users_email ON public.users(email);
-CREATE INDEX IF NOT EXISTS idx_users_auth0_id ON public.users(auth0_user_id) WHERE auth0_user_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_users_keycloak_id ON public.users(keycloak_user_id) WHERE keycloak_user_id IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_users_is_platform_admin ON public.users(is_platform_admin) WHERE is_platform_admin = true;
+CREATE INDEX IF NOT EXISTS idx_users_organization_id ON public.users(organization_id);
+CREATE INDEX IF NOT EXISTS idx_users_auth0_user_id ON public.users(auth0_user_id);
 
--- Organization Memberships (Multi-org support)
+-- TABLE: organization_memberships
 CREATE TABLE IF NOT EXISTS public.organization_memberships (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
-    organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
-    role TEXT NOT NULL DEFAULT 'analyst' CHECK (role IN ('owner', 'admin', 'engineer', 'analyst')),
-    is_default BOOLEAN DEFAULT false,
-    invited_by UUID REFERENCES public.users(id),
-    joined_at TIMESTAMPTZ DEFAULT NOW(),
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(user_id, organization_id)
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  role TEXT NOT NULL DEFAULT 'member', -- member, engineer, analyst, admin, owner, super_admin
+  -- Onboarding tracking
+  welcome_sent_at TIMESTAMPTZ,
+  first_login_at TIMESTAMPTZ,
+  -- Timestamps
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(organization_id, user_id)
 );
 
-CREATE INDEX IF NOT EXISTS idx_org_memberships_user ON public.organization_memberships(user_id);
 CREATE INDEX IF NOT EXISTS idx_org_memberships_org ON public.organization_memberships(organization_id);
-CREATE INDEX IF NOT EXISTS idx_org_memberships_user_org ON public.organization_memberships(user_id, organization_id);
+CREATE INDEX IF NOT EXISTS idx_org_memberships_user ON public.organization_memberships(user_id);
 
--- Organization Invitations
-CREATE TABLE IF NOT EXISTS public.organization_invitations (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
-    email TEXT NOT NULL,
-    role TEXT NOT NULL DEFAULT 'analyst' CHECK (role IN ('admin', 'engineer', 'analyst')),
-    token TEXT NOT NULL UNIQUE DEFAULT encode(gen_random_bytes(32), 'hex'),
-    invited_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
-    status TEXT DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'expired', 'cancelled')),
-    expires_at TIMESTAMPTZ NOT NULL DEFAULT (NOW() + INTERVAL '7 days'),
-    accepted_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    CONSTRAINT unique_org_email_invitation UNIQUE (organization_id, email)
-);
-
-CREATE INDEX IF NOT EXISTS idx_org_invitations_token ON public.organization_invitations(token);
-CREATE INDEX IF NOT EXISTS idx_org_invitations_email ON public.organization_invitations(email);
-CREATE INDEX IF NOT EXISTS idx_org_invitations_org ON public.organization_invitations(organization_id);
-
--- User Preferences
-CREATE TABLE IF NOT EXISTS public.user_preferences (
-    user_id UUID PRIMARY KEY REFERENCES public.users(id) ON DELETE CASCADE,
-    last_organization_id UUID REFERENCES public.organizations(id) ON DELETE SET NULL,
-    theme TEXT DEFAULT 'system' CHECK (theme IN ('light', 'dark', 'system')),
-    notifications_enabled BOOLEAN DEFAULT true,
-    email_notifications BOOLEAN DEFAULT true,
-    language TEXT DEFAULT 'en',
-    timezone TEXT DEFAULT 'UTC',
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- Workspaces
-CREATE TABLE IF NOT EXISTS public.workspaces (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    slug TEXT NOT NULL,
-    description TEXT,
-    visibility TEXT DEFAULT 'private' CHECK (visibility IN ('private', 'team', 'public')),
-    settings JSONB DEFAULT '{}'::jsonb,
-    created_by UUID REFERENCES public.users(id),
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(organization_id, slug)
-);
-
-CREATE INDEX IF NOT EXISTS idx_workspaces_org ON public.workspaces(organization_id);
-CREATE INDEX IF NOT EXISTS idx_workspaces_slug ON public.workspaces(slug);
-
--- Workspace Members
-CREATE TABLE IF NOT EXISTS public.workspace_members (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
-    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
-    role TEXT DEFAULT 'member' CHECK (role IN ('owner', 'admin', 'member', 'viewer')),
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(workspace_id, user_id)
-);
-
-CREATE INDEX IF NOT EXISTS idx_workspace_members_workspace ON public.workspace_members(workspace_id);
-CREATE INDEX IF NOT EXISTS idx_workspace_members_user ON public.workspace_members(user_id);
-
--- Projects (linked to workspaces)
+-- TABLE: projects
 CREATE TABLE IF NOT EXISTS public.projects (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    workspace_id UUID NOT NULL REFERENCES public.workspaces(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    slug TEXT NOT NULL,
-    description TEXT,
-    status TEXT DEFAULT 'active' CHECK (status IN ('active', 'archived', 'deleted')),
-    settings JSONB DEFAULT '{}'::jsonb,
-    created_by UUID REFERENCES public.users(id),
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(workspace_id, slug)
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  slug TEXT NOT NULL,
+  description TEXT,
+  organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  owner_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  start_date DATE,
+  target_date DATE,
+  status TEXT DEFAULT 'active',
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(organization_id, slug)
 );
 
-CREATE INDEX IF NOT EXISTS idx_projects_workspace ON public.projects(workspace_id);
-CREATE INDEX IF NOT EXISTS idx_projects_status ON public.projects(status);
+CREATE TRIGGER set_timestamp_projects
+  BEFORE UPDATE ON public.projects
+  FOR EACH ROW EXECUTE FUNCTION trigger_set_timestamp();
+
+CREATE INDEX IF NOT EXISTS idx_projects_organization_id ON public.projects(organization_id);
 CREATE INDEX IF NOT EXISTS idx_projects_slug ON public.projects(slug);
 
--- ============================================================================
--- CATALOG TABLES
--- ============================================================================
-
--- Manufacturers
-CREATE TABLE IF NOT EXISTS public.manufacturers (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name TEXT NOT NULL UNIQUE,
-    slug TEXT UNIQUE NOT NULL,
-    normalized_name TEXT,
-    aliases TEXT[] DEFAULT '{}',
-    website TEXT,
-    description TEXT,
-    logo_url TEXT,
-    is_verified BOOLEAN DEFAULT false,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_manufacturers_slug ON public.manufacturers(slug);
-CREATE INDEX IF NOT EXISTS idx_manufacturers_name ON public.manufacturers(name);
-
--- Categories
-CREATE TABLE IF NOT EXISTS public.categories (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name TEXT NOT NULL,
-    slug TEXT UNIQUE NOT NULL,
-    parent_id UUID REFERENCES public.categories(id) ON DELETE CASCADE,
-    level INTEGER DEFAULT 0,
-    path TEXT,
-    description TEXT,
-    image_url TEXT,
-    component_count INTEGER DEFAULT 0,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_categories_parent ON public.categories(parent_id);
-CREATE INDEX IF NOT EXISTS idx_categories_path ON public.categories(path);
-CREATE INDEX IF NOT EXISTS idx_categories_slug ON public.categories(slug);
-
--- Suppliers
-CREATE TABLE IF NOT EXISTS public.suppliers (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    name TEXT NOT NULL UNIQUE,
-    slug TEXT UNIQUE NOT NULL,
-    api_key_required BOOLEAN DEFAULT false,
-    api_endpoint TEXT,
-    website TEXT,
-    priority INTEGER DEFAULT 50,
-    is_active BOOLEAN DEFAULT true,
-    rate_limit_per_minute INTEGER,
-    rate_limit_per_day INTEGER,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_suppliers_priority ON public.suppliers(priority);
-CREATE INDEX IF NOT EXISTS idx_suppliers_slug ON public.suppliers(slug);
-
--- Components
-CREATE TABLE IF NOT EXISTS public.components (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    organization_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE,
-    manufacturer_id UUID REFERENCES public.manufacturers(id) ON DELETE SET NULL,
-    category_id UUID REFERENCES public.categories(id) ON DELETE SET NULL,
-    manufacturer_part_number TEXT NOT NULL,
-    manufacturer TEXT,
-    description TEXT,
-    datasheet_url TEXT,
-    image_url TEXT,
-    lifecycle_status TEXT CHECK (lifecycle_status IN ('Active', 'NRND', 'EOL', 'Obsolete', 'Preview', 'Unknown')),
-    lifecycle_change_date DATE,
-    risk_level TEXT CHECK (risk_level IN ('GREEN', 'YELLOW', 'ORANGE', 'RED', 'CRITICAL')),
-    rohs_compliant TEXT CHECK (rohs_compliant IN ('COMPLIANT', 'NON_COMPLIANT', 'UNKNOWN')),
-    reach_compliant TEXT CHECK (reach_compliant IN ('COMPLIANT', 'NON_COMPLIANT', 'UNKNOWN')),
-    has_alternatives BOOLEAN DEFAULT false,
-    alternative_part_numbers TEXT[],
-    unit_price NUMERIC(14,4),
-    currency TEXT DEFAULT 'USD',
-    stock_quantity INTEGER,
-    moq INTEGER,
-    lead_time_days INTEGER,
-    quality_score NUMERIC(5,2),
-    package_type TEXT,
-    mounting_style TEXT CHECK (mounting_style IN ('SMD', 'THT', 'HYBRID')),
-    temp_min_c INTEGER,
-    temp_max_c INTEGER,
-    power_rating_w DECIMAL(10,4),
-    specifications JSONB DEFAULT '{}'::jsonb,
-    metadata JSONB DEFAULT '{}'::jsonb,
-    search_vector TSVECTOR,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    last_enriched_at TIMESTAMPTZ
-);
-
-CREATE INDEX IF NOT EXISTS idx_components_org ON public.components(organization_id);
-CREATE INDEX IF NOT EXISTS idx_components_manufacturer ON public.components(manufacturer_id);
-CREATE INDEX IF NOT EXISTS idx_components_category ON public.components(category_id);
-CREATE INDEX IF NOT EXISTS idx_components_mpn ON public.components(manufacturer_part_number);
-CREATE INDEX IF NOT EXISTS idx_components_lifecycle ON public.components(lifecycle_status);
-CREATE INDEX IF NOT EXISTS idx_components_risk ON public.components(risk_level);
-CREATE INDEX IF NOT EXISTS idx_components_search ON public.components USING GIN(search_vector);
-
--- Attributes
-CREATE TABLE IF NOT EXISTS public.attributes (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    component_id UUID NOT NULL REFERENCES public.components(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    value TEXT NOT NULL,
-    unit TEXT,
-    source TEXT,
-    confidence NUMERIC(5,2),
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_attributes_component ON public.attributes(component_id);
-CREATE INDEX IF NOT EXISTS idx_attributes_name ON public.attributes(name);
-
--- ============================================================================
--- BOM MANAGEMENT
--- ============================================================================
-
--- BOMs
+-- TABLE: boms
 CREATE TABLE IF NOT EXISTS public.boms (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
-    project_id UUID REFERENCES public.projects(id) ON DELETE SET NULL,
-    name TEXT NOT NULL,
-    version TEXT,
-    description TEXT,
-    status TEXT DEFAULT 'draft' CHECK (status IN ('draft', 'pending', 'processing', 'completed', 'failed', 'archived')),
-    component_count INTEGER DEFAULT 0,
-    total_cost DECIMAL(12,2),
-    enrichment_status TEXT DEFAULT 'pending' CHECK (enrichment_status IN ('pending', 'queued', 'processing', 'enriched', 'failed')),
-    enrichment_priority INTEGER DEFAULT 5 CHECK (enrichment_priority >= 1 AND enrichment_priority <= 10),
-    temporal_workflow_id TEXT,
-    source TEXT,
-    priority TEXT DEFAULT 'normal' CHECK (priority IN ('high', 'normal')),
-    raw_file_s3_key TEXT,
-    parsed_file_s3_key TEXT,
-    metadata JSONB DEFAULT '{}'::jsonb,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  description TEXT,
+  organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  project_id UUID REFERENCES public.projects(id) ON DELETE SET NULL,
+  created_by_id UUID REFERENCES public.users(id),
+  status TEXT DEFAULT 'draft', -- draft, pending, analyzing, enriching, completed, failed, archived
+  source TEXT DEFAULT 'manual', -- manual, customer, api
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_boms_org ON public.boms(organization_id);
-CREATE INDEX IF NOT EXISTS idx_boms_project ON public.boms(project_id);
+CREATE TRIGGER set_timestamp_boms
+  BEFORE UPDATE ON public.boms
+  FOR EACH ROW EXECUTE FUNCTION trigger_set_timestamp();
+
+CREATE INDEX IF NOT EXISTS idx_boms_organization_id ON public.boms(organization_id);
+CREATE INDEX IF NOT EXISTS idx_boms_project_id ON public.boms(project_id);
 CREATE INDEX IF NOT EXISTS idx_boms_status ON public.boms(status);
-CREATE INDEX IF NOT EXISTS idx_boms_enrichment_status ON public.boms(enrichment_status);
+CREATE INDEX IF NOT EXISTS idx_boms_created_at ON public.boms(created_at DESC);
 
--- BOM Line Items
-CREATE TABLE IF NOT EXISTS public.bom_line_items (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    bom_id UUID NOT NULL REFERENCES public.boms(id) ON DELETE CASCADE,
-    line_number INTEGER,
-    reference_designator TEXT,
-    manufacturer_part_number TEXT,
-    manufacturer TEXT,
-    description TEXT,
-    quantity INTEGER DEFAULT 1,
-    component_id UUID,
-    match_confidence NUMERIC(5,2),
-    match_method TEXT CHECK (match_method IN ('exact', 'fuzzy', 'manual', 'unmatched')),
-    enrichment_status TEXT DEFAULT 'pending' CHECK (enrichment_status IN ('pending', 'matched', 'enriched', 'no_match', 'error')),
-    enriched_mpn TEXT,
-    enriched_manufacturer TEXT,
-    specifications JSONB,
-    datasheet_url TEXT,
-    lifecycle_status TEXT,
-    compliance_status JSONB,
-    pricing JSONB,
-    unit_price DECIMAL(10,4),
-    extended_price DECIMAL(12,2),
-    risk_level TEXT CHECK (risk_level IN ('GREEN', 'YELLOW', 'ORANGE', 'RED')),
-    redis_component_key TEXT,
-    component_storage TEXT DEFAULT 'none',
-    enrichment_error TEXT,
-    category VARCHAR(255),
-    subcategory VARCHAR(255),
-    metadata JSONB DEFAULT '{}'::jsonb,
-    enriched_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+-- TABLE: bom_uploads
+CREATE TABLE IF NOT EXISTS public.bom_uploads (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  bom_id UUID REFERENCES public.boms(id) ON DELETE SET NULL,
+  uploaded_by UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  filename TEXT NOT NULL,
+  file_size INTEGER,
+  s3_key TEXT,
+  s3_url TEXT,
+  status TEXT DEFAULT 'pending',
+  error_message TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_bom_line_items_bom ON public.bom_line_items(bom_id);
-CREATE INDEX IF NOT EXISTS idx_bom_line_items_component ON public.bom_line_items(component_id);
+CREATE INDEX IF NOT EXISTS idx_bom_uploads_organization_id ON public.bom_uploads(organization_id);
+CREATE INDEX IF NOT EXISTS idx_bom_uploads_bom_id ON public.bom_uploads(bom_id);
+CREATE INDEX IF NOT EXISTS idx_bom_uploads_status ON public.bom_uploads(status);
+
+-- TABLE: bom_line_items
+CREATE TABLE IF NOT EXISTS public.bom_line_items (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  bom_id UUID NOT NULL REFERENCES public.boms(id) ON DELETE CASCADE,
+  line_number INTEGER,
+  manufacturer_part_number TEXT,
+  manufacturer TEXT,
+  description TEXT,
+  quantity INTEGER DEFAULT 1,
+  reference_designators TEXT,
+  notes TEXT,
+  component_id INTEGER,
+  enrichment_status TEXT DEFAULT 'pending',
+  enrichment_data JSONB,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_bom_line_items_bom_id ON public.bom_line_items(bom_id);
 CREATE INDEX IF NOT EXISTS idx_bom_line_items_mpn ON public.bom_line_items(manufacturer_part_number);
 CREATE INDEX IF NOT EXISTS idx_bom_line_items_status ON public.bom_line_items(enrichment_status);
 
--- Legacy BOM Jobs (for CNS service compatibility)
-CREATE TABLE IF NOT EXISTS public.bom_jobs (
-    id SERIAL PRIMARY KEY,
-    job_id VARCHAR(100) NOT NULL UNIQUE,
-    customer_id INTEGER,
-    customer_name VARCHAR(255),
-    filename VARCHAR(255),
-    file_size INTEGER,
-    total_items INTEGER,
-    status VARCHAR(50) DEFAULT 'pending',
-    progress INTEGER DEFAULT 0,
-    items_processed INTEGER DEFAULT 0,
-    items_auto_approved INTEGER DEFAULT 0,
-    items_in_staging INTEGER DEFAULT 0,
-    items_rejected INTEGER DEFAULT 0,
-    items_failed INTEGER DEFAULT 0,
-    started_at TIMESTAMPTZ,
-    completed_at TIMESTAMPTZ,
-    processing_time_ms INTEGER,
-    error_message TEXT,
-    results_data JSONB,
-    organization_id UUID,
-    project_id UUID,
-    source VARCHAR(50) DEFAULT 'customer',
-    source_metadata JSONB,
-    priority INTEGER DEFAULT 5,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+-- TABLE: notifications
+CREATE TABLE IF NOT EXISTS public.notifications (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  message TEXT,
+  notification_type TEXT NOT NULL,
+  is_read BOOLEAN DEFAULT false,
+  data JSONB,
+  created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_bom_jobs_job_id ON public.bom_jobs(job_id);
-CREATE INDEX IF NOT EXISTS idx_bom_jobs_org ON public.bom_jobs(organization_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_user ON public.notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_org ON public.notifications(organization_id);
+CREATE INDEX IF NOT EXISTS idx_notifications_read ON public.notifications(is_read);
 
--- Legacy BOM Items
-CREATE TABLE IF NOT EXISTS public.bom_items (
-    id SERIAL PRIMARY KEY,
-    job_id VARCHAR(100) NOT NULL,
-    line_number INTEGER NOT NULL,
-    mpn VARCHAR(255),
-    manufacturer VARCHAR(255),
-    quantity INTEGER,
-    reference_designator TEXT,
-    description TEXT,
-    component_id INTEGER,
-    enriched_mpn VARCHAR(255),
-    enriched_manufacturer VARCHAR(255),
-    specifications JSONB,
-    datasheet_url TEXT,
-    lifecycle_status VARCHAR(50),
-    estimated_lifetime DATE,
-    compliance_status JSONB,
-    pricing JSONB,
-    match_confidence NUMERIC(5,2),
-    quality_score INTEGER,
-    routing_destination VARCHAR(50) DEFAULT 'staging',
-    enrichment_status VARCHAR(50) DEFAULT 'pending',
-    error_message TEXT,
-    retry_count INTEGER DEFAULT 0,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_bom_items_job_id ON public.bom_items(job_id);
-
--- BOM Processing Jobs
-CREATE TABLE IF NOT EXISTS public.bom_processing_jobs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    bom_id UUID NOT NULL REFERENCES public.boms(id) ON DELETE CASCADE,
-    organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
-    status TEXT DEFAULT 'queued' CHECK (status IN ('queued', 'processing', 'completed', 'failed', 'cancelled')),
-    priority INTEGER DEFAULT 5,
-    temporal_workflow_id TEXT,
-    total_items INTEGER,
-    processed_items INTEGER DEFAULT 0,
-    enriched_items INTEGER DEFAULT 0,
-    failed_items INTEGER DEFAULT 0,
-    started_at TIMESTAMPTZ,
-    completed_at TIMESTAMPTZ,
-    error_message TEXT,
-    metadata JSONB DEFAULT '{}'::jsonb,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_bom_processing_jobs_bom ON public.bom_processing_jobs(bom_id);
-CREATE INDEX IF NOT EXISTS idx_bom_processing_jobs_status ON public.bom_processing_jobs(status);
-
--- Column Mapping Templates
-CREATE TABLE IF NOT EXISTS public.column_mapping_templates (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
-    name TEXT NOT NULL,
-    description TEXT,
-    mappings JSONB NOT NULL,
-    is_default BOOLEAN DEFAULT false,
-    created_by UUID REFERENCES public.users(id),
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_column_mapping_templates_org ON public.column_mapping_templates(organization_id);
-
--- ============================================================================
--- ENRICHMENT SYSTEM
--- ============================================================================
-
--- CNS Enrichment Config
-CREATE TABLE IF NOT EXISTS public.cns_enrichment_config (
-    id SERIAL PRIMARY KEY,
-    tenant_id VARCHAR(100),
-    config_name VARCHAR(100) NOT NULL,
-    is_active BOOLEAN DEFAULT true,
-    is_global BOOLEAN DEFAULT false,
-    enable_suppliers BOOLEAN DEFAULT true,
-    preferred_suppliers TEXT[] DEFAULT ARRAY['mouser', 'digikey', 'element14'],
-    supplier_min_confidence NUMERIC(5,2) DEFAULT 90.0,
-    enable_ai BOOLEAN DEFAULT false,
-    ai_provider VARCHAR(50),
-    ai_operations TEXT[] DEFAULT ARRAY['category', 'specs'],
-    ai_min_confidence NUMERIC(5,2) DEFAULT 70.0,
-    ai_cost_limit_monthly NUMERIC(10,2),
-    enable_web_scraping BOOLEAN DEFAULT false,
-    scraping_sources TEXT[],
-    scraping_timeout_seconds INTEGER,
-    quality_reject_threshold INTEGER DEFAULT 70,
-    quality_staging_threshold INTEGER DEFAULT 94,
-    quality_auto_approve_threshold INTEGER DEFAULT 95,
-    batch_size INTEGER DEFAULT 100 CHECK (batch_size >= 1 AND batch_size <= 1000),
-    max_retries INTEGER DEFAULT 2 CHECK (max_retries >= 0 AND max_retries <= 10),
-    ai_cost_current_month NUMERIC(10,2),
-    ai_requests_current_month INTEGER,
-    web_scraping_requests_current_month INTEGER,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_cns_config_tenant ON public.cns_enrichment_config(tenant_id);
-CREATE INDEX IF NOT EXISTS idx_cns_config_global ON public.cns_enrichment_config(is_global) WHERE is_global = true;
-
--- CNS Processing Events
-CREATE TABLE IF NOT EXISTS public.cns_processing_events (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
-    bom_id UUID REFERENCES public.boms(id) ON DELETE CASCADE,
-    event_type VARCHAR(100) NOT NULL,
-    event_category VARCHAR(50) DEFAULT 'processing',
-    severity VARCHAR(20) DEFAULT 'info',
-    title TEXT NOT NULL,
-    message TEXT,
-    metadata JSONB DEFAULT '{}'::jsonb,
-    workflow_id VARCHAR(255),
-    actor_type VARCHAR(50) DEFAULT 'system',
-    actor_id VARCHAR(255),
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_cns_events_org ON public.cns_processing_events(organization_id);
-CREATE INDEX IF NOT EXISTS idx_cns_events_bom ON public.cns_processing_events(bom_id);
-CREATE INDEX IF NOT EXISTS idx_cns_events_type ON public.cns_processing_events(event_type);
-
--- Enrichment Events
-CREATE TABLE IF NOT EXISTS public.enrichment_events (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    event_id VARCHAR(255) UNIQUE NOT NULL,
-    event_type VARCHAR(100) NOT NULL,
-    routing_key VARCHAR(255),
-    bom_id UUID NOT NULL,
-    tenant_id UUID NOT NULL,
-    project_id UUID,
-    user_id UUID,
-    source VARCHAR(20) NOT NULL CHECK (source IN ('customer', 'staff')),
-    workflow_id VARCHAR(255),
-    state JSONB NOT NULL,
-    payload JSONB NOT NULL,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_enrichment_events_bom ON public.enrichment_events(bom_id);
-CREATE INDEX IF NOT EXISTS idx_enrichment_events_tenant ON public.enrichment_events(tenant_id);
-
--- Audit Logs
+-- TABLE: audit_logs
 CREATE TABLE IF NOT EXISTS public.audit_logs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    event_type TEXT NOT NULL,
-    routing_key TEXT NOT NULL,
-    organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
-    user_id TEXT,
-    username TEXT,
-    email TEXT,
-    source TEXT DEFAULT 'cns-service' NOT NULL,
-    event_data JSONB DEFAULT '{}'::jsonb,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  action TEXT NOT NULL,
+  resource_type TEXT,
+  resource_id TEXT,
+  old_values JSONB,
+  new_values JSONB,
+  ip_address INET,
+  user_agent TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_audit_logs_org ON public.audit_logs(organization_id);
-CREATE INDEX IF NOT EXISTS idx_audit_logs_type ON public.audit_logs(event_type);
-
--- Audit Enrichment Runs
-CREATE TABLE IF NOT EXISTS public.audit_enrichment_runs (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    upload_id TEXT NOT NULL,
-    line_id TEXT NOT NULL,
-    mpn TEXT NOT NULL,
-    manufacturer TEXT,
-    enrichment_timestamp TIMESTAMPTZ DEFAULT NOW() NOT NULL,
-    successful BOOLEAN DEFAULT false NOT NULL,
-    quality_score NUMERIC(5,2),
-    storage_location TEXT,
-    supplier_name TEXT NOT NULL,
-    supplier_match_confidence NUMERIC(5,2),
-    processing_time_ms INTEGER,
-    error_message TEXT,
-    needs_review BOOLEAN DEFAULT false,
-    review_notes TEXT,
-    reviewed_by TEXT,
-    reviewed_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_audit_enrichment_upload ON public.audit_enrichment_runs(upload_id);
-
--- Audit Field Comparisons
-CREATE TABLE IF NOT EXISTS public.audit_field_comparisons (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    enrichment_run_id UUID NOT NULL REFERENCES public.audit_enrichment_runs(id) ON DELETE CASCADE,
-    field_name TEXT NOT NULL,
-    field_category TEXT,
-    supplier_value TEXT,
-    normalized_value TEXT,
-    changed BOOLEAN DEFAULT false,
-    change_type TEXT,
-    change_reason TEXT,
-    confidence NUMERIC(5,2),
-    supplier_data_quality TEXT,
-    normalization_applied BOOLEAN DEFAULT false,
-    created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE INDEX IF NOT EXISTS idx_audit_field_comparisons_run ON public.audit_field_comparisons(enrichment_run_id);
-
--- Audit Supplier Quality
-CREATE TABLE IF NOT EXISTS public.audit_supplier_quality (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    date DATE NOT NULL,
-    supplier_name TEXT NOT NULL,
-    total_requests INTEGER DEFAULT 0,
-    successful_requests INTEGER DEFAULT 0,
-    failed_requests INTEGER DEFAULT 0,
-    avg_quality_score NUMERIC(5,2),
-    avg_match_confidence NUMERIC(5,2),
-    avg_processing_time_ms INTEGER,
-    fields_changed_count INTEGER DEFAULT 0,
-    fields_missing_count INTEGER DEFAULT 0,
-    fields_invalid_count INTEGER DEFAULT 0,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_audit_supplier_quality_date ON public.audit_supplier_quality(date, supplier_name);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON public.audit_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON public.audit_logs(created_at DESC);
 
 -- ============================================================================
--- ALERTS & NOTIFICATIONS
+-- SECTION 2: ENRICHMENT TABLES
 -- ============================================================================
 
--- Alerts
+-- TABLE: enrichment_queue
+CREATE TABLE IF NOT EXISTS public.enrichment_queue (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE,
+  bom_id UUID REFERENCES public.boms(id) ON DELETE CASCADE,
+  bom_line_item_id UUID REFERENCES public.bom_line_items(id) ON DELETE CASCADE,
+  mpn TEXT NOT NULL,
+  manufacturer TEXT,
+  priority INTEGER DEFAULT 0,
+  status TEXT DEFAULT 'pending',
+  attempts INTEGER DEFAULT 0,
+  last_attempt_at TIMESTAMPTZ,
+  error_message TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_enrichment_queue_status ON public.enrichment_queue(status);
+CREATE INDEX IF NOT EXISTS idx_enrichment_queue_priority ON public.enrichment_queue(priority DESC);
+CREATE INDEX IF NOT EXISTS idx_enrichment_queue_org ON public.enrichment_queue(organization_id);
+
+-- TABLE: enrichment_events
+CREATE TABLE IF NOT EXISTS public.enrichment_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE,
+  bom_id UUID REFERENCES public.boms(id) ON DELETE SET NULL,
+  event_type TEXT NOT NULL,
+  payload JSONB,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_enrichment_events_bom_id ON public.enrichment_events(bom_id);
+CREATE INDEX IF NOT EXISTS idx_enrichment_events_created_at ON public.enrichment_events(created_at DESC);
+
+-- TABLE: enrichment_audit_log
+CREATE TABLE IF NOT EXISTS public.enrichment_audit_log (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID REFERENCES public.organizations(id) ON DELETE CASCADE,
+  bom_id UUID REFERENCES public.boms(id) ON DELETE SET NULL,
+  line_item_id UUID REFERENCES public.bom_line_items(id) ON DELETE SET NULL,
+  mpn TEXT,
+  manufacturer TEXT,
+  supplier TEXT,
+  action TEXT NOT NULL,
+  data JSONB,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_enrichment_audit_org ON public.enrichment_audit_log(organization_id);
+CREATE INDEX IF NOT EXISTS idx_enrichment_audit_bom ON public.enrichment_audit_log(bom_id);
+
+-- ============================================================================
+-- SECTION 3: ALERT SYSTEM TABLES
+-- ============================================================================
+
+-- TABLE: alerts
 CREATE TABLE IF NOT EXISTS public.alerts (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
-    component_id UUID REFERENCES public.components(id) ON DELETE SET NULL,
-    user_id UUID REFERENCES public.users(id),
-    severity TEXT NOT NULL CHECK (severity IN ('LOW', 'MEDIUM', 'HIGH', 'CRITICAL')),
-    alert_type TEXT NOT NULL CHECK (alert_type IN ('LIFECYCLE', 'RISK', 'PRICE', 'AVAILABILITY', 'COMPLIANCE', 'PCN', 'SUPPLY_CHAIN')),
-    title TEXT NOT NULL,
-    message TEXT,
-    is_read BOOLEAN DEFAULT false,
-    is_dismissed BOOLEAN DEFAULT false,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    read_at TIMESTAMPTZ,
-    dismissed_at TIMESTAMPTZ,
-    deleted_at TIMESTAMPTZ,
-    context JSONB,
-    action_url TEXT,
-    archived_at TIMESTAMPTZ,
-    snoozed_until TIMESTAMPTZ
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES public.users(id) ON DELETE SET NULL,
+  component_id UUID,
+  bom_id UUID REFERENCES public.boms(id) ON DELETE SET NULL,
+  alert_type TEXT NOT NULL CHECK (alert_type IN ('LIFECYCLE', 'RISK', 'PRICE', 'AVAILABILITY', 'COMPLIANCE', 'PCN', 'SUPPLY_CHAIN')),
+  severity TEXT NOT NULL CHECK (severity IN ('critical', 'warning', 'info')),
+  title TEXT NOT NULL,
+  message TEXT,
+  action_url TEXT,
+  is_actionable BOOLEAN DEFAULT false,
+  is_read BOOLEAN DEFAULT false,
+  acknowledged_at TIMESTAMPTZ,
+  acknowledged_by UUID REFERENCES public.users(id),
+  created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_alerts_org ON public.alerts(organization_id);
-CREATE INDEX IF NOT EXISTS idx_alerts_user ON public.alerts(user_id);
-CREATE INDEX IF NOT EXISTS idx_alerts_component ON public.alerts(component_id);
+CREATE INDEX IF NOT EXISTS idx_alerts_organization_id ON public.alerts(organization_id);
+CREATE INDEX IF NOT EXISTS idx_alerts_user_id ON public.alerts(user_id);
+CREATE INDEX IF NOT EXISTS idx_alerts_bom_id ON public.alerts(bom_id);
 CREATE INDEX IF NOT EXISTS idx_alerts_severity ON public.alerts(severity);
-CREATE INDEX IF NOT EXISTS idx_alerts_type ON public.alerts(alert_type);
+CREATE INDEX IF NOT EXISTS idx_alerts_is_read ON public.alerts(is_read);
+CREATE INDEX IF NOT EXISTS idx_alerts_created_at ON public.alerts(created_at DESC);
 
--- Alert Preferences
+-- TABLE: alert_preferences
 CREATE TABLE IF NOT EXISTS public.alert_preferences (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
-    organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
-    alert_type TEXT NOT NULL CHECK (alert_type IN ('LIFECYCLE', 'RISK', 'PRICE', 'AVAILABILITY', 'COMPLIANCE', 'PCN', 'SUPPLY_CHAIN')),
-    is_active BOOLEAN DEFAULT true,
-    in_app_enabled BOOLEAN DEFAULT true,
-    email_enabled BOOLEAN DEFAULT false,
-    webhook_enabled BOOLEAN DEFAULT false,
-    webhook_url TEXT,
-    email_address TEXT,
-    threshold_config JSONB,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    updated_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(user_id, organization_id, alert_type)
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
+  organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  alert_type TEXT NOT NULL CHECK (alert_type IN ('LIFECYCLE', 'RISK', 'PRICE', 'AVAILABILITY', 'COMPLIANCE', 'PCN', 'SUPPLY_CHAIN')),
+  is_active BOOLEAN DEFAULT true,
+  in_app_enabled BOOLEAN DEFAULT true,
+  email_enabled BOOLEAN DEFAULT false,
+  webhook_enabled BOOLEAN DEFAULT false,
+  min_severity TEXT DEFAULT 'info' CHECK (min_severity IN ('critical', 'warning', 'info')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(user_id, organization_id, alert_type)
 );
 
 CREATE INDEX IF NOT EXISTS idx_alert_preferences_user ON public.alert_preferences(user_id);
 CREATE INDEX IF NOT EXISTS idx_alert_preferences_org ON public.alert_preferences(organization_id);
 
--- Alert Deliveries
+-- TABLE: alert_deliveries
 CREATE TABLE IF NOT EXISTS public.alert_deliveries (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    alert_id UUID NOT NULL REFERENCES public.alerts(id) ON DELETE CASCADE,
-    delivery_method TEXT NOT NULL,
-    recipient TEXT NOT NULL,
-    status TEXT DEFAULT 'pending',
-    delivered_at TIMESTAMPTZ,
-    novu_transaction_id TEXT,
-    error_message TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  alert_id UUID NOT NULL REFERENCES public.alerts(id) ON DELETE CASCADE,
+  channel TEXT NOT NULL,
+  status TEXT DEFAULT 'pending',
+  delivered_at TIMESTAMPTZ,
+  error_message TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_alert_deliveries_alert ON public.alert_deliveries(alert_id);
+CREATE INDEX IF NOT EXISTS idx_alert_deliveries_status ON public.alert_deliveries(status);
 
--- Component Watches
+-- TABLE: component_watches
 CREATE TABLE IF NOT EXISTS public.component_watches (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
-    organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
-    component_id UUID NOT NULL REFERENCES public.components(id) ON DELETE CASCADE,
-    watch_lifecycle BOOLEAN DEFAULT true,
-    watch_price BOOLEAN DEFAULT true,
-    watch_availability BOOLEAN DEFAULT true,
-    watch_compliance BOOLEAN DEFAULT true,
-    watch_supply_chain BOOLEAN DEFAULT true,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    UNIQUE(user_id, component_id)
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id UUID NOT NULL REFERENCES public.users(id) ON DELETE CASCADE,
+  component_id UUID,
+  mpn TEXT,
+  manufacturer TEXT,
+  watch_lifecycle BOOLEAN DEFAULT true,
+  watch_price BOOLEAN DEFAULT true,
+  watch_availability BOOLEAN DEFAULT true,
+  watch_compliance BOOLEAN DEFAULT true,
+  watch_supply_chain BOOLEAN DEFAULT true,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE INDEX IF NOT EXISTS idx_component_watches_user ON public.component_watches(user_id);
-CREATE INDEX IF NOT EXISTS idx_component_watches_component ON public.component_watches(component_id);
+CREATE INDEX IF NOT EXISTS idx_component_watches_mpn ON public.component_watches(mpn);
 
--- Notifications
-CREATE TABLE IF NOT EXISTS public.notifications (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
-    user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
-    type TEXT NOT NULL,
-    title TEXT NOT NULL,
-    message TEXT,
-    data JSONB,
-    is_read BOOLEAN DEFAULT false,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    read_at TIMESTAMPTZ
+-- ============================================================================
+-- SECTION 4: RISK ANALYSIS TABLES
+-- ============================================================================
+
+-- TABLE: organization_risk_profiles
+CREATE TABLE IF NOT EXISTS public.organization_risk_profiles (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE UNIQUE,
+  -- Risk Factor Weights (must sum to 100)
+  lifecycle_weight INTEGER DEFAULT 30 CHECK (lifecycle_weight BETWEEN 0 AND 100),
+  supply_chain_weight INTEGER DEFAULT 25 CHECK (supply_chain_weight BETWEEN 0 AND 100),
+  compliance_weight INTEGER DEFAULT 20 CHECK (compliance_weight BETWEEN 0 AND 100),
+  obsolescence_weight INTEGER DEFAULT 15 CHECK (obsolescence_weight BETWEEN 0 AND 100),
+  single_source_weight INTEGER DEFAULT 10 CHECK (single_source_weight BETWEEN 0 AND 100),
+  -- Thresholds
+  low_threshold INTEGER DEFAULT 30 CHECK (low_threshold BETWEEN 1 AND 99),
+  medium_threshold INTEGER DEFAULT 60 CHECK (medium_threshold BETWEEN 1 AND 99),
+  high_threshold INTEGER DEFAULT 85 CHECK (high_threshold BETWEEN 1 AND 99),
+  -- Context Weights
+  quantity_weight DECIMAL(4,3) DEFAULT 0.150,
+  lead_time_weight DECIMAL(4,3) DEFAULT 0.100,
+  criticality_weight DECIMAL(4,3) DEFAULT 0.200,
+  -- Preset
+  preset_name TEXT CHECK (preset_name IN ('default', 'automotive', 'medical', 'aerospace', 'consumer', 'industrial', 'custom')),
+  custom_factors JSONB DEFAULT '[]'::jsonb,
+  -- Timestamps
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  created_by UUID,
+  updated_by UUID,
+  CHECK (low_threshold < medium_threshold AND medium_threshold < high_threshold),
+  CHECK (lifecycle_weight + supply_chain_weight + compliance_weight + obsolescence_weight + single_source_weight = 100)
 );
 
-CREATE INDEX IF NOT EXISTS idx_notifications_org ON public.notifications(organization_id);
-CREATE INDEX IF NOT EXISTS idx_notifications_user ON public.notifications(user_id);
+CREATE INDEX IF NOT EXISTS idx_org_risk_profiles_org_id ON public.organization_risk_profiles(organization_id);
+
+-- TABLE: component_base_risk_scores
+CREATE TABLE IF NOT EXISTS public.component_base_risk_scores (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  mpn TEXT NOT NULL,
+  manufacturer TEXT NOT NULL,
+  -- Individual Risk Factors
+  lifecycle_risk INTEGER DEFAULT 0 CHECK (lifecycle_risk BETWEEN 0 AND 100),
+  supply_chain_risk INTEGER DEFAULT 0 CHECK (supply_chain_risk BETWEEN 0 AND 100),
+  compliance_risk INTEGER DEFAULT 0 CHECK (compliance_risk BETWEEN 0 AND 100),
+  obsolescence_risk INTEGER DEFAULT 0 CHECK (obsolescence_risk BETWEEN 0 AND 100),
+  single_source_risk INTEGER DEFAULT 0 CHECK (single_source_risk BETWEEN 0 AND 100),
+  -- Total Score
+  default_total_score INTEGER DEFAULT 0 CHECK (default_total_score BETWEEN 0 AND 100),
+  default_risk_level TEXT CHECK (default_risk_level IN ('low', 'medium', 'high', 'critical')) DEFAULT 'low',
+  risk_factors JSONB DEFAULT '{}'::jsonb,
+  -- Metadata
+  calculation_date TIMESTAMPTZ DEFAULT NOW(),
+  calculation_method TEXT DEFAULT 'weighted_average_v1',
+  data_sources TEXT[] DEFAULT ARRAY[]::TEXT[],
+  lead_time_days INTEGER,
+  stock_quantity INTEGER,
+  supplier_count INTEGER DEFAULT 0,
+  -- Timestamps
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(mpn, manufacturer)
+);
+
+CREATE INDEX IF NOT EXISTS idx_component_base_risk_mpn ON public.component_base_risk_scores(mpn);
+CREATE INDEX IF NOT EXISTS idx_component_base_risk_level ON public.component_base_risk_scores(default_risk_level);
+
+-- TABLE: bom_line_item_risk_scores
+CREATE TABLE IF NOT EXISTS public.bom_line_item_risk_scores (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  bom_line_item_id UUID NOT NULL REFERENCES public.bom_line_items(id) ON DELETE CASCADE UNIQUE,
+  organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  base_risk_id UUID REFERENCES public.component_base_risk_scores(id) ON DELETE SET NULL,
+  base_risk_score INTEGER NOT NULL DEFAULT 0 CHECK (base_risk_score BETWEEN 0 AND 100),
+  -- Context Modifiers
+  quantity_modifier INTEGER DEFAULT 0,
+  lead_time_modifier INTEGER DEFAULT 0,
+  criticality_modifier INTEGER DEFAULT 0,
+  user_criticality_level INTEGER DEFAULT 5 CHECK (user_criticality_level BETWEEN 1 AND 10),
+  -- Final Score
+  contextual_risk_score INTEGER NOT NULL DEFAULT 0 CHECK (contextual_risk_score BETWEEN 0 AND 100),
+  risk_level TEXT CHECK (risk_level IN ('low', 'medium', 'high', 'critical')) DEFAULT 'low',
+  -- Alternates
+  alternates_available INTEGER DEFAULT 0,
+  alternate_risk_reduction INTEGER DEFAULT 0,
+  -- Metadata
+  calculated_at TIMESTAMPTZ DEFAULT NOW(),
+  profile_version_used UUID,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_bli_risk_bom_line_item ON public.bom_line_item_risk_scores(bom_line_item_id);
+CREATE INDEX IF NOT EXISTS idx_bli_risk_org ON public.bom_line_item_risk_scores(organization_id);
+CREATE INDEX IF NOT EXISTS idx_bli_risk_level ON public.bom_line_item_risk_scores(risk_level);
+
+-- TABLE: bom_risk_summaries
+CREATE TABLE IF NOT EXISTS public.bom_risk_summaries (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  bom_id UUID NOT NULL REFERENCES public.boms(id) ON DELETE CASCADE UNIQUE,
+  organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  -- Risk Distribution
+  low_risk_count INTEGER DEFAULT 0,
+  medium_risk_count INTEGER DEFAULT 0,
+  high_risk_count INTEGER DEFAULT 0,
+  critical_risk_count INTEGER DEFAULT 0,
+  total_line_items INTEGER DEFAULT 0,
+  -- Aggregate Scores
+  average_risk_score DECIMAL(5,2) DEFAULT 0,
+  weighted_risk_score DECIMAL(5,2) DEFAULT 0,
+  max_risk_score INTEGER DEFAULT 0,
+  min_risk_score INTEGER DEFAULT 0,
+  -- Health Grade
+  health_grade TEXT CHECK (health_grade IN ('A', 'B', 'C', 'D', 'F')) DEFAULT 'A',
+  top_risk_factors JSONB DEFAULT '[]'::jsonb,
+  top_risk_components JSONB DEFAULT '[]'::jsonb,
+  -- Trend
+  previous_average_score DECIMAL(5,2),
+  score_trend TEXT CHECK (score_trend IN ('improving', 'stable', 'worsening')) DEFAULT 'stable',
+  -- Metadata
+  calculated_at TIMESTAMPTZ DEFAULT NOW(),
+  profile_version_used UUID,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_bom_risk_summary_bom ON public.bom_risk_summaries(bom_id);
+CREATE INDEX IF NOT EXISTS idx_bom_risk_summary_org ON public.bom_risk_summaries(organization_id);
+CREATE INDEX IF NOT EXISTS idx_bom_risk_summary_grade ON public.bom_risk_summaries(health_grade);
+
+-- TABLE: project_risk_summaries
+CREATE TABLE IF NOT EXISTS public.project_risk_summaries (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  project_id UUID NOT NULL REFERENCES public.projects(id) ON DELETE CASCADE UNIQUE,
+  organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  -- BOM Counts
+  total_boms INTEGER DEFAULT 0,
+  healthy_boms INTEGER DEFAULT 0,
+  at_risk_boms INTEGER DEFAULT 0,
+  critical_boms INTEGER DEFAULT 0,
+  -- Component Counts
+  total_components INTEGER DEFAULT 0,
+  unique_components INTEGER DEFAULT 0,
+  -- Aggregate Metrics
+  average_bom_health_score DECIMAL(5,2) DEFAULT 0,
+  weighted_project_score DECIMAL(5,2) DEFAULT 0,
+  -- Risk Distribution
+  low_risk_total INTEGER DEFAULT 0,
+  medium_risk_total INTEGER DEFAULT 0,
+  high_risk_total INTEGER DEFAULT 0,
+  critical_risk_total INTEGER DEFAULT 0,
+  top_risk_factors JSONB DEFAULT '[]'::jsonb,
+  -- Metadata
+  calculated_at TIMESTAMPTZ DEFAULT NOW(),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_project_risk_summary_project ON public.project_risk_summaries(project_id);
+CREATE INDEX IF NOT EXISTS idx_project_risk_summary_org ON public.project_risk_summaries(organization_id);
+
+-- TABLE: risk_score_history
+CREATE TABLE IF NOT EXISTS public.risk_score_history (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  entity_type TEXT NOT NULL CHECK (entity_type IN ('bom', 'component', 'project')),
+  entity_id UUID NOT NULL,
+  organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  total_risk_score INTEGER NOT NULL CHECK (total_risk_score BETWEEN 0 AND 100),
+  risk_level TEXT NOT NULL CHECK (risk_level IN ('low', 'medium', 'high', 'critical')),
+  score_change INTEGER DEFAULT 0,
+  lifecycle_risk INTEGER,
+  supply_chain_risk INTEGER,
+  compliance_risk INTEGER,
+  obsolescence_risk INTEGER,
+  single_source_risk INTEGER,
+  health_grade TEXT CHECK (health_grade IN ('A', 'B', 'C', 'D', 'F')),
+  recorded_date TIMESTAMPTZ DEFAULT NOW(),
+  calculation_method TEXT,
+  UNIQUE(entity_type, entity_id, recorded_date::DATE)
+);
+
+CREATE INDEX IF NOT EXISTS idx_risk_history_entity ON public.risk_score_history(entity_type, entity_id);
+CREATE INDEX IF NOT EXISTS idx_risk_history_org ON public.risk_score_history(organization_id);
+CREATE INDEX IF NOT EXISTS idx_risk_history_date ON public.risk_score_history(recorded_date DESC);
 
 -- ============================================================================
--- UTILITY FUNCTIONS
+-- SECTION 5: BILLING TABLES
 -- ============================================================================
 
--- Get current user ID
-CREATE OR REPLACE FUNCTION public.get_current_user_id()
-RETURNS UUID
+-- TABLE: subscription_plans
+CREATE TABLE IF NOT EXISTS public.subscription_plans (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  tier subscription_tier NOT NULL,
+  slug TEXT UNIQUE NOT NULL,
+  price_monthly INTEGER NOT NULL DEFAULT 0,
+  price_yearly INTEGER,
+  currency TEXT NOT NULL DEFAULT 'USD',
+  billing_interval TEXT NOT NULL DEFAULT 'month',
+  trial_days INTEGER DEFAULT 0,
+  limits JSONB NOT NULL DEFAULT '{}'::jsonb,
+  description TEXT,
+  features TEXT[],
+  is_popular BOOLEAN DEFAULT FALSE,
+  display_order INTEGER DEFAULT 0,
+  is_active BOOLEAN DEFAULT TRUE,
+  provider_plan_ids JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_subscription_plans_tier ON public.subscription_plans(tier);
+CREATE INDEX IF NOT EXISTS idx_subscription_plans_active ON public.subscription_plans(is_active) WHERE is_active = TRUE;
+
+-- TABLE: billing_customers
+CREATE TABLE IF NOT EXISTS public.billing_customers (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE UNIQUE,
+  billing_email TEXT NOT NULL,
+  billing_name TEXT,
+  billing_address JSONB DEFAULT '{}'::jsonb,
+  tax_id TEXT,
+  tax_exempt BOOLEAN DEFAULT FALSE,
+  provider_customer_ids JSONB DEFAULT '{}'::jsonb,
+  default_payment_method_id UUID,
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_billing_customers_org ON public.billing_customers(organization_id);
+
+-- TABLE: payment_methods
+CREATE TABLE IF NOT EXISTS public.payment_methods (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  billing_customer_id UUID NOT NULL REFERENCES public.billing_customers(id) ON DELETE CASCADE,
+  type TEXT NOT NULL,
+  display_name TEXT,
+  brand TEXT,
+  last_four TEXT,
+  exp_month INTEGER,
+  exp_year INTEGER,
+  provider TEXT NOT NULL,
+  provider_payment_method_id TEXT NOT NULL,
+  is_default BOOLEAN DEFAULT FALSE,
+  is_valid BOOLEAN DEFAULT TRUE,
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_payment_methods_customer ON public.payment_methods(billing_customer_id);
+
+-- TABLE: subscriptions
+CREATE TABLE IF NOT EXISTS public.subscriptions (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  billing_customer_id UUID NOT NULL REFERENCES public.billing_customers(id) ON DELETE CASCADE,
+  plan_id UUID NOT NULL REFERENCES public.subscription_plans(id),
+  organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE UNIQUE,
+  status subscription_status NOT NULL DEFAULT 'active',
+  current_period_start TIMESTAMPTZ NOT NULL,
+  current_period_end TIMESTAMPTZ NOT NULL,
+  trial_start TIMESTAMPTZ,
+  trial_end TIMESTAMPTZ,
+  cancel_at_period_end BOOLEAN DEFAULT FALSE,
+  canceled_at TIMESTAMPTZ,
+  cancellation_reason TEXT,
+  provider TEXT,
+  provider_subscription_id TEXT,
+  provider_data JSONB DEFAULT '{}'::jsonb,
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_subscriptions_org ON public.subscriptions(organization_id);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON public.subscriptions(status);
+
+-- TABLE: invoices
+CREATE TABLE IF NOT EXISTS public.invoices (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  invoice_number TEXT UNIQUE NOT NULL,
+  billing_customer_id UUID NOT NULL REFERENCES public.billing_customers(id),
+  subscription_id UUID REFERENCES public.subscriptions(id),
+  organization_id UUID NOT NULL REFERENCES public.organizations(id),
+  status invoice_status NOT NULL DEFAULT 'draft',
+  subtotal INTEGER NOT NULL DEFAULT 0,
+  tax INTEGER NOT NULL DEFAULT 0,
+  total INTEGER NOT NULL DEFAULT 0,
+  amount_paid INTEGER NOT NULL DEFAULT 0,
+  amount_due INTEGER NOT NULL DEFAULT 0,
+  currency TEXT NOT NULL DEFAULT 'USD',
+  invoice_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  due_date TIMESTAMPTZ,
+  paid_at TIMESTAMPTZ,
+  period_start TIMESTAMPTZ,
+  period_end TIMESTAMPTZ,
+  provider TEXT,
+  provider_invoice_id TEXT,
+  provider_data JSONB DEFAULT '{}'::jsonb,
+  invoice_pdf_url TEXT,
+  hosted_invoice_url TEXT,
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_invoices_customer ON public.invoices(billing_customer_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_org ON public.invoices(organization_id);
+CREATE INDEX IF NOT EXISTS idx_invoices_status ON public.invoices(status);
+
+-- TABLE: invoice_line_items
+CREATE TABLE IF NOT EXISTS public.invoice_line_items (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  invoice_id UUID NOT NULL REFERENCES public.invoices(id) ON DELETE CASCADE,
+  description TEXT NOT NULL,
+  quantity INTEGER NOT NULL DEFAULT 1,
+  unit_amount INTEGER NOT NULL,
+  amount INTEGER NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'USD',
+  period_start TIMESTAMPTZ,
+  period_end TIMESTAMPTZ,
+  type TEXT DEFAULT 'subscription',
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_invoice_line_items_invoice ON public.invoice_line_items(invoice_id);
+
+-- TABLE: payments
+CREATE TABLE IF NOT EXISTS public.payments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  billing_customer_id UUID NOT NULL REFERENCES public.billing_customers(id),
+  invoice_id UUID REFERENCES public.invoices(id),
+  subscription_id UUID REFERENCES public.subscriptions(id),
+  payment_method_id UUID REFERENCES public.payment_methods(id),
+  amount INTEGER NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'USD',
+  status payment_status NOT NULL DEFAULT 'pending',
+  provider TEXT NOT NULL,
+  provider_payment_id TEXT NOT NULL,
+  provider_data JSONB DEFAULT '{}'::jsonb,
+  failure_code TEXT,
+  failure_message TEXT,
+  refunded_amount INTEGER DEFAULT 0,
+  metadata JSONB DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_payments_customer ON public.payments(billing_customer_id);
+CREATE INDEX IF NOT EXISTS idx_payments_status ON public.payments(status);
+
+-- TABLE: usage_records
+CREATE TABLE IF NOT EXISTS public.usage_records (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  subscription_id UUID REFERENCES public.subscriptions(id),
+  usage_type TEXT NOT NULL,
+  period_start TIMESTAMPTZ NOT NULL,
+  period_end TIMESTAMPTZ NOT NULL,
+  quantity INTEGER NOT NULL DEFAULT 0,
+  reported_to_provider BOOLEAN DEFAULT FALSE,
+  provider_usage_record_id TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(organization_id, usage_type, period_start)
+);
+
+CREATE INDEX IF NOT EXISTS idx_usage_records_org ON public.usage_records(organization_id);
+
+-- ============================================================================
+-- SECTION 6: ONBOARDING & SETTINGS AUDIT TABLES
+-- ============================================================================
+
+-- TABLE: onboarding_events
+CREATE TABLE IF NOT EXISTS public.onboarding_events (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL,
+  event_type TEXT NOT NULL,
+  event_data JSONB,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_onboarding_events_org ON public.onboarding_events(organization_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_onboarding_events_user ON public.onboarding_events(user_id, created_at DESC);
+
+-- TABLE: organization_settings_audit
+CREATE TABLE IF NOT EXISTS public.organization_settings_audit (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  changed_by UUID NOT NULL,
+  changed_at TIMESTAMPTZ DEFAULT NOW(),
+  setting_name TEXT NOT NULL,
+  old_value TEXT,
+  new_value TEXT,
+  change_reason TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_org_settings_audit_org ON public.organization_settings_audit(organization_id, changed_at DESC);
+
+-- TABLE: account_deletion_audit
+CREATE TABLE IF NOT EXISTS public.account_deletion_audit (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  organization_id UUID NOT NULL REFERENCES public.organizations(id) ON DELETE CASCADE,
+  deleted_by UUID NOT NULL,
+  deleted_at TIMESTAMPTZ DEFAULT NOW(),
+  deletion_type TEXT NOT NULL,
+  data_snapshot JSONB
+);
+
+CREATE INDEX IF NOT EXISTS idx_account_deletion_org ON public.account_deletion_audit(organization_id);
+
+-- ============================================================================
+-- SECTION 7: AUTH0 HELPER FUNCTIONS (Simplified - Single Path)
+-- ============================================================================
+-- Migration 080: Replaced 4-fallback chain with single explicit Auth0 path
+--
+-- Auth0 JWT claims used:
+--   - https://ananta.component.platform/org_id: Auth0 org ID (NOT Supabase UUID)
+--   - https://ananta.component.platform/roles: ["platform:admin", ...] (array)
+--
+-- Single lookup: JWT.org_id → organizations.auth0_org_id → organizations.id
+
+-- Function: current_user_organization_id()
+-- Single lookup: Auth0 org_id → organizations.auth0_org_id → organizations.id
+CREATE OR REPLACE FUNCTION current_user_organization_id()
+RETURNS uuid
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
-SET search_path = public
 AS $$
-    SELECT COALESCE(
-        nullif(current_setting('app.current_user_id', true), '')::uuid,
-        (SELECT id FROM users
-         WHERE keycloak_user_id = nullif(current_setting('app.keycloak_user_id', true), '')
-         LIMIT 1)
-    )
+  SELECT o.id
+  FROM organizations o
+  WHERE o.auth0_org_id = auth.jwt() ->> 'https://ananta.component.platform/org_id'
+  LIMIT 1
 $$;
 
--- Get user organization IDs
-CREATE OR REPLACE FUNCTION public.get_user_organization_ids()
-RETURNS SETOF UUID
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-    SELECT organization_id
-    FROM organization_memberships
-    WHERE user_id = get_current_user_id()
-$$;
+COMMENT ON FUNCTION current_user_organization_id() IS
+'Returns Supabase organization UUID by looking up Auth0 org_id from JWT. Single path, no fallbacks.';
 
--- Get user organizations (with optional user_id parameter)
-CREATE OR REPLACE FUNCTION public.get_user_organizations(p_user_id UUID DEFAULT NULL::uuid)
-RETURNS SETOF UUID
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-    SELECT organization_id
-    FROM organization_memberships
-    WHERE user_id = COALESCE(p_user_id, get_current_user_id())
-$$;
-
--- Is member of organization
-CREATE OR REPLACE FUNCTION public.is_member_of(p_org_id UUID)
-RETURNS BOOLEAN
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-    SELECT EXISTS (
-        SELECT 1 FROM organization_memberships
-        WHERE user_id = get_current_user_id()
-        AND organization_id = p_org_id
-    )
-$$;
-
--- Is org member (with optional user_id)
-CREATE OR REPLACE FUNCTION public.is_org_member(p_org_id UUID, p_user_id UUID DEFAULT NULL::uuid)
-RETURNS BOOLEAN
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-    SELECT EXISTS (
-        SELECT 1 FROM organization_memberships
-        WHERE organization_id = p_org_id
-        AND user_id = COALESCE(p_user_id, get_current_user_id())
-    )
-$$;
-
--- Is admin of organization
-CREATE OR REPLACE FUNCTION public.is_admin_of(p_org_id UUID)
-RETURNS BOOLEAN
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-    SELECT EXISTS (
-        SELECT 1 FROM organization_memberships
-        WHERE user_id = get_current_user_id()
-        AND organization_id = p_org_id
-        AND role IN ('owner', 'admin')
-    )
-$$;
-
--- Is org admin (with optional user_id)
-CREATE OR REPLACE FUNCTION public.is_org_admin(p_org_id UUID, p_user_id UUID DEFAULT NULL::uuid)
-RETURNS BOOLEAN
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-    SELECT EXISTS (
-        SELECT 1 FROM organization_memberships
-        WHERE organization_id = p_org_id
-        AND user_id = COALESCE(p_user_id, get_current_user_id())
-        AND role IN ('owner', 'admin')
-    )
-$$;
-
--- Is super admin
-CREATE OR REPLACE FUNCTION public.is_super_admin()
-RETURNS BOOLEAN
+-- Function: current_user_role()
+-- Extracts first role from Auth0 roles array, strips "platform:" prefix
+CREATE OR REPLACE FUNCTION current_user_role()
+RETURNS text
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
 AS $$
-    SELECT COALESCE(
-        (SELECT is_platform_admin FROM users WHERE id = get_current_user_id()),
-        false
-    )
+  SELECT REPLACE(
+    auth.jwt() -> 'https://ananta.component.platform/roles' ->> 0,
+    'platform:',
+    ''
+  )
 $$;
 
--- Is platform staff
-CREATE OR REPLACE FUNCTION public.is_platform_staff()
-RETURNS BOOLEAN
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-    SELECT EXISTS (
-        SELECT 1 FROM organization_memberships
-        WHERE user_id = get_current_user_id()
-        AND organization_id = 'a0000000-0000-0000-0000-000000000001'::uuid
-    )
-$$;
+COMMENT ON FUNCTION current_user_role() IS
+'Returns user role from Auth0 JWT roles array. Strips "platform:" prefix.';
 
--- Is platform admin (JWT-based)
-CREATE OR REPLACE FUNCTION public.is_platform_admin()
-RETURNS BOOLEAN
+-- Function: is_super_admin()
+-- Checks if "platform:super_admin" is in the roles array
+CREATE OR REPLACE FUNCTION is_super_admin()
+RETURNS boolean
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
 AS $$
-    SELECT COALESCE(
-        (current_setting('request.jwt.claims', true)::json->>'platform_admin')::BOOLEAN,
-        (current_setting('request.jwt.claims', true)::json->'user_metadata'->>'platform_admin')::BOOLEAN,
-        false
-    )
+  SELECT EXISTS (
+    SELECT 1
+    FROM jsonb_array_elements_text(
+      COALESCE(auth.jwt() -> 'https://ananta.component.platform/roles', '[]'::jsonb)
+    ) AS role
+    WHERE role = 'platform:super_admin'
+  )
 $$;
 
--- Current user organization ID
-CREATE OR REPLACE FUNCTION public.current_user_organization_id()
-RETURNS UUID
+COMMENT ON FUNCTION is_super_admin() IS
+'Returns true if user has platform:super_admin in their Auth0 roles array.';
+
+-- Function: is_org_admin()
+-- Checks if user has admin/owner role
+CREATE OR REPLACE FUNCTION is_org_admin()
+RETURNS boolean
 LANGUAGE sql
 STABLE
 SECURITY DEFINER
 AS $$
-    SELECT COALESCE(
-        (current_setting('request.jwt.claims', true)::json->>'organization_id')::UUID,
-        (current_setting('request.jwt.claims', true)::json->'user_metadata'->>'organization_id')::UUID
-    )
+  SELECT current_user_role() IN ('admin', 'owner', 'super_admin')
 $$;
 
--- Get active CNS config
-CREATE OR REPLACE FUNCTION public.get_active_cns_config(p_tenant_id VARCHAR)
-RETURNS TABLE(
-    id INTEGER,
-    tenant_id VARCHAR,
-    config_name VARCHAR,
-    is_active BOOLEAN,
-    is_global BOOLEAN,
-    enable_suppliers BOOLEAN,
-    preferred_suppliers TEXT[],
-    supplier_min_confidence NUMERIC,
-    enable_ai BOOLEAN,
-    ai_provider VARCHAR,
-    ai_operations TEXT[],
-    ai_min_confidence NUMERIC,
-    ai_cost_limit_monthly NUMERIC,
-    enable_web_scraping BOOLEAN,
-    scraping_sources TEXT[],
-    scraping_timeout_seconds INTEGER,
-    quality_reject_threshold INTEGER,
-    quality_staging_threshold INTEGER,
-    quality_auto_approve_threshold INTEGER,
-    batch_size INTEGER,
-    max_retries INTEGER,
-    ai_cost_current_month NUMERIC,
-    ai_requests_current_month INTEGER,
-    web_scraping_requests_current_month INTEGER,
-    created_at TIMESTAMPTZ,
-    updated_at TIMESTAMPTZ
-)
+COMMENT ON FUNCTION is_org_admin() IS
+'Returns true if user role is admin, owner, or super_admin.';
+
+-- Function: is_org_admin_or_owner()
+-- For membership writes - same as is_org_admin()
+CREATE OR REPLACE FUNCTION is_org_admin_or_owner()
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+AS $$
+  SELECT current_user_role() IN ('admin', 'owner', 'super_admin')
+$$;
+
+COMMENT ON FUNCTION is_org_admin_or_owner() IS
+'Returns true if user role allows admin operations. Used for membership writes.';
+
+-- Grant execute permissions (authenticated only - not anon)
+GRANT EXECUTE ON FUNCTION current_user_organization_id() TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION current_user_role() TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION is_super_admin() TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION is_org_admin() TO authenticated, service_role;
+GRANT EXECUTE ON FUNCTION is_org_admin_or_owner() TO authenticated, service_role;
+
+-- ============================================================================
+-- SECTION 7B: PERFORMANCE INDEXES (from 080)
+-- ============================================================================
+
+-- Index for Auth0 org_id lookup (the ONE path we use now)
+CREATE INDEX IF NOT EXISTS idx_organizations_auth0_org_id
+    ON organizations(auth0_org_id)
+    WHERE auth0_org_id IS NOT NULL;
+
+-- Keep existing indexes for other queries (not auth-related)
+CREATE INDEX IF NOT EXISTS idx_users_auth0_user_id_org
+    ON users(auth0_user_id) WHERE auth0_user_id IS NOT NULL;
+
+CREATE INDEX IF NOT EXISTS idx_org_memberships_user_role
+    ON organization_memberships(user_id, role);
+
+-- ============================================================================
+-- SECTION 8: SECURITY TRIGGERS (from 078)
+-- ============================================================================
+
+-- Trigger: Prevent removing last owner
+CREATE OR REPLACE FUNCTION prevent_last_owner_removal()
+RETURNS TRIGGER
 LANGUAGE plpgsql
+SECURITY DEFINER
 AS $$
+DECLARE
+    owner_count INTEGER;
 BEGIN
-    IF p_tenant_id IS NOT NULL THEN
-        RETURN QUERY
-        SELECT c.* FROM cns_enrichment_config c
-        WHERE c.tenant_id = p_tenant_id AND c.is_active = TRUE
-        LIMIT 1;
+    IF TG_OP = 'DELETE' AND OLD.role = 'owner' THEN
+        SELECT COUNT(*) INTO owner_count
+        FROM organization_memberships
+        WHERE organization_id = OLD.organization_id
+        AND role = 'owner'
+        AND user_id != OLD.user_id;
 
-        IF FOUND THEN
-            RETURN;
+        IF owner_count = 0 THEN
+            RAISE EXCEPTION 'Cannot remove the last owner of an organization';
+        END IF;
+    ELSIF TG_OP = 'UPDATE' AND OLD.role = 'owner' AND NEW.role != 'owner' THEN
+        SELECT COUNT(*) INTO owner_count
+        FROM organization_memberships
+        WHERE organization_id = OLD.organization_id
+        AND role = 'owner'
+        AND user_id != OLD.user_id;
+
+        IF owner_count = 0 THEN
+            RAISE EXCEPTION 'Cannot demote the last owner of an organization';
         END IF;
     END IF;
 
-    RETURN QUERY
-    SELECT c.* FROM cns_enrichment_config c
-    WHERE c.is_global = TRUE AND c.is_active = TRUE
-    ORDER BY c.created_at DESC
-    LIMIT 1;
+    IF TG_OP = 'DELETE' THEN RETURN OLD; END IF;
+    RETURN NEW;
 END;
 $$;
 
--- Log CNS event helper
-CREATE OR REPLACE FUNCTION public.log_cns_event(
+DROP TRIGGER IF EXISTS prevent_last_owner_removal_trigger ON organization_memberships;
+CREATE TRIGGER prevent_last_owner_removal_trigger
+    BEFORE DELETE OR UPDATE ON organization_memberships
+    FOR EACH ROW EXECUTE FUNCTION prevent_last_owner_removal();
+
+-- SECURITY DEFINER function for system inserts (onboarding_events)
+-- SECURITY: Only callable by service_role to prevent privilege escalation
+CREATE OR REPLACE FUNCTION insert_onboarding_event(
+    p_user_id UUID,
     p_organization_id UUID,
-    p_event_type VARCHAR,
-    p_title VARCHAR,
-    p_message TEXT DEFAULT NULL,
-    p_bom_id UUID DEFAULT NULL,
-    p_event_category VARCHAR DEFAULT 'processing',
-    p_severity VARCHAR DEFAULT 'info',
-    p_metadata JSONB DEFAULT '{}'::jsonb,
-    p_workflow_id VARCHAR DEFAULT NULL,
-    p_actor_type VARCHAR DEFAULT 'system',
-    p_actor_id VARCHAR DEFAULT NULL
+    p_event_type TEXT,
+    p_event_data JSONB DEFAULT '{}'::jsonb
 )
 RETURNS UUID
 LANGUAGE plpgsql
 SECURITY DEFINER
+SET search_path = public
 AS $$
 DECLARE
-    v_event_id UUID;
+    new_id UUID;
+    caller_role TEXT;
 BEGIN
-    INSERT INTO cns_processing_events (
-        organization_id, bom_id, event_type, event_category, severity,
-        title, message, metadata, workflow_id, actor_type, actor_id
-    ) VALUES (
-        p_organization_id, p_bom_id, p_event_type, p_event_category, p_severity,
-        p_title, p_message, p_metadata, p_workflow_id, p_actor_type, p_actor_id
+    -- SECURITY: Only allow service_role to call this function
+    SELECT current_setting('role', true) INTO caller_role;
+    IF caller_role != 'service_role' THEN
+        RAISE EXCEPTION 'insert_onboarding_event can only be called by service_role';
+    END IF;
+
+    INSERT INTO onboarding_events (user_id, organization_id, event_type, event_data, created_at)
+    VALUES (p_user_id, p_organization_id, p_event_type, p_event_data, NOW())
+    RETURNING id INTO new_id;
+    RETURN new_id;
+END;
+$$;
+
+-- Only grant to service_role - NOT to authenticated users
+REVOKE EXECUTE ON FUNCTION insert_onboarding_event FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION insert_onboarding_event TO service_role;
+
+-- ============================================================================
+-- SECTION 9: ENABLE ROW LEVEL SECURITY ON ALL TABLES
+-- ============================================================================
+
+ALTER TABLE organizations ENABLE ROW LEVEL SECURITY;
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE organization_memberships ENABLE ROW LEVEL SECURITY;
+ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
+ALTER TABLE boms ENABLE ROW LEVEL SECURITY;
+ALTER TABLE bom_uploads ENABLE ROW LEVEL SECURITY;
+ALTER TABLE bom_line_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE enrichment_queue ENABLE ROW LEVEL SECURITY;
+ALTER TABLE enrichment_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE enrichment_audit_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE alerts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE alert_preferences ENABLE ROW LEVEL SECURITY;
+ALTER TABLE alert_deliveries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE component_watches ENABLE ROW LEVEL SECURITY;
+ALTER TABLE organization_risk_profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE component_base_risk_scores ENABLE ROW LEVEL SECURITY;
+ALTER TABLE bom_line_item_risk_scores ENABLE ROW LEVEL SECURITY;
+ALTER TABLE bom_risk_summaries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE project_risk_summaries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE risk_score_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE subscription_plans ENABLE ROW LEVEL SECURITY;
+ALTER TABLE billing_customers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE payment_methods ENABLE ROW LEVEL SECURITY;
+ALTER TABLE subscriptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invoices ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invoice_line_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE payments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE usage_records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE onboarding_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE organization_settings_audit ENABLE ROW LEVEL SECURITY;
+ALTER TABLE account_deletion_audit ENABLE ROW LEVEL SECURITY;
+
+-- ============================================================================
+-- SECTION 10: CONSOLIDATED RLS POLICIES (from 077 + 078)
+-- ============================================================================
+
+-- ---------------------------------------------------------------------------
+-- organizations
+-- ---------------------------------------------------------------------------
+CREATE POLICY "organizations_access" ON organizations FOR ALL
+USING (id = current_user_organization_id() OR is_super_admin())
+WITH CHECK (is_super_admin());
+
+-- ---------------------------------------------------------------------------
+-- users: SELECT org-scoped, UPDATE self only, ALL for super_admin
+-- ---------------------------------------------------------------------------
+CREATE POLICY "users_org_select" ON users FOR SELECT
+USING (organization_id = current_user_organization_id() OR is_super_admin());
+
+CREATE POLICY "users_own_update" ON users FOR UPDATE
+USING (id = auth.uid() OR is_super_admin())
+WITH CHECK (id = auth.uid() OR is_super_admin());
+
+CREATE POLICY "users_super_admin_manage" ON users FOR ALL
+USING (is_super_admin()) WITH CHECK (is_super_admin());
+
+-- ---------------------------------------------------------------------------
+-- organization_memberships: Admin-only writes (from 078)
+-- ---------------------------------------------------------------------------
+CREATE POLICY "organization_memberships_select" ON organization_memberships FOR SELECT
+USING (organization_id = current_user_organization_id() OR is_super_admin());
+
+CREATE POLICY "organization_memberships_insert" ON organization_memberships FOR INSERT
+WITH CHECK (
+    is_super_admin() OR (
+        organization_id = current_user_organization_id()
+        AND is_org_admin_or_owner()
+        AND (role NOT IN ('owner', 'super_admin') OR is_super_admin())
     )
-    RETURNING id INTO v_event_id;
+);
 
-    RETURN v_event_id;
-END;
-$$;
+CREATE POLICY "organization_memberships_update" ON organization_memberships FOR UPDATE
+USING (organization_id = current_user_organization_id() OR is_super_admin())
+WITH CHECK (
+    is_super_admin() OR (
+        organization_id = current_user_organization_id()
+        AND is_org_admin_or_owner()
+        AND (role NOT IN ('owner', 'super_admin') OR is_super_admin())
+        AND user_id != auth.uid()
+    )
+);
 
--- Add user to platform organization
-CREATE OR REPLACE FUNCTION public.add_user_to_platform_org(p_user_id UUID)
-RETURNS void
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = 'public'
-AS $$
-DECLARE
-    platform_org_id UUID := 'a0000000-0000-0000-0000-000000000001';
-    user_role TEXT;
-    user_is_platform_admin BOOLEAN;
-BEGIN
-    SELECT role, is_platform_admin INTO user_role, user_is_platform_admin
-    FROM users WHERE id = p_user_id;
+CREATE POLICY "organization_memberships_delete" ON organization_memberships FOR DELETE
+USING (
+    is_super_admin() OR (
+        organization_id = current_user_organization_id()
+        AND is_org_admin_or_owner()
+        AND user_id != auth.uid()
+    )
+);
 
-    IF user_role IN ('super_admin', 'admin') OR user_is_platform_admin = true THEN
-        INSERT INTO organization_memberships (user_id, organization_id, role, created_at, updated_at)
-        VALUES (p_user_id, platform_org_id, 'admin', NOW(), NOW())
-        ON CONFLICT (user_id, organization_id) DO UPDATE SET role = 'admin', updated_at = NOW();
-    END IF;
-END;
-$$;
+-- ---------------------------------------------------------------------------
+-- ORG-SCOPED TABLES: {table}_org_access
+-- ---------------------------------------------------------------------------
 
--- Set BOM organization ID from project
-CREATE OR REPLACE FUNCTION public.set_bom_organization_id()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-AS $$
-DECLARE
-    v_organization_id UUID;
-BEGIN
-    SELECT w.organization_id INTO v_organization_id
-    FROM projects p
-    JOIN workspaces w ON w.id = p.workspace_id
-    WHERE p.id = NEW.project_id;
+CREATE POLICY "projects_org_access" ON projects FOR ALL
+USING (organization_id = current_user_organization_id() OR is_super_admin())
+WITH CHECK (organization_id = current_user_organization_id() OR is_super_admin());
 
-    IF v_organization_id IS NOT NULL THEN
-        NEW.organization_id := v_organization_id;
-    ELSE
-        RAISE EXCEPTION '[ERROR] Cannot determine organization_id for BOM "%" with project_id %. Check workspace linkage.',
-            NEW.name, NEW.project_id;
-    END IF;
+CREATE POLICY "boms_org_access" ON boms FOR ALL
+USING (organization_id = current_user_organization_id() OR is_super_admin())
+WITH CHECK (organization_id = current_user_organization_id() OR is_super_admin());
 
-    RETURN NEW;
-END;
-$$;
+CREATE POLICY "bom_uploads_org_access" ON bom_uploads FOR ALL
+USING (organization_id = current_user_organization_id() OR is_super_admin())
+WITH CHECK (organization_id = current_user_organization_id() OR is_super_admin());
 
--- Generate slug from name
-CREATE OR REPLACE FUNCTION public.generate_slug_from_name()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    IF NEW.slug IS NULL OR NEW.slug = '' THEN
-        NEW.slug := lower(
-            regexp_replace(
-                regexp_replace(
-                    regexp_replace(trim(NEW.name), '[^\w\s-]', '', 'g'),
-                    '\s+', '-', 'g'
-                ),
-                '-+', '-', 'g'
-            )
-        );
-    END IF;
-    RETURN NEW;
-END;
-$$;
+CREATE POLICY "bom_line_items_org_access" ON bom_line_items FOR ALL
+USING (
+    is_super_admin() OR
+    EXISTS (SELECT 1 FROM boms WHERE boms.id = bom_line_items.bom_id AND boms.organization_id = current_user_organization_id())
+)
+WITH CHECK (
+    is_super_admin() OR
+    EXISTS (SELECT 1 FROM boms WHERE boms.id = bom_line_items.bom_id AND boms.organization_id = current_user_organization_id())
+);
 
--- Ensure single default template
-CREATE OR REPLACE FUNCTION public.ensure_single_default_template()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    IF NEW.is_default = TRUE THEN
-        UPDATE column_mapping_templates
-        SET is_default = FALSE
-        WHERE organization_id = NEW.organization_id
-          AND id != NEW.id
-          AND is_default = TRUE;
-    END IF;
-    RETURN NEW;
-END;
-$$;
+CREATE POLICY "notifications_org_access" ON notifications FOR ALL
+USING (organization_id = current_user_organization_id() OR is_super_admin())
+WITH CHECK (organization_id = current_user_organization_id() OR is_super_admin());
 
--- Update component search vector
-CREATE OR REPLACE FUNCTION public.update_component_search_vector()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    NEW.search_vector := to_tsvector('english',
-        COALESCE(NEW.manufacturer_part_number, '') || ' ' ||
-        COALESCE(NEW.manufacturer, '') || ' ' ||
-        COALESCE(NEW.description, '')
-    );
-    RETURN NEW;
-END;
-$$;
+CREATE POLICY "enrichment_queue_org_access" ON enrichment_queue FOR ALL
+USING (organization_id = current_user_organization_id() OR is_super_admin())
+WITH CHECK (organization_id = current_user_organization_id() OR is_super_admin());
 
--- Auto-update timestamps
-CREATE OR REPLACE FUNCTION public.trigger_set_timestamp()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$;
+CREATE POLICY "enrichment_events_org_access" ON enrichment_events FOR ALL
+USING (organization_id = current_user_organization_id() OR is_super_admin())
+WITH CHECK (organization_id = current_user_organization_id() OR is_super_admin());
 
--- Trigger for auto-adding platform staff to platform org
-CREATE OR REPLACE FUNCTION public.trigger_auto_add_platform_staff_to_platform_org()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = 'public'
-AS $$
-BEGIN
-    IF (NEW.role IN ('super_admin', 'admin') OR NEW.is_platform_admin = true) AND
-       (OLD IS NULL OR (OLD.role NOT IN ('super_admin', 'admin') AND OLD.is_platform_admin <> true)) THEN
-        PERFORM add_user_to_platform_org(NEW.id);
-    END IF;
-    RETURN NEW;
-END;
-$$;
+CREATE POLICY "enrichment_audit_log_org_access" ON enrichment_audit_log FOR ALL
+USING (organization_id = current_user_organization_id() OR is_super_admin())
+WITH CHECK (organization_id = current_user_organization_id() OR is_super_admin());
 
--- Update BOM items updated_at
-CREATE OR REPLACE FUNCTION public.update_bom_items_updated_at()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$;
+-- ---------------------------------------------------------------------------
+-- alerts: User-scoped UPDATE/DELETE (from 078)
+-- ---------------------------------------------------------------------------
+CREATE POLICY "alerts_org_select" ON alerts FOR SELECT
+USING (organization_id = current_user_organization_id() OR is_super_admin());
 
--- Update BOM jobs updated_at
-CREATE OR REPLACE FUNCTION public.update_bom_jobs_updated_at()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$;
+CREATE POLICY "alerts_org_insert" ON alerts FOR INSERT
+WITH CHECK (organization_id = current_user_organization_id() OR is_super_admin());
 
--- Update BOM processing jobs updated_at
-CREATE OR REPLACE FUNCTION public.update_bom_processing_jobs_updated_at()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$;
+CREATE POLICY "alerts_user_update" ON alerts FOR UPDATE
+USING (
+    is_super_admin() OR user_id = auth.uid() OR
+    (organization_id = current_user_organization_id() AND is_org_admin_or_owner())
+)
+WITH CHECK (
+    is_super_admin() OR user_id = auth.uid() OR
+    (organization_id = current_user_organization_id() AND is_org_admin_or_owner())
+);
 
--- Update column mapping templates updated_at
-CREATE OR REPLACE FUNCTION public.update_column_mapping_templates_updated_at()
-RETURNS TRIGGER
-LANGUAGE plpgsql
-AS $$
-BEGIN
-    NEW.updated_at = NOW();
-    RETURN NEW;
-END;
-$$;
+CREATE POLICY "alerts_user_delete" ON alerts FOR DELETE
+USING (
+    is_super_admin() OR user_id = auth.uid() OR
+    (organization_id = current_user_organization_id() AND is_org_admin_or_owner())
+);
+
+-- ---------------------------------------------------------------------------
+-- USER-SCOPED TABLES
+-- ---------------------------------------------------------------------------
+
+CREATE POLICY "alert_preferences_user_access" ON alert_preferences FOR ALL
+USING (user_id = auth.uid() OR is_super_admin())
+WITH CHECK (user_id = auth.uid() OR is_super_admin());
+
+CREATE POLICY "alert_deliveries_user_access" ON alert_deliveries FOR ALL
+USING (is_super_admin() OR alert_id IN (SELECT id FROM alerts WHERE user_id = auth.uid()))
+WITH CHECK (is_super_admin() OR alert_id IN (SELECT id FROM alerts WHERE user_id = auth.uid()));
+
+CREATE POLICY "component_watches_user_access" ON component_watches FOR ALL
+USING (user_id = auth.uid() OR is_super_admin())
+WITH CHECK (user_id = auth.uid() OR is_super_admin());
+
+-- ---------------------------------------------------------------------------
+-- RISK TABLES
+-- ---------------------------------------------------------------------------
+
+CREATE POLICY "organization_risk_profiles_org_access" ON organization_risk_profiles FOR ALL
+USING (organization_id = current_user_organization_id() OR is_super_admin())
+WITH CHECK (organization_id = current_user_organization_id() OR is_super_admin());
+
+CREATE POLICY "bom_line_item_risk_scores_org_access" ON bom_line_item_risk_scores FOR ALL
+USING (organization_id = current_user_organization_id() OR is_super_admin())
+WITH CHECK (organization_id = current_user_organization_id() OR is_super_admin());
+
+CREATE POLICY "bom_risk_summaries_org_access" ON bom_risk_summaries FOR ALL
+USING (organization_id = current_user_organization_id() OR is_super_admin())
+WITH CHECK (organization_id = current_user_organization_id() OR is_super_admin());
+
+CREATE POLICY "project_risk_summaries_org_access" ON project_risk_summaries FOR ALL
+USING (organization_id = current_user_organization_id() OR is_super_admin())
+WITH CHECK (organization_id = current_user_organization_id() OR is_super_admin());
+
+CREATE POLICY "risk_score_history_org_access" ON risk_score_history FOR ALL
+USING (organization_id = current_user_organization_id() OR is_super_admin())
+WITH CHECK (organization_id = current_user_organization_id() OR is_super_admin());
+
+-- component_base_risk_scores: Read-only for authenticated (global component data)
+CREATE POLICY "component_base_risk_scores_read" ON component_base_risk_scores FOR SELECT
+TO authenticated USING (true);
+
+-- ---------------------------------------------------------------------------
+-- SPECIAL TABLES
+-- ---------------------------------------------------------------------------
+
+-- audit_logs: SELECT only for org members
+CREATE POLICY "audit_logs_org_select" ON audit_logs FOR SELECT
+USING (is_super_admin() OR organization_id IN (SELECT organization_id FROM users WHERE id = auth.uid()));
+
+-- subscription_plans: Public read for active plans
+CREATE POLICY "subscription_plans_public_read" ON subscription_plans FOR SELECT
+USING (is_active = true);
+
+-- onboarding_events: No direct INSERT (use SECURITY DEFINER function)
+CREATE POLICY "onboarding_events_no_direct_insert" ON onboarding_events FOR INSERT
+WITH CHECK (false);
+
+CREATE POLICY "onboarding_events_user_select" ON onboarding_events FOR SELECT
+USING (user_id = auth.uid() OR is_super_admin());
+
+-- organization_settings_audit: Admin select only, no direct insert
+CREATE POLICY "organization_settings_audit_no_direct_insert" ON organization_settings_audit FOR INSERT
+WITH CHECK (false);
+
+CREATE POLICY "organization_settings_audit_admin_select" ON organization_settings_audit FOR SELECT
+USING (is_super_admin() OR (organization_id = current_user_organization_id() AND is_org_admin_or_owner()));
+
+-- account_deletion_audit
+CREATE POLICY "account_deletion_audit_owner_select" ON account_deletion_audit FOR SELECT
+USING (
+    EXISTS (
+        SELECT 1 FROM users u
+        JOIN organization_memberships om ON u.id = om.user_id
+        WHERE u.auth0_user_id = auth.uid()::text
+        AND om.organization_id = account_deletion_audit.organization_id
+        AND om.role = 'owner'
+    )
+);
+
+CREATE POLICY "account_deletion_audit_super_admin" ON account_deletion_audit FOR ALL
+USING (is_super_admin()) WITH CHECK (is_super_admin());
+
+-- Backend-only billing tables (no user policies - service_role bypasses RLS)
 
 -- ============================================================================
--- TRIGGERS
+-- SECTION 11: GRANTS
 -- ============================================================================
 
--- Timestamp triggers
-DROP TRIGGER IF EXISTS update_organizations_updated_at ON public.organizations;
-CREATE TRIGGER update_organizations_updated_at BEFORE UPDATE ON public.organizations
-    FOR EACH ROW EXECUTE FUNCTION trigger_set_timestamp();
+-- Core tables
+GRANT SELECT, INSERT, UPDATE ON organizations TO authenticated;
+GRANT SELECT, INSERT, UPDATE ON users TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON organization_memberships TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON projects TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON boms TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON bom_uploads TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON bom_line_items TO authenticated;
+GRANT SELECT, INSERT, UPDATE ON notifications TO authenticated;
+GRANT SELECT ON audit_logs TO authenticated;
 
-DROP TRIGGER IF EXISTS update_users_updated_at ON public.users;
-CREATE TRIGGER update_users_updated_at BEFORE UPDATE ON public.users
-    FOR EACH ROW EXECUTE FUNCTION trigger_set_timestamp();
+-- Enrichment tables
+GRANT SELECT, INSERT, UPDATE, DELETE ON enrichment_queue TO authenticated;
+GRANT SELECT, INSERT ON enrichment_events TO authenticated;
+GRANT SELECT, INSERT ON enrichment_audit_log TO authenticated;
 
-DROP TRIGGER IF EXISTS update_org_memberships_updated_at ON public.organization_memberships;
-CREATE TRIGGER update_org_memberships_updated_at BEFORE UPDATE ON public.organization_memberships
-    FOR EACH ROW EXECUTE FUNCTION trigger_set_timestamp();
+-- Alert tables
+GRANT SELECT, INSERT, UPDATE, DELETE ON alerts TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON alert_preferences TO authenticated;
+GRANT SELECT ON alert_deliveries TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON component_watches TO authenticated;
 
-DROP TRIGGER IF EXISTS update_org_invitations_updated_at ON public.organization_invitations;
-CREATE TRIGGER update_org_invitations_updated_at BEFORE UPDATE ON public.organization_invitations
-    FOR EACH ROW EXECUTE FUNCTION trigger_set_timestamp();
+-- Risk tables
+GRANT SELECT, INSERT, UPDATE ON organization_risk_profiles TO authenticated;
+GRANT SELECT ON component_base_risk_scores TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON bom_line_item_risk_scores TO authenticated;
+GRANT SELECT, INSERT, UPDATE ON bom_risk_summaries TO authenticated;
+GRANT SELECT, INSERT, UPDATE ON project_risk_summaries TO authenticated;
+GRANT SELECT, INSERT ON risk_score_history TO authenticated;
 
-DROP TRIGGER IF EXISTS update_workspaces_updated_at ON public.workspaces;
-CREATE TRIGGER update_workspaces_updated_at BEFORE UPDATE ON public.workspaces
-    FOR EACH ROW EXECUTE FUNCTION trigger_set_timestamp();
+-- Billing tables (read-only for authenticated, managed by service_role)
+GRANT SELECT ON subscription_plans TO authenticated;
 
-DROP TRIGGER IF EXISTS update_projects_updated_at ON public.projects;
-CREATE TRIGGER update_projects_updated_at BEFORE UPDATE ON public.projects
-    FOR EACH ROW EXECUTE FUNCTION trigger_set_timestamp();
+-- Onboarding
+GRANT SELECT ON onboarding_events TO authenticated;
+GRANT SELECT ON organization_settings_audit TO authenticated;
 
-DROP TRIGGER IF EXISTS update_components_updated_at ON public.components;
-CREATE TRIGGER update_components_updated_at BEFORE UPDATE ON public.components
-    FOR EACH ROW EXECUTE FUNCTION trigger_set_timestamp();
-
-DROP TRIGGER IF EXISTS update_boms_updated_at ON public.boms;
-CREATE TRIGGER update_boms_updated_at BEFORE UPDATE ON public.boms
-    FOR EACH ROW EXECUTE FUNCTION trigger_set_timestamp();
-
-DROP TRIGGER IF EXISTS update_bom_line_items_updated_at ON public.bom_line_items;
-CREATE TRIGGER update_bom_line_items_updated_at BEFORE UPDATE ON public.bom_line_items
-    FOR EACH ROW EXECUTE FUNCTION trigger_set_timestamp();
-
-DROP TRIGGER IF EXISTS update_bom_items_updated_at ON public.bom_items;
-CREATE TRIGGER update_bom_items_updated_at BEFORE UPDATE ON public.bom_items
-    FOR EACH ROW EXECUTE FUNCTION update_bom_items_updated_at();
-
-DROP TRIGGER IF EXISTS update_bom_jobs_updated_at ON public.bom_jobs;
-CREATE TRIGGER update_bom_jobs_updated_at BEFORE UPDATE ON public.bom_jobs
-    FOR EACH ROW EXECUTE FUNCTION update_bom_jobs_updated_at();
-
-DROP TRIGGER IF EXISTS update_bom_processing_jobs_updated_at ON public.bom_processing_jobs;
-CREATE TRIGGER update_bom_processing_jobs_updated_at BEFORE UPDATE ON public.bom_processing_jobs
-    FOR EACH ROW EXECUTE FUNCTION update_bom_processing_jobs_updated_at();
-
-DROP TRIGGER IF EXISTS update_column_mapping_templates_updated_at ON public.column_mapping_templates;
-CREATE TRIGGER update_column_mapping_templates_updated_at BEFORE UPDATE ON public.column_mapping_templates
-    FOR EACH ROW EXECUTE FUNCTION update_column_mapping_templates_updated_at();
-
--- Component search vector trigger
-DROP TRIGGER IF EXISTS update_component_search ON public.components;
-CREATE TRIGGER update_component_search BEFORE INSERT OR UPDATE ON public.components
-    FOR EACH ROW EXECUTE FUNCTION update_component_search_vector();
-
--- Column mapping template default trigger
-DROP TRIGGER IF EXISTS ensure_single_default_template ON public.column_mapping_templates;
-CREATE TRIGGER ensure_single_default_template BEFORE INSERT OR UPDATE ON public.column_mapping_templates
-    FOR EACH ROW EXECUTE FUNCTION ensure_single_default_template();
-
--- Auto-add platform staff trigger
-DROP TRIGGER IF EXISTS auto_add_platform_staff_to_platform_org ON public.users;
-CREATE TRIGGER auto_add_platform_staff_to_platform_org AFTER INSERT OR UPDATE ON public.users
-    FOR EACH ROW EXECUTE FUNCTION trigger_auto_add_platform_staff_to_platform_org();
+-- Full access for service_role
+GRANT ALL ON ALL TABLES IN SCHEMA public TO service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO service_role;
 
 -- ============================================================================
--- SEED DATA
+-- SECTION 12: SEED DEFAULT SUBSCRIPTION PLANS
 -- ============================================================================
 
--- Seed Organization 1: Platform Super Admin (CNS Staff)
-INSERT INTO public.organizations (id, name, slug, subscription_status, plan_tier, description)
-VALUES (
-    'a0000000-0000-0000-0000-000000000001'::uuid,
-    'Platform Admin',
-    'platform-admin',
-    'active',
-    'enterprise',
-    'Internal platform administrators and CNS staff'
-)
-ON CONFLICT (id) DO UPDATE SET
-    name = EXCLUDED.name,
-    slug = EXCLUDED.slug,
-    description = EXCLUDED.description;
-
--- Seed Organization 2: CNS Staff
-INSERT INTO public.organizations (id, name, slug, subscription_status, plan_tier, description)
-VALUES (
-    'a0000000-0000-0000-0000-000000000002'::uuid,
-    'CNS Staff',
-    'cns-staff',
-    'active',
-    'enterprise',
-    'Component Normalization Service staff organization'
-)
-ON CONFLICT (id) DO UPDATE SET
-    name = EXCLUDED.name,
-    slug = EXCLUDED.slug,
-    description = EXCLUDED.description;
-
--- Seed Organization 3: Demo Customer
-INSERT INTO public.organizations (id, name, slug, subscription_status, plan_tier, description)
-VALUES (
-    'a0000000-0000-0000-0000-000000000000'::uuid,
-    'Demo Organization',
-    'demo-org',
-    'trial',
-    'standard',
-    'Demo customer organization for testing'
-)
-ON CONFLICT (id) DO UPDATE SET
-    name = EXCLUDED.name,
-    slug = EXCLUDED.slug,
-    description = EXCLUDED.description;
-
--- Seed User 1: Platform Super Admin
-INSERT INTO public.users (id, email, first_name, last_name, role, is_platform_admin, is_active, email_verified)
-VALUES (
-    'b0000000-0000-0000-0000-000000000001'::uuid,
-    'superadmin@ananta.dev',
-    'Platform',
-    'Admin',
-    'super_admin',
-    true,
-    true,
-    true
-)
-ON CONFLICT (email) DO UPDATE SET
-    first_name = EXCLUDED.first_name,
-    last_name = EXCLUDED.last_name,
-    role = EXCLUDED.role,
-    is_platform_admin = EXCLUDED.is_platform_admin;
-
--- Seed User 2: CNS Staff Lead
-INSERT INTO public.users (id, email, first_name, last_name, role, is_platform_admin, is_active, email_verified)
-VALUES (
-    'b0000000-0000-0000-0000-000000000002'::uuid,
-    'cns-lead@ananta.dev',
-    'CNS',
-    'Lead',
-    'admin',
-    false,
-    true,
-    true
-)
-ON CONFLICT (email) DO UPDATE SET
-    first_name = EXCLUDED.first_name,
-    last_name = EXCLUDED.last_name,
-    role = EXCLUDED.role;
-
--- Seed User 3: CNS Engineer
-INSERT INTO public.users (id, email, first_name, last_name, role, is_platform_admin, is_active, email_verified)
-VALUES (
-    'b0000000-0000-0000-0000-000000000003'::uuid,
-    'cns-engineer@ananta.dev',
-    'CNS',
-    'Engineer',
-    'engineer',
-    false,
-    true,
-    true
-)
-ON CONFLICT (email) DO UPDATE SET
-    first_name = EXCLUDED.first_name,
-    last_name = EXCLUDED.last_name,
-    role = EXCLUDED.role;
-
--- Seed User 4: Demo Owner
-INSERT INTO public.users (id, email, first_name, last_name, role, is_platform_admin, is_active, email_verified)
-VALUES (
-    'b0000000-0000-0000-0000-000000000004'::uuid,
-    'demo-owner@example.com',
-    'Demo',
-    'Owner',
-    'owner',
-    false,
-    true,
-    true
-)
-ON CONFLICT (email) DO UPDATE SET
-    first_name = EXCLUDED.first_name,
-    last_name = EXCLUDED.last_name,
-    role = EXCLUDED.role;
-
--- Seed User 5: Demo Engineer
-INSERT INTO public.users (id, email, first_name, last_name, role, is_platform_admin, is_active, email_verified)
-VALUES (
-    'b0000000-0000-0000-0000-000000000005'::uuid,
-    'demo-engineer@example.com',
-    'Demo',
-    'Engineer',
-    'engineer',
-    false,
-    true,
-    true
-)
-ON CONFLICT (email) DO UPDATE SET
-    first_name = EXCLUDED.first_name,
-    last_name = EXCLUDED.last_name,
-    role = EXCLUDED.role;
-
--- Seed Organization Memberships
-INSERT INTO public.organization_memberships (user_id, organization_id, role)
-VALUES
-    ('b0000000-0000-0000-0000-000000000001'::uuid, 'a0000000-0000-0000-0000-000000000001'::uuid, 'admin'),
-    ('b0000000-0000-0000-0000-000000000002'::uuid, 'a0000000-0000-0000-0000-000000000002'::uuid, 'admin'),
-    ('b0000000-0000-0000-0000-000000000003'::uuid, 'a0000000-0000-0000-0000-000000000002'::uuid, 'engineer'),
-    ('b0000000-0000-0000-0000-000000000004'::uuid, 'a0000000-0000-0000-0000-000000000000'::uuid, 'owner'),
-    ('b0000000-0000-0000-0000-000000000005'::uuid, 'a0000000-0000-0000-0000-000000000000'::uuid, 'engineer')
-ON CONFLICT (user_id, organization_id) DO UPDATE SET role = EXCLUDED.role;
-
--- Seed Suppliers
-INSERT INTO public.suppliers (name, slug, api_key_required, website, priority, is_active)
-VALUES
-    ('DigiKey', 'digikey', true, 'https://www.digikey.com', 100, true),
-    ('Mouser Electronics', 'mouser', true, 'https://www.mouser.com', 90, true),
-    ('Element14', 'element14', true, 'https://www.element14.com', 80, true),
-    ('Arrow Electronics', 'arrow', false, 'https://www.arrow.com', 70, true)
+INSERT INTO subscription_plans (name, tier, slug, price_monthly, price_yearly, limits, features, description, display_order) VALUES
+('Free', 'free', 'free', 0, 0,
+ '{"max_members": 1, "max_projects": 2, "max_bom_uploads_per_month": 5, "max_components_per_bom": 100, "max_api_calls_per_month": 100, "features": ["basic_enrichment"]}'::jsonb,
+ ARRAY['5 BOM uploads/month', '100 components/BOM', 'Basic enrichment', 'Community support'],
+ 'Perfect for trying out the platform', 1),
+('Starter', 'starter', 'starter', 2900, 29000,
+ '{"max_members": 5, "max_projects": 10, "max_bom_uploads_per_month": 50, "max_components_per_bom": 500, "max_api_calls_per_month": 5000, "features": ["basic_enrichment", "export_csv", "export_excel", "email_support"]}'::jsonb,
+ ARRAY['5 team members', '50 BOM uploads/month', '500 components/BOM', 'CSV & Excel export', 'Email support'],
+ 'For small teams getting started', 2),
+('Professional', 'professional', 'professional', 9900, 99000,
+ '{"max_members": 25, "max_projects": 50, "max_bom_uploads_per_month": 200, "max_components_per_bom": 2000, "max_api_calls_per_month": 50000, "features": ["basic_enrichment", "advanced_enrichment", "export_csv", "export_excel", "api_access", "priority_support", "custom_fields"]}'::jsonb,
+ ARRAY['25 team members', '200 BOM uploads/month', '2000 components/BOM', 'Full API access', 'Advanced enrichment', 'Priority support'],
+ 'For growing engineering teams', 3),
+('Enterprise', 'enterprise', 'enterprise', 0, 0,
+ '{"max_members": -1, "max_projects": -1, "max_bom_uploads_per_month": -1, "max_components_per_bom": -1, "max_api_calls_per_month": -1, "features": ["basic_enrichment", "advanced_enrichment", "export_csv", "export_excel", "api_access", "priority_support", "custom_fields", "sso", "dedicated_support", "sla", "custom_integrations"]}'::jsonb,
+ ARRAY['Unlimited team members', 'Unlimited BOMs', 'SSO/SAML', 'Dedicated support', 'SLA guarantee', 'Custom integrations'],
+ 'For large organizations with custom needs', 4)
 ON CONFLICT (slug) DO NOTHING;
-
--- Seed Manufacturers (Top 20)
-INSERT INTO public.manufacturers (name, slug, website, is_verified, normalized_name)
-VALUES
-    ('Texas Instruments', 'texas-instruments', 'https://www.ti.com', true, 'texas instruments'),
-    ('Analog Devices', 'analog-devices', 'https://www.analog.com', true, 'analog devices'),
-    ('STMicroelectronics', 'stmicroelectronics', 'https://www.st.com', true, 'stmicroelectronics'),
-    ('NXP Semiconductors', 'nxp', 'https://www.nxp.com', true, 'nxp semiconductors'),
-    ('Microchip Technology', 'microchip', 'https://www.microchip.com', true, 'microchip technology'),
-    ('Infineon', 'infineon', 'https://www.infineon.com', true, 'infineon'),
-    ('ON Semiconductor', 'on-semi', 'https://www.onsemi.com', true, 'on semiconductor'),
-    ('Renesas', 'renesas', 'https://www.renesas.com', true, 'renesas'),
-    ('Murata', 'murata', 'https://www.murata.com', true, 'murata'),
-    ('TDK', 'tdk', 'https://www.tdk.com', true, 'tdk'),
-    ('Vishay', 'vishay', 'https://www.vishay.com', true, 'vishay'),
-    ('Yageo', 'yageo', 'https://www.yageo.com', true, 'yageo'),
-    ('TE Connectivity', 'te-connectivity', 'https://www.te.com', true, 'te connectivity'),
-    ('Molex', 'molex', 'https://www.molex.com', true, 'molex'),
-    ('Amphenol', 'amphenol', 'https://www.amphenol.com', true, 'amphenol')
-ON CONFLICT (slug) DO NOTHING;
-
--- Seed Root Categories
-INSERT INTO public.categories (name, slug, level, path, description)
-VALUES
-    ('Passive Components', 'passive-components', 0, 'Passive Components', 'Resistors, Capacitors, Inductors'),
-    ('Active Components', 'active-components', 0, 'Active Components', 'ICs, Transistors, Diodes'),
-    ('Electromechanical', 'electromechanical', 0, 'Electromechanical', 'Connectors, Switches, Relays'),
-    ('Power', 'power', 0, 'Power', 'Power supplies, Regulators'),
-    ('RF & Wireless', 'rf-wireless', 0, 'RF & Wireless', 'Antennas, RF modules'),
-    ('Sensors', 'sensors', 0, 'Sensors', 'Temperature, Pressure, Motion sensors')
-ON CONFLICT (slug) DO NOTHING;
-
--- Seed Default CNS Config
-INSERT INTO public.cns_enrichment_config (config_name, is_active, is_global, enable_suppliers, enable_ai)
-VALUES ('Global Default', true, true, true, false)
-ON CONFLICT DO NOTHING;
 
 COMMIT;
 
 -- ============================================================================
--- MIGRATION COMPLETE
+-- VERIFICATION
 -- ============================================================================
+
 DO $$
 DECLARE
-    table_count INTEGER;
-    function_count INTEGER;
+  table_count INT;
+  policy_count INT;
 BEGIN
-    SELECT COUNT(*) INTO table_count FROM information_schema.tables
-    WHERE table_schema = 'public' AND table_type = 'BASE TABLE';
+  SELECT COUNT(*) INTO table_count FROM information_schema.tables WHERE table_schema = 'public' AND table_type = 'BASE TABLE';
+  SELECT COUNT(*) INTO policy_count FROM pg_policies WHERE schemaname = 'public';
 
-    SELECT COUNT(*) INTO function_count FROM information_schema.routines
-    WHERE routine_schema = 'public' AND routine_type = 'FUNCTION';
-
-    RAISE NOTICE '';
-    RAISE NOTICE '================================================================';
-    RAISE NOTICE '  SUPABASE MASTER MIGRATION V6.0 COMPLETE';
-    RAISE NOTICE '================================================================';
-    RAISE NOTICE '  Total Tables: %', table_count;
-    RAISE NOTICE '  Total Functions: %', function_count;
-    RAISE NOTICE '';
-    RAISE NOTICE 'SEED DATA CREATED:';
-    RAISE NOTICE '  - 3 Organizations (Platform Admin, CNS Staff, Demo Org)';
-    RAISE NOTICE '  - 5 Users (super_admin, cns-lead, cns-engineer, demo-owner, demo-engineer)';
-    RAISE NOTICE '  - 5 Organization memberships';
-    RAISE NOTICE '  - 4 Suppliers (DigiKey, Mouser, Element14, Arrow)';
-    RAISE NOTICE '  - 15 Manufacturers';
-    RAISE NOTICE '  - 6 Root categories';
-    RAISE NOTICE '  - 1 Global CNS config';
-    RAISE NOTICE '';
-    RAISE NOTICE 'KEY FEATURES:';
-    RAISE NOTICE '  - Multi-org user management';
-    RAISE NOTICE '  - Workspace/Project hierarchy';
-    RAISE NOTICE '  - Complete BOM enrichment pipeline';
-    RAISE NOTICE '  - Alert & notification system';
-    RAISE NOTICE '  - Audit trail & event logging';
-    RAISE NOTICE '  - Full-text search on components';
-    RAISE NOTICE '================================================================';
+  RAISE NOTICE '============================================================================';
+  RAISE NOTICE 'MASTER MIGRATION V3 COMPLETE!';
+  RAISE NOTICE '============================================================================';
+  RAISE NOTICE '✓ Tables created: %', table_count;
+  RAISE NOTICE '✓ RLS policies created: %', policy_count;
+  RAISE NOTICE '';
+  RAISE NOTICE 'Security Features:';
+  RAISE NOTICE '  - Admin-only membership writes (prevents privilege escalation)';
+  RAISE NOTICE '  - User-scoped alert UPDATE/DELETE (prevents editing others alerts)';
+  RAISE NOTICE '  - Last owner protection trigger';
+  RAISE NOTICE '  - System insert tables use SECURITY DEFINER functions';
+  RAISE NOTICE '  - Auth0 compatible helper functions';
+  RAISE NOTICE '============================================================================';
 END $$;

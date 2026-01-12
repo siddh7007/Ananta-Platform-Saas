@@ -1,0 +1,119 @@
+# =============================================================================
+# ArgoCD Application - Middleware API
+# =============================================================================
+# API Gateway and middleware service
+# =============================================================================
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: middleware-api
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: middleware-api
+    app.kubernetes.io/component: api
+    app.kubernetes.io/part-of: app-plane
+    environment: '{{.Values.environment}}'
+  annotations:
+    argocd.argoproj.io/sync-wave: "5"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: ananta-platform
+
+  source:
+    repoURL: https://github.com/ananta-platform/ananta-platform-saas.git
+    targetRevision: HEAD
+    path: infrastructure/kubernetes/helm/middleware-api
+
+    helm:
+      releaseName: middleware-api
+      valueFiles:
+        - values.yaml
+        - values-{{.Values.environment}}.yaml
+
+      values: |
+        fullnameOverride: middleware-api
+
+        image:
+          repository: ghcr.io/ananta-platform/middleware-api
+          pullPolicy: IfNotPresent
+
+        service:
+          type: ClusterIP
+          port: 3000
+
+        ingress:
+          enabled: true
+          className: nginx
+          annotations:
+            cert-manager.io/cluster-issuer: letsencrypt-prod
+            nginx.ingress.kubernetes.io/proxy-body-size: "100m"
+            nginx.ingress.kubernetes.io/rate-limit: "100"
+            nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+          hosts:
+            - host: middleware.{{.Values.domain}}
+              paths:
+                - path: /
+                  pathType: Prefix
+
+        resources:
+          requests:
+            cpu: 100m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+
+        autoscaling:
+          enabled: true
+          minReplicas: 3
+          maxReplicas: 20
+          targetCPUUtilizationPercentage: 60
+
+        # Redis for rate limiting and caching
+        redis:
+          host: redis.cache-system.svc.cluster.local
+          port: 6379
+
+        # JWT validation
+        auth:
+          keycloakUrl: https://auth.{{.Values.domain}}
+          realm: ananta
+
+        configMap:
+          LOG_LEVEL: info
+          NODE_ENV: production
+          RATE_LIMIT_ENABLED: "true"
+          CORS_ENABLED: "true"
+
+        secrets:
+          existingSecret: middleware-api-secrets
+
+        serviceMonitor:
+          enabled: true
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: ananta-{{.Values.environment}}
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  revisionHistoryLimit: 10
+
+  info:
+    - name: Documentation
+      value: https://docs.ananta-platform.io/services/middleware-api
+    - name: Team
+      value: platform-team

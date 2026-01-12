@@ -1,0 +1,124 @@
+# =============================================================================
+# ArgoCD Application - RabbitMQ
+# =============================================================================
+# Message broker for async communication
+# =============================================================================
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: rabbitmq
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: rabbitmq
+    app.kubernetes.io/component: messaging
+    app.kubernetes.io/part-of: infrastructure
+    environment: '{{.Values.environment}}'
+  annotations:
+    argocd.argoproj.io/sync-wave: "0"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: ananta-platform
+
+  source:
+    repoURL: https://charts.bitnami.com/bitnami
+    targetRevision: 12.10.0
+    chart: rabbitmq
+
+    helm:
+      releaseName: rabbitmq
+      values: |
+        fullnameOverride: rabbitmq
+
+        image:
+          tag: 3.12.10
+
+        auth:
+          username: admin
+          existingPasswordSecret: rabbitmq-secret
+          existingErlangCookieSecret: rabbitmq-erlang-secret
+
+        replicaCount: 3
+
+        clustering:
+          enabled: true
+
+        persistence:
+          enabled: true
+          size: 20Gi
+          storageClass: standard
+
+        resources:
+          requests:
+            cpu: 500m
+            memory: 1Gi
+          limits:
+            cpu: 2000m
+            memory: 2Gi
+
+        service:
+          type: ClusterIP
+          ports:
+            amqp: 5672
+            management: 15672
+
+        ingress:
+          enabled: true
+          ingressClassName: nginx
+          annotations:
+            cert-manager.io/cluster-issuer: letsencrypt-prod
+          hostname: rabbitmq.{{.Values.domain}}
+          tls: true
+
+        metrics:
+          enabled: true
+          serviceMonitor:
+            enabled: true
+            interval: 30s
+
+        # Virtual hosts
+        extraConfiguration: |
+          default_vhost = ananta
+          load_definitions = /app/definitions.json
+
+        # Plugins
+        plugins: "rabbitmq_management rabbitmq_peer_discovery_k8s rabbitmq_prometheus"
+
+        # Memory and disk alarms
+        memoryHighWatermark:
+          enabled: true
+          type: relative
+          value: 0.5
+
+        communityPlugins: ""
+
+        networkPolicy:
+          enabled: true
+          allowExternal: true
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: rabbitmq-system
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 5m
+
+  revisionHistoryLimit: 5
+
+  info:
+    - name: Documentation
+      value: https://docs.ananta-platform.io/infrastructure/rabbitmq
+    - name: Team
+      value: platform-team

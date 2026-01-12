@@ -450,6 +450,11 @@ export class TenantController {
     },
   })
   async findMyTenants(): Promise<Tenant[]> {
+    // DEBUG: Log the entire currentUser object
+    console.log(`[my-tenants] currentUser object:`, JSON.stringify(this.currentUser, null, 2));
+    console.log(`[my-tenants] currentUser.id:`, this.currentUser?.id);
+    console.log(`[my-tenants] currentUser.tenantId:`, this.currentUser?.tenantId);
+
     // First try tenantId from the current user's JWT token
     let tenantId = this.currentUser?.tenantId;
 
@@ -459,6 +464,7 @@ export class TenantController {
       try {
         console.log(`[my-tenants] No tenantId in JWT, looking up user ${this.currentUser.id} in database`);
         const user = await this.userRepository.findById(this.currentUser.id);
+        console.log(`[my-tenants] User lookup result:`, JSON.stringify(user, null, 2));
         tenantId = user?.tenantId;
         if (tenantId) {
           console.log(`[my-tenants] Found tenantId ${tenantId} for user ${this.currentUser.id} in database`);
@@ -476,9 +482,21 @@ export class TenantController {
 
     // Return the user's assigned tenant
     try {
-      const tenant = await this.tenantRepository.findById(tenantId);
+      console.log(`[my-tenants] Looking up tenant ${tenantId}`);
+      // Use findOne with explicit filter to bypass soft-delete scope issues
+      const tenant = await this.tenantRepository.findOne({
+        where: {
+          id: tenantId,
+        },
+      });
+      console.log(`[my-tenants] Found tenant:`, tenant?.name);
+      if (!tenant) {
+        console.log(`[my-tenants] Tenant ${tenantId} query returned null`);
+        return [];
+      }
       return [tenant];
     } catch (error) {
+      console.error(`[my-tenants] Error details:`, error);
       // Tenant not found - return empty array
       console.log(`[my-tenants] Tenant ${tenantId} not found for user ${this.currentUser?.id}`);
       return [];

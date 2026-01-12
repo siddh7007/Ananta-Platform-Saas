@@ -1,0 +1,32 @@
+-- =============================================================================
+-- SEED DATA FOR SUPABASE DATABASE
+-- =============================================================================
+-- This file must be run BEFORE 001_SUPABASE_MASTER.sql
+-- Inserts users that are referenced by organization_memberships and workspace_members
+-- =============================================================================
+
+-- Insert users (referenced by memberships in 001_SUPABASE_MASTER.sql)
+-- User IDs extracted from organization_memberships FK errors:
+-- c0000000-0000-0000-0000-000000000001, 000000000002, 000000000003, 000000000004,
+-- 000000000005, 000000000010, 000000000011, 000000000012, 000000000013
+
+INSERT INTO public.users (id, email, first_name, last_name, keycloak_user_id, role, is_platform_admin, is_active, created_at, updated_at) VALUES
+-- Platform admin users
+('c0000000-0000-0000-0000-000000000001', 'superadmin@ananta.dev', 'Super', 'Admin', 'superadmin@ananta.dev', 'super_admin', true, true, NOW(), NOW()),
+('c0000000-0000-0000-0000-000000000010', 'admin@ananta.dev', 'Platform', 'Admin', 'admin@ananta.dev', 'admin', true, true, NOW(), NOW()),
+('c0000000-0000-0000-0000-000000000012', 'backstage-admin@ananta.dev', 'Backstage', 'Admin', 'backstage-admin@ananta.dev', 'admin', true, true, NOW(), NOW()),
+
+-- CNS Staff organization users
+('c0000000-0000-0000-0000-000000000002', 'cns-lead@ananta.dev', 'CNS', 'Lead', 'cns-lead@ananta.dev', 'owner', false, true, NOW(), NOW()),
+('c0000000-0000-0000-0000-000000000003', 'cns-engineer@ananta.dev', 'CNS', 'Engineer', 'cns-engineer@ananta.dev', 'engineer', false, true, NOW(), NOW()),
+('c0000000-0000-0000-0000-000000000011', 'cnsstaff@ananta.dev', 'CNS', 'Staff', 'cnsstaff@ananta.dev', 'engineer', false, true, NOW(), NOW()),
+
+-- Demo organization users
+('c0000000-0000-0000-0000-000000000004', 'demo-owner@example.com', 'Demo', 'Owner', 'demo-owner@example.com', 'owner', false, true, NOW(), NOW()),
+('c0000000-0000-0000-0000-000000000005', 'demo-engineer@example.com', 'Demo', 'Engineer', 'demo-engineer@example.com', 'engineer', false, true, NOW(), NOW()),
+('c0000000-0000-0000-0000-000000000013', 'demo-analyst@example.com', 'Demo', 'Analyst', 'demo-analyst@example.com', 'analyst', false, true, NOW(), NOW())
+ON CONFLICT (id) DO NOTHING;
+
+-- =============================================================================
+-- END OF SEED DATA
+-- =============================================================================

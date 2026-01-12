@@ -1,0 +1,11 @@
+# Example terraform.tfvars file
+# Copy this to terraform.tfvars and fill in your actual values
+
+control_plane_db_user     = "postgres"
+control_plane_db_password = "your-secure-password-here"
+
+supabase_db_user     = "postgres"
+supabase_db_password = "your-secure-password-here"
+
+components_v2_db_user     = "postgres"
+components_v2_db_password = "your-secure-password-here"
