@@ -119,7 +119,7 @@ resource "kubernetes_ingress_v1" "supabase_studio" {
             service {
               name = "supabase-studio"
               port {
-                number = 3000
+                number = 27800
               }
             }
           }
