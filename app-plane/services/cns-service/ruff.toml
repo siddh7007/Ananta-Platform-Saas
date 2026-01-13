@@ -4,19 +4,38 @@
 # Set line length to 120 characters (common Python standard)
 line-length = 120
 
+# Exclude verification/test scripts and generated files
+exclude = [
+    "verify_*.py",
+    "**/migrations/**",
+    "**/__pycache__/**",
+    ".git",
+    ".venv",
+    "venv",
+    "build",
+    "dist",
+]
+
 [lint]
 # Enable commonly used rules
 select = ["E", "F", "W"]
 
-# Ignore specific rules globally if needed
-ignore = []
+# Ignore specific rules globally to reduce noise
+ignore = [
+    "E501",  # Line too long - handled by formatter
+    "W293",  # Blank line contains whitespace - cosmetic
+    "W291",  # Trailing whitespace - cosmetic
+]
 
 # Per-file ignores
 [lint.per-file-ignores]
-# Example/documentation files - allow unused imports, unused variables, mid-file imports, and long lines
-"EXAMPLE_INTEGRATION.py" = ["F401", "F841", "E402", "E501"]
-"**/examples/**/*.py" = ["F401", "F841", "E402", "E501"]
-"**/docs/**/*.py" = ["F401", "F841", "E402", "E501"]
+# Example/documentation files - allow unused imports, unused variables, mid-file imports
+"EXAMPLE_INTEGRATION.py" = ["F401", "F841", "E402"]
+"**/examples/**/*.py" = ["F401", "F841", "E402"]
+"**/docs/**/*.py" = ["F401", "F841", "E402"]
+# Test files - more lenient linting
+"**/tests/**/*.py" = ["F401", "F841", "E722"]
+"test_*.py" = ["F401", "F841", "E722"]
 
 [format]
 # Use double quotes for strings
