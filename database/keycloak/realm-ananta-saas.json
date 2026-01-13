@@ -353,6 +353,116 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "backstage-portal",
+      "name": "Backstage Admin Portal",
+      "description": "Platform admin portal for staff tenant users only (React Admin)",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "authorizationServicesEnabled": false,
+      "fullScopeAllowed": true,
+      "rootUrl": "http://localhost:27510",
+      "baseUrl": "/",
+      "adminUrl": "",
+      "redirectUris": [
+        "http://localhost:27510/*"
+      ],
+      "webOrigins": [
+        "http://localhost:27510",
+        "+"
+      ],
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "email"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access",
+        "microprofile-jwt"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      }
+    },
+    {
+      "clientId": "cns-dashboard",
+      "name": "CNS Service Dashboard",
+      "description": "CNS Service embedded React Admin dashboard (port 27200/dashboard)",
+      "enabled": true,
+      "publicClient": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": true,
+      "serviceAccountsEnabled": false,
+      "authorizationServicesEnabled": false,
+      "fullScopeAllowed": true,
+      "rootUrl": "http://localhost:27200",
+      "baseUrl": "/dashboard",
+      "adminUrl": "",
+      "redirectUris": [
+        "http://localhost:27200/*",
+        "http://localhost:27200/dashboard/*"
+      ],
+      "webOrigins": [
+        "http://localhost:27200",
+        "+"
+      ],
+      "defaultClientScopes": [
+        "web-origins",
+        "acr",
+        "profile",
+        "roles",
+        "email",
+        "tenant"
+      ],
+      "optionalClientScopes": [
+        "address",
+        "phone",
+        "offline_access",
+        "microprofile-jwt"
+      ],
+      "protocolMappers": [
+        {
+          "name": "tenant-id-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "tenant_id",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "tenant_id",
+            "jsonType.label": "String"
+          }
+        },
+        {
+          "name": "tenant-key-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-attribute-mapper",
+          "consentRequired": false,
+          "config": {
+            "userinfo.token.claim": "true",
+            "user.attribute": "tenant_key",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "claim.name": "tenant_key",
+            "jsonType.label": "String"
+          }
+        }
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256"
+      }
     }
   ],
   "clientScopes": [
