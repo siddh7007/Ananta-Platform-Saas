@@ -29,7 +29,9 @@ deploy_cns_service      = true
 deploy_customer_portal  = true
 deploy_cns_dashboard    = true
 deploy_supabase_studio  = true
-deploy_novu             = false  # Disable Novu for now (optional service)
+deploy_novu             = true   # Enable Novu notification services
+deploy_directus         = true   # Enable Directus CMS for audit trail
+deploy_backstage_portal = true   # Enable Backstage Portal (internal staff portal)
 deploy_observability    = false  # Disable observability for now (optional)
 
 # CNS Service Vendor API Keys (placeholders for local development)

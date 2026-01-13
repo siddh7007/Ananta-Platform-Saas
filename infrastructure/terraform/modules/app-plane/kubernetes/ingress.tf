@@ -243,3 +243,167 @@ resource "kubernetes_ingress_v1" "cns_dashboard" {
     }
   }
 }
+
+# -----------------------------------------------------------------------------
+# Novu Web Dashboard Ingress
+# -----------------------------------------------------------------------------
+
+resource "kubernetes_ingress_v1" "novu_web" {
+  count = var.deploy_novu ? 1 : 0
+
+  metadata {
+    name      = "novu-web-ingress"
+    namespace = var.namespace
+    labels    = local.common_labels
+    annotations = {
+      "traefik.ingress.kubernetes.io/router.entrypoints" = "web"
+    }
+  }
+
+  spec {
+    ingress_class_name = "traefik"
+
+    rule {
+      host = "novu.localhost"
+      http {
+        path {
+          path      = "/"
+          path_type = "Prefix"
+          backend {
+            service {
+              name = "novu-web"
+              port {
+                number = 13200
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  depends_on = [kubernetes_deployment.novu_web]
+}
+
+# -----------------------------------------------------------------------------
+# Novu API Ingress
+# -----------------------------------------------------------------------------
+
+resource "kubernetes_ingress_v1" "novu_api" {
+  count = var.deploy_novu ? 1 : 0
+
+  metadata {
+    name      = "novu-api-ingress"
+    namespace = var.namespace
+    labels    = local.common_labels
+    annotations = {
+      "traefik.ingress.kubernetes.io/router.entrypoints" = "web"
+    }
+  }
+
+  spec {
+    ingress_class_name = "traefik"
+
+    rule {
+      host = "novu-api.localhost"
+      http {
+        path {
+          path      = "/"
+          path_type = "Prefix"
+          backend {
+            service {
+              name = "novu-api"
+              port {
+                number = 13100
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  depends_on = [kubernetes_deployment.novu_api]
+}
+
+# -----------------------------------------------------------------------------
+# Directus Ingress
+# -----------------------------------------------------------------------------
+
+resource "kubernetes_ingress_v1" "directus" {
+  count = var.deploy_directus ? 1 : 0
+
+  metadata {
+    name      = "directus-ingress"
+    namespace = var.namespace
+    labels    = local.common_labels
+    annotations = {
+      "traefik.ingress.kubernetes.io/router.entrypoints" = "web"
+    }
+  }
+
+  spec {
+    ingress_class_name = "traefik"
+
+    rule {
+      host = "directus.localhost"
+      http {
+        path {
+          path      = "/"
+          path_type = "Prefix"
+          backend {
+            service {
+              name = "directus"
+              port {
+                number = 8055
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  depends_on = [kubernetes_deployment.directus]
+}
+
+# -----------------------------------------------------------------------------
+# Backstage Portal Ingress
+# -----------------------------------------------------------------------------
+
+resource "kubernetes_ingress_v1" "backstage_portal" {
+  count = var.deploy_backstage_portal ? 1 : 0
+
+  metadata {
+    name      = "backstage-portal-ingress"
+    namespace = var.namespace
+    labels    = local.common_labels
+    annotations = {
+      "traefik.ingress.kubernetes.io/router.entrypoints" = "web"
+    }
+  }
+
+  spec {
+    ingress_class_name = "traefik"
+
+    rule {
+      host = "backstage.localhost"
+      http {
+        path {
+          path      = "/"
+          path_type = "Prefix"
+          backend {
+            service {
+              name = "backstage-portal"
+              port {
+                number = 27300
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  depends_on = [kubernetes_deployment.backstage_portal]
+}

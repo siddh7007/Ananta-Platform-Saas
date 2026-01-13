@@ -671,12 +671,23 @@ module "app_plane" {
   control_plane_api_url = "http://tenant-management-service.${kubernetes_namespace.namespaces["control_plane"].metadata[0].name}:14000"
 
   # Service deployment flags
-  deploy_cns_service     = var.deploy_cns_service
-  deploy_customer_portal = var.deploy_customer_portal
-  deploy_supabase_studio = var.deploy_supabase_studio
-  deploy_cns_dashboard   = var.deploy_cns_dashboard
-  deploy_novu            = var.deploy_novu
-  deploy_observability   = var.deploy_observability
+  deploy_cns_service      = var.deploy_cns_service
+  deploy_customer_portal  = var.deploy_customer_portal
+  deploy_supabase_studio  = var.deploy_supabase_studio
+  deploy_cns_dashboard    = var.deploy_cns_dashboard
+  deploy_novu             = var.deploy_novu
+  deploy_observability    = var.deploy_observability
+  deploy_directus         = var.deploy_directus
+  deploy_backstage_portal = var.deploy_backstage_portal
+
+  # Directus configuration
+  directus_image          = var.directus_image
+  directus_admin_email    = var.directus_admin_email
+  directus_admin_password = var.directus_admin_password
+  directus_secret         = var.directus_secret
+
+  # Backstage Portal configuration
+  backstage_portal_image  = var.backstage_portal_image
 
   # Helm chart versions
   redis_chart_version    = var.redis_chart_version

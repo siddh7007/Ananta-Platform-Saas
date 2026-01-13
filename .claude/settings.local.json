@@ -55,7 +55,10 @@
       "Bash(git checkout:*)",
       "Bash(cat:*)",
       "Bash(bun install)",
-      "Bash(bun add:*)"
+      "Bash(bun add:*)",
+      "Bash(curl:*)",
+      "Bash(docker ps:*)",
+      "Bash(\"e:/Work/Ananta-Platform-Saas/terraform.exe\" apply -auto-approve)"
     ],
     "deny": [],
     "ask": []

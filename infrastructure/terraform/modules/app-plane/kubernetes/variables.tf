@@ -382,3 +382,55 @@ variable "labels" {
   type        = map(string)
   default     = {}
 }
+
+# -----------------------------------------------------------------------------
+# Directus Configuration
+# -----------------------------------------------------------------------------
+
+variable "deploy_directus" {
+  description = "Deploy Directus CMS for audit trail and file management"
+  type        = bool
+  default     = false
+}
+
+variable "directus_image" {
+  description = "Directus Docker image"
+  type        = string
+  default     = "directus/directus:10.10.4"
+}
+
+variable "directus_admin_email" {
+  description = "Directus admin email"
+  type        = string
+  default     = "admin@ananta.local"
+}
+
+variable "directus_admin_password" {
+  description = "Directus admin password"
+  type        = string
+  default     = "directus123"
+  sensitive   = true
+}
+
+variable "directus_secret" {
+  description = "Directus secret key for encryption"
+  type        = string
+  default     = "directus-secret-key-change-in-production"
+  sensitive   = true
+}
+
+# -----------------------------------------------------------------------------
+# Backstage Portal Configuration
+# -----------------------------------------------------------------------------
+
+variable "deploy_backstage_portal" {
+  description = "Deploy Backstage Portal (internal staff admin portal)"
+  type        = bool
+  default     = false
+}
+
+variable "backstage_portal_image" {
+  description = "Backstage Portal Docker image"
+  type        = string
+  default     = "ananta/backstage-portal:local"
+}

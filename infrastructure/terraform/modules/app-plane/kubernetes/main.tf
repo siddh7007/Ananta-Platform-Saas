@@ -3838,3 +3838,355 @@ resource "kubernetes_service" "grafana" {
     type = "ClusterIP"
   }
 }
+
+# =============================================================================
+# DIRECTUS CMS (Audit Trail and File Management)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Directus Secrets
+# -----------------------------------------------------------------------------
+
+resource "kubernetes_secret" "directus" {
+  count = var.deploy_directus ? 1 : 0
+
+  metadata {
+    name      = "${var.name_prefix}-directus-secrets"
+    namespace = var.namespace
+    labels    = local.common_labels
+  }
+
+  data = {
+    ADMIN_EMAIL    = var.directus_admin_email
+    ADMIN_PASSWORD = var.directus_admin_password
+    SECRET         = var.directus_secret
+  }
+
+  type = "Opaque"
+}
+
+# -----------------------------------------------------------------------------
+# Directus Deployment
+# -----------------------------------------------------------------------------
+
+resource "kubernetes_deployment" "directus" {
+  count = var.deploy_directus ? 1 : 0
+
+  metadata {
+    name      = "directus"
+    namespace = var.namespace
+    labels    = merge(local.common_labels, {
+      "app.kubernetes.io/name"      = "directus"
+      "app.kubernetes.io/component" = "cms"
+    })
+  }
+
+  spec {
+    replicas = 1
+
+    selector {
+      match_labels = {
+        "app.kubernetes.io/name" = "directus"
+      }
+    }
+
+    template {
+      metadata {
+        labels = merge(local.common_labels, {
+          "app.kubernetes.io/name"      = "directus"
+          "app.kubernetes.io/component" = "cms"
+        })
+      }
+
+      spec {
+        container {
+          name  = "directus"
+          image = var.directus_image
+
+          port {
+            container_port = 8055
+            name           = "http"
+          }
+
+          env {
+            name  = "PUBLIC_URL"
+            value = "http://directus.localhost:8888"
+          }
+
+          env {
+            name  = "DB_CLIENT"
+            value = "pg"
+          }
+
+          env {
+            name  = "DB_HOST"
+            value = "supabase-db"
+          }
+
+          env {
+            name  = "DB_PORT"
+            value = "5432"
+          }
+
+          env {
+            name  = "DB_DATABASE"
+            value = "directus"
+          }
+
+          env {
+            name  = "DB_USER"
+            value = "postgres"
+          }
+
+          env {
+            name  = "DB_PASSWORD"
+            value = "postgres"
+          }
+
+          env {
+            name  = "CACHE_ENABLED"
+            value = "true"
+          }
+
+          env {
+            name  = "CACHE_STORE"
+            value = "redis"
+          }
+
+          env {
+            name  = "CACHE_REDIS"
+            value = "redis://redis:6379"
+          }
+
+          env {
+            name = "SECRET"
+            value_from {
+              secret_key_ref {
+                name = kubernetes_secret.directus[0].metadata[0].name
+                key  = "SECRET"
+              }
+            }
+          }
+
+          env {
+            name = "ADMIN_EMAIL"
+            value_from {
+              secret_key_ref {
+                name = kubernetes_secret.directus[0].metadata[0].name
+                key  = "ADMIN_EMAIL"
+              }
+            }
+          }
+
+          env {
+            name = "ADMIN_PASSWORD"
+            value_from {
+              secret_key_ref {
+                name = kubernetes_secret.directus[0].metadata[0].name
+                key  = "ADMIN_PASSWORD"
+              }
+            }
+          }
+
+          resources {
+            requests = {
+              cpu    = "100m"
+              memory = "256Mi"
+            }
+            limits = {
+              cpu    = "500m"
+              memory = "512Mi"
+            }
+          }
+
+          readiness_probe {
+            http_get {
+              path = "/server/health"
+              port = 8055
+            }
+            initial_delay_seconds = 30
+            period_seconds        = 10
+          }
+
+          liveness_probe {
+            http_get {
+              path = "/server/health"
+              port = 8055
+            }
+            initial_delay_seconds = 60
+            period_seconds        = 30
+          }
+        }
+      }
+    }
+  }
+
+  depends_on = [kubernetes_stateful_set.supabase_db, kubernetes_stateful_set.redis]
+}
+
+# -----------------------------------------------------------------------------
+# Directus Service
+# -----------------------------------------------------------------------------
+
+resource "kubernetes_service" "directus" {
+  count = var.deploy_directus ? 1 : 0
+
+  metadata {
+    name      = "directus"
+    namespace = var.namespace
+    labels    = merge(local.common_labels, {
+      "app.kubernetes.io/name" = "directus"
+    })
+  }
+
+  spec {
+    selector = {
+      "app.kubernetes.io/name" = "directus"
+    }
+
+    port {
+      name        = "http"
+      port        = 8055
+      target_port = 8055
+    }
+
+    type = "ClusterIP"
+  }
+}
+
+# =============================================================================
+# BACKSTAGE PORTAL (Internal Staff Admin Portal)
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Backstage Portal Deployment
+# -----------------------------------------------------------------------------
+
+resource "kubernetes_deployment" "backstage_portal" {
+  count = var.deploy_backstage_portal ? 1 : 0
+
+  metadata {
+    name      = "backstage-portal"
+    namespace = var.namespace
+    labels    = merge(local.common_labels, {
+      "app.kubernetes.io/name"      = "backstage-portal"
+      "app.kubernetes.io/component" = "frontend"
+    })
+  }
+
+  spec {
+    replicas = 1
+
+    selector {
+      match_labels = {
+        "app.kubernetes.io/name" = "backstage-portal"
+      }
+    }
+
+    template {
+      metadata {
+        labels = merge(local.common_labels, {
+          "app.kubernetes.io/name"      = "backstage-portal"
+          "app.kubernetes.io/component" = "frontend"
+        })
+      }
+
+      spec {
+        container {
+          name  = "backstage-portal"
+          image = var.backstage_portal_image
+          image_pull_policy = "Never"
+
+          port {
+            container_port = 80
+            name           = "http"
+          }
+
+          env {
+            name  = "VITE_CNS_SERVICE_URL"
+            value = "http://cns.localhost:8888"
+          }
+
+          env {
+            name  = "VITE_SUPABASE_URL"
+            value = "http://supabase-api:27810"
+          }
+
+          env {
+            name  = "VITE_KEYCLOAK_URL"
+            value = var.cns_dashboard_keycloak_url
+          }
+
+          env {
+            name  = "VITE_KEYCLOAK_REALM"
+            value = var.cns_dashboard_keycloak_realm
+          }
+
+          env {
+            name  = "VITE_KEYCLOAK_CLIENT_ID"
+            value = "backstage-portal"
+          }
+
+          resources {
+            requests = {
+              cpu    = "50m"
+              memory = "64Mi"
+            }
+            limits = {
+              cpu    = "200m"
+              memory = "256Mi"
+            }
+          }
+
+          readiness_probe {
+            http_get {
+              path = "/"
+              port = 80
+            }
+            initial_delay_seconds = 5
+            period_seconds        = 10
+          }
+
+          liveness_probe {
+            http_get {
+              path = "/"
+              port = 80
+            }
+            initial_delay_seconds = 10
+            period_seconds        = 30
+          }
+        }
+      }
+    }
+  }
+}
+
+# -----------------------------------------------------------------------------
+# Backstage Portal Service
+# -----------------------------------------------------------------------------
+
+resource "kubernetes_service" "backstage_portal" {
+  count = var.deploy_backstage_portal ? 1 : 0
+
+  metadata {
+    name      = "backstage-portal"
+    namespace = var.namespace
+    labels    = merge(local.common_labels, {
+      "app.kubernetes.io/name" = "backstage-portal"
+    })
+  }
+
+  spec {
+    selector = {
+      "app.kubernetes.io/name" = "backstage-portal"
+    }
+
+    port {
+      name        = "http"
+      port        = 27300
+      target_port = 80
+    }
+
+    type = "ClusterIP"
+  }
+}
