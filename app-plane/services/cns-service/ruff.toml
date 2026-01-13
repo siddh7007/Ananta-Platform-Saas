@@ -21,5 +21,3 @@ ignore = []
 [format]
 # Use double quotes for strings
 quote-style = "double"
-# Match line length
-line-length = 120
