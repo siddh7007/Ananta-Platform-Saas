@@ -618,11 +618,16 @@ jobs:
           sudo mv argocd /usr/local/bin/
 
       - name: Trigger ArgoCD Sync
-        if: ${{ secrets.ARGOCD_TOKEN != '' }}
         env:
           ARGOCD_SERVER: ${{ vars.ARGOCD_SERVER || 'argocd.ananta.io' }}
           ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_TOKEN }}
         run: |
+          if [ -z "$ARGOCD_AUTH_TOKEN" ]; then
+            echo "ARGOCD_TOKEN secret not configured - skipping ArgoCD sync"
+            echo "ArgoCD will auto-sync from updated manifests"
+            exit 0
+          fi
+
           ENV="${{ github.event.inputs.environment || 'dev' }}"
           SERVICES='${{ needs.detect-changes.outputs.services-matrix }}'
 
@@ -638,11 +643,15 @@ jobs:
           done
 
       - name: Wait for rollout
-        if: ${{ secrets.ARGOCD_TOKEN != '' }}
         env:
           ARGOCD_SERVER: ${{ vars.ARGOCD_SERVER || 'argocd.ananta.io' }}
           ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_TOKEN }}
         run: |
+          if [ -z "$ARGOCD_AUTH_TOKEN" ]; then
+            echo "ARGOCD_TOKEN secret not configured - skipping rollout wait"
+            exit 0
+          fi
+
           ENV="${{ github.event.inputs.environment || 'dev' }}"
           SERVICES='${{ needs.detect-changes.outputs.services-matrix }}'
 
