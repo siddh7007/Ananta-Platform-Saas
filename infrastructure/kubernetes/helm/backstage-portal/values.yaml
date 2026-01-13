@@ -7,7 +7,7 @@ replicaCount: 1
 
 image:
   repository: ananta/backstage-portal
-  tag: "local"
+  tag: "1e4ed6e"
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
