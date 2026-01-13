@@ -1,6 +1,9 @@
 # Ruff configuration for CNS Service
 # https://docs.astral.sh/ruff/configuration/
 
+# Set line length to 120 characters (common Python standard)
+line-length = 120
+
 [lint]
 # Enable commonly used rules
 select = ["E", "F", "W"]
@@ -10,11 +13,13 @@ ignore = []
 
 # Per-file ignores
 [lint.per-file-ignores]
-# Example/documentation files - allow unused imports, unused variables, and mid-file imports
-"EXAMPLE_INTEGRATION.py" = ["F401", "F841", "E402"]
-"**/examples/**/*.py" = ["F401", "F841", "E402"]
-"**/docs/**/*.py" = ["F401", "F841", "E402"]
+# Example/documentation files - allow unused imports, unused variables, mid-file imports, and long lines
+"EXAMPLE_INTEGRATION.py" = ["F401", "F841", "E402", "E501"]
+"**/examples/**/*.py" = ["F401", "F841", "E402", "E501"]
+"**/docs/**/*.py" = ["F401", "F841", "E402", "E501"]
 
 [format]
 # Use double quotes for strings
 quote-style = "double"
+# Match line length
+line-length = 120
