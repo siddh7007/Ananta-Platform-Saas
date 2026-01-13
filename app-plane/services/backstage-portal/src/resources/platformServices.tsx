@@ -358,14 +358,14 @@ const ServiceFilter = (props: any) => (
       choices={categoryChoices}
       optionText="name"
       optionValue="id"
-      allowEmpty
+      emptyText="All Categories"
     />
     <SelectInput
       source="enabled"
       choices={enabledChoices}
       optionText="name"
       optionValue="id"
-      allowEmpty
+      emptyText="All"
       parse={parseEnabledFilter}
       format={formatEnabledFilter}
     />
