@@ -1,0 +1,20 @@
+# Ruff configuration for CNS Service
+# https://docs.astral.sh/ruff/configuration/
+
+[lint]
+# Enable commonly used rules
+select = ["E", "F", "W"]
+
+# Ignore specific rules globally if needed
+ignore = []
+
+# Per-file ignores
+[lint.per-file-ignores]
+# Example/documentation files - allow unused imports, unused variables, and mid-file imports
+"EXAMPLE_INTEGRATION.py" = ["F401", "F841", "E402"]
+"**/examples/**/*.py" = ["F401", "F841", "E402"]
+"**/docs/**/*.py" = ["F401", "F841", "E402"]
+
+[format]
+# Use double quotes for strings
+quote-style = "double"
