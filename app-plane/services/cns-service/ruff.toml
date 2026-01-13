@@ -24,11 +24,15 @@ select = ["E", "F", "W"]
 # Note: Many of these are false positives or intentional patterns in the codebase
 ignore = [
     "E501",  # Line too long - handled by formatter
+    "E402",  # Import not at top of file - common pattern for conditional imports
+    "E731",  # Lambda assignment - used for fallback stubs
+    "E741",  # Ambiguous variable name (l, O, I) - style preference
     "W291",  # Trailing whitespace - cosmetic
     "W292",  # No newline at end of file - cosmetic
     "W293",  # Blank line contains whitespace - cosmetic
     "F401",  # Unused imports - often needed for re-exports or future use
     "F541",  # f-string without placeholders - used for consistent logging style
+    "F821",  # Undefined name - many false positives with conditional imports
     "F841",  # Unused variables - often assigned for debugging or future use
     "E722",  # Bare except - used intentionally for catch-all error handling
 ]
