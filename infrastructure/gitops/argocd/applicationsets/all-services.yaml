@@ -1,0 +1,193 @@
+# =============================================================================
+# ArgoCD ApplicationSet - All Platform Services
+# =============================================================================
+# Automatically generates ArgoCD Applications for all microservices
+# across all environments (dev, staging, prod)
+# =============================================================================
+
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: ananta-platform-services
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: ananta-platform
+    app.kubernetes.io/component: applicationset
+spec:
+  generators:
+    # Matrix generator: Services × Environments
+    - matrix:
+        generators:
+          # All services
+          - list:
+              elements:
+                # =============================================================
+                # Control Plane Services (TypeScript/LoopBack)
+                # =============================================================
+                - name: tenant-management-service
+                  path: infrastructure/kubernetes/helm/tenant-management-service
+                  namespace: control-plane
+                  plane: control
+                  port: "14000"
+                  syncWave: "10"
+
+                - name: orchestrator-service
+                  path: infrastructure/kubernetes/helm/orchestrator-service
+                  namespace: control-plane
+                  plane: control
+                  port: "14001"
+                  syncWave: "15"
+
+                - name: subscription-service
+                  path: infrastructure/kubernetes/helm/subscription-service
+                  namespace: control-plane
+                  plane: control
+                  port: "14002"
+                  syncWave: "15"
+
+                - name: temporal-worker-service
+                  path: infrastructure/kubernetes/helm/temporal-worker-service
+                  namespace: control-plane
+                  plane: control
+                  port: "14003"
+                  syncWave: "20"
+
+                # =============================================================
+                # App Plane Services (Python/FastAPI)
+                # =============================================================
+                - name: cns-service
+                  path: infrastructure/kubernetes/helm/cns-service
+                  namespace: app-plane
+                  plane: app
+                  port: "27200"
+                  syncWave: "10"
+
+                - name: audit-logger
+                  path: infrastructure/kubernetes/helm/audit-logger
+                  namespace: app-plane
+                  plane: app
+                  port: "27201"
+                  syncWave: "15"
+
+                - name: middleware-api
+                  path: infrastructure/kubernetes/helm/middleware-api
+                  namespace: app-plane
+                  plane: app
+                  port: "27202"
+                  syncWave: "15"
+
+                - name: novu-consumer
+                  path: infrastructure/kubernetes/helm/novu-consumer
+                  namespace: app-plane
+                  plane: app
+                  port: "27203"
+                  syncWave: "15"
+
+                # =============================================================
+                # Frontend Applications (React/Vite)
+                # =============================================================
+                - name: admin-app
+                  path: infrastructure/kubernetes/helm/admin-app
+                  namespace: control-plane
+                  plane: control
+                  port: "27555"
+                  syncWave: "25"
+
+                - name: customer-portal
+                  path: infrastructure/kubernetes/helm/customer-portal
+                  namespace: app-plane
+                  plane: app
+                  port: "27100"
+                  syncWave: "25"
+
+                - name: backstage-portal
+                  path: infrastructure/kubernetes/helm/backstage-portal
+                  namespace: app-plane
+                  plane: app
+                  port: "27300"
+                  syncWave: "25"
+
+                - name: cns-dashboard
+                  path: infrastructure/kubernetes/helm/cns-dashboard
+                  namespace: app-plane
+                  plane: app
+                  port: "27250"
+                  syncWave: "25"
+
+          # Environments
+          - list:
+              elements:
+                - environment: dev
+                  targetRevision: develop
+                  domain: dev.ananta.io
+
+                - environment: staging
+                  targetRevision: staging
+                  domain: staging.ananta.io
+
+                - environment: prod
+                  targetRevision: main
+                  domain: ananta.io
+
+  template:
+    metadata:
+      name: '{{name}}-{{environment}}'
+      namespace: argocd
+      labels:
+        app.kubernetes.io/name: '{{name}}'
+        app.kubernetes.io/part-of: ananta-platform
+        app.kubernetes.io/component: '{{plane}}-plane'
+        environment: '{{environment}}'
+      annotations:
+        argocd.argoproj.io/sync-wave: '{{syncWave}}'
+      finalizers:
+        - resources-finalizer.argocd.argoproj.io
+    spec:
+      project: ananta-platform
+
+      source:
+        repoURL: https://github.com/siddh7007/Ananta-Platform-Saas.git
+        targetRevision: '{{targetRevision}}'
+        path: '{{path}}'
+
+        helm:
+          releaseName: '{{name}}'
+          valueFiles:
+            - values.yaml
+            - values-{{environment}}.yaml
+          parameters:
+            - name: image.pullPolicy
+              value: Always
+
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{namespace}}'
+
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+          - CreateNamespace=true
+          - PrunePropagationPolicy=foreground
+          - PruneLast=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 5s
+            factor: 2
+            maxDuration: 3m
+
+      revisionHistoryLimit: 5
+
+      info:
+        - name: Environment
+          value: '{{environment}}'
+        - name: Plane
+          value: '{{plane}}'
+        - name: Port
+          value: '{{port}}'
+
+  # Sync policy for the ApplicationSet itself
+  syncPolicy:
+    preserveResourcesOnDeletion: true

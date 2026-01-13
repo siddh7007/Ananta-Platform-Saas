@@ -1,0 +1,16 @@
+apiVersion: v2
+name: backstage-portal
+description: Internal staff administration portal for platform operations
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - saas
+  - app-plane
+  - admin
+  - staff
+  - react-admin
+maintainers:
+  - name: Platform Team
+    email: platform@ananta.io
+home: https://github.com/siddh7007/Ananta-Platform-Saas

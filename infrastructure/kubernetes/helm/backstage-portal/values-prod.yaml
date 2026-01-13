@@ -1,0 +1,59 @@
+# =============================================================================
+# Backstage Portal - Production Environment Values
+# =============================================================================
+
+replicaCount: 3
+
+image:
+  repository: ghcr.io/siddh7007/ananta/backstage-portal
+  tag: "latest"
+  pullPolicy: IfNotPresent
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/rate-limit-window: "1m"
+    # CORS - restrict to production domains only
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://ananta.io,https://backstage.ananta.io,https://admin.ananta.io"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, PUT, POST, DELETE, PATCH, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,X-CustomHeader,X-LANG,Keep-Alive,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,X-Api-Key,X-Device-Id,Authorization"
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    # Security headers
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      add_header X-Frame-Options "SAMEORIGIN" always;
+      add_header X-Content-Type-Options "nosniff" always;
+      add_header X-XSS-Protection "1; mode=block" always;
+      add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+  hosts:
+    - host: backstage.ananta.io
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: backstage-portal-tls
+      hosts:
+        - backstage.ananta.io
+
+resources:
+  requests:
+    cpu: 200m
+    memory: 256Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+autoscaling:
+  enabled: true
+  minReplicas: 3
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+config:
+  keycloak:
+    url: "https://auth.ananta.io"
+    realm: "ananta-saas"
+    clientId: "backstage-portal"
+  cnsServiceUrl: "https://cns.ananta.io"

@@ -1,0 +1,99 @@
+# =============================================================================
+# Backstage Portal Helm Chart Values
+# =============================================================================
+# Internal staff administration portal for platform operations
+
+replicaCount: 1
+
+image:
+  repository: ananta/backstage-portal
+  tag: "local"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: "backstage-portal"
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext: {}
+
+securityContext: {}
+
+service:
+  type: ClusterIP
+  port: 27300
+  targetPort: 80
+
+ingress:
+  enabled: true
+  className: "traefik"
+  annotations: {}
+  hosts:
+    - host: backstage.localhost
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 3
+  targetCPUUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# =============================================================================
+# Application Configuration (Build-time env vars baked into image)
+# =============================================================================
+# These are for documentation - actual values are set at Docker build time
+config:
+  # Auth provider: 'keycloak' or 'auth0'
+  authProvider: "keycloak"
+
+  # Keycloak settings
+  keycloak:
+    url: "http://localhost:8180"
+    realm: "ananta-saas"
+    clientId: "backstage-portal"
+
+  # CNS Service URL
+  cnsServiceUrl: "http://cns.localhost:8888"
+
+  # Supabase URL
+  supabaseUrl: "http://supabase-api:27810"
+
+# =============================================================================
+# Health Checks
+# =============================================================================
+livenessProbe:
+  httpGet:
+    path: /
+    port: http
+  initialDelaySeconds: 10
+  periodSeconds: 30
+
+readinessProbe:
+  httpGet:
+    path: /
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10

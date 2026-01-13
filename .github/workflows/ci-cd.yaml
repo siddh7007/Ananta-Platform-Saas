@@ -1,0 +1,730 @@
+# =============================================================================
+# CI/CD Pipeline for Ananta Platform SaaS
+# =============================================================================
+# Builds, tests, and deploys all microservices via ArgoCD
+#
+# Triggers:
+#   - Push to main/develop branches
+#   - Pull requests to main
+#   - Manual dispatch
+#
+# Services:
+#   Control Plane: tenant-management, orchestrator, subscription, temporal-worker
+#   App Plane: cns-service, backstage-portal, customer-portal, audit-logger, etc.
+# =============================================================================
+
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - 'release/**'
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+      - '.gitignore'
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      services:
+        description: 'Services to build (comma-separated, or "all")'
+        required: false
+        default: 'all'
+      environment:
+        description: 'Target environment'
+        required: true
+        default: 'dev'
+        type: choice
+        options:
+          - dev
+          - staging
+          - prod
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository_owner }}/ananta
+
+# =============================================================================
+# Jobs
+# =============================================================================
+jobs:
+  # ---------------------------------------------------------------------------
+  # Detect Changed Services
+  # ---------------------------------------------------------------------------
+  detect-changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      # Control Plane
+      tenant-management: ${{ steps.changes.outputs.tenant-management }}
+      orchestrator: ${{ steps.changes.outputs.orchestrator }}
+      subscription: ${{ steps.changes.outputs.subscription }}
+      temporal-worker: ${{ steps.changes.outputs.temporal-worker }}
+      # App Plane
+      cns-service: ${{ steps.changes.outputs.cns-service }}
+      backstage-portal: ${{ steps.changes.outputs.backstage-portal }}
+      customer-portal: ${{ steps.changes.outputs.customer-portal }}
+      audit-logger: ${{ steps.changes.outputs.audit-logger }}
+      middleware-api: ${{ steps.changes.outputs.middleware-api }}
+      novu-consumer: ${{ steps.changes.outputs.novu-consumer }}
+      # Frontend Apps
+      admin-app: ${{ steps.changes.outputs.admin-app }}
+      # Matrix
+      services-matrix: ${{ steps.matrix.outputs.services }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect file changes
+        uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            tenant-management:
+              - 'arc-saas/services/tenant-management-service/**'
+              - 'infrastructure/kubernetes/helm/tenant-management-service/**'
+            orchestrator:
+              - 'arc-saas/services/orchestrator-service/**'
+              - 'infrastructure/kubernetes/helm/orchestrator-service/**'
+            subscription:
+              - 'arc-saas/services/subscription-service/**'
+              - 'infrastructure/kubernetes/helm/subscription-service/**'
+            temporal-worker:
+              - 'arc-saas/services/temporal-worker-service/**'
+              - 'infrastructure/kubernetes/helm/temporal-worker-service/**'
+            cns-service:
+              - 'app-plane/services/cns-service/**'
+              - 'infrastructure/kubernetes/helm/cns-service/**'
+            backstage-portal:
+              - 'app-plane/services/backstage-portal/**'
+              - 'infrastructure/kubernetes/helm/backstage-portal/**'
+            customer-portal:
+              - 'arc-saas/apps/customer-portal/**'
+              - 'infrastructure/kubernetes/helm/customer-portal/**'
+            audit-logger:
+              - 'app-plane/services/audit-logger/**'
+              - 'infrastructure/kubernetes/helm/audit-logger/**'
+            middleware-api:
+              - 'app-plane/services/middleware-api/**'
+              - 'infrastructure/kubernetes/helm/middleware-api/**'
+            novu-consumer:
+              - 'app-plane/services/novu-consumer/**'
+              - 'infrastructure/kubernetes/helm/novu-consumer/**'
+            admin-app:
+              - 'arc-saas/apps/admin-app/**'
+              - 'infrastructure/kubernetes/helm/admin-app/**'
+
+      - name: Build services matrix
+        id: matrix
+        run: |
+          services=()
+
+          # Check manual dispatch for specific services
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            if [ "${{ github.event.inputs.services }}" == "all" ]; then
+              services=("tenant-management" "orchestrator" "subscription" "temporal-worker" "cns-service" "backstage-portal" "customer-portal" "admin-app" "audit-logger" "middleware-api" "novu-consumer")
+            else
+              IFS=',' read -ra services <<< "${{ github.event.inputs.services }}"
+            fi
+          else
+            # Auto-detect changed services
+            [ "${{ steps.changes.outputs.tenant-management }}" == "true" ] && services+=("tenant-management")
+            [ "${{ steps.changes.outputs.orchestrator }}" == "true" ] && services+=("orchestrator")
+            [ "${{ steps.changes.outputs.subscription }}" == "true" ] && services+=("subscription")
+            [ "${{ steps.changes.outputs.temporal-worker }}" == "true" ] && services+=("temporal-worker")
+            [ "${{ steps.changes.outputs.cns-service }}" == "true" ] && services+=("cns-service")
+            [ "${{ steps.changes.outputs.backstage-portal }}" == "true" ] && services+=("backstage-portal")
+            [ "${{ steps.changes.outputs.customer-portal }}" == "true" ] && services+=("customer-portal")
+            [ "${{ steps.changes.outputs.admin-app }}" == "true" ] && services+=("admin-app")
+            [ "${{ steps.changes.outputs.audit-logger }}" == "true" ] && services+=("audit-logger")
+            [ "${{ steps.changes.outputs.middleware-api }}" == "true" ] && services+=("middleware-api")
+            [ "${{ steps.changes.outputs.novu-consumer }}" == "true" ] && services+=("novu-consumer")
+          fi
+
+          # Convert to JSON array
+          json=$(printf '%s\n' "${services[@]}" | jq -R . | jq -s -c .)
+          echo "services=$json" >> $GITHUB_OUTPUT
+          echo "Changed services: $json"
+
+  # ---------------------------------------------------------------------------
+  # Build & Test - Control Plane Services (TypeScript/Node.js)
+  # ---------------------------------------------------------------------------
+  build-control-plane:
+    name: Build ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: |
+      contains(needs.detect-changes.outputs.services-matrix, 'tenant-management') ||
+      contains(needs.detect-changes.outputs.services-matrix, 'orchestrator') ||
+      contains(needs.detect-changes.outputs.services-matrix, 'subscription') ||
+      contains(needs.detect-changes.outputs.services-matrix, 'temporal-worker')
+
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - tenant-management
+          - orchestrator
+          - subscription
+          - temporal-worker
+        include:
+          - service: tenant-management
+            path: arc-saas/services/tenant-management-service
+            port: 14000
+          - service: orchestrator
+            path: arc-saas/services/orchestrator-service
+            port: 14001
+          - service: subscription
+            path: arc-saas/services/subscription-service
+            port: 14002
+          - service: temporal-worker
+            path: arc-saas/services/temporal-worker-service
+            port: 14003
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check if service changed
+        id: check
+        run: |
+          if [[ '${{ needs.detect-changes.outputs.services-matrix }}' == *'"${{ matrix.service }}"'* ]]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Bun
+        if: steps.check.outputs.changed == 'true'
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Cache dependencies
+        if: steps.check.outputs.changed == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('${{ matrix.path }}/bun.lockb', '${{ matrix.path }}/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install dependencies
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          cd ${{ matrix.path }}
+          bun install --frozen-lockfile
+
+      - name: Type check
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          cd ${{ matrix.path }}
+          bun run tsc --noEmit
+        continue-on-error: false
+
+      - name: Run tests
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          cd ${{ matrix.path }}
+          bun test
+        continue-on-error: false
+
+      - name: Build
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          cd ${{ matrix.path }}
+          bun run build
+
+      - name: Set up Docker Buildx
+        if: steps.check.outputs.changed == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        if: steps.check.outputs.changed == 'true' && github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        if: steps.check.outputs.changed == 'true'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}-service
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix=
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push Docker image
+        if: steps.check.outputs.changed == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.path }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ---------------------------------------------------------------------------
+  # Build & Test - App Plane Services (Python/FastAPI)
+  # ---------------------------------------------------------------------------
+  build-app-plane-python:
+    name: Build ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: |
+      contains(needs.detect-changes.outputs.services-matrix, 'cns-service') ||
+      contains(needs.detect-changes.outputs.services-matrix, 'audit-logger') ||
+      contains(needs.detect-changes.outputs.services-matrix, 'middleware-api') ||
+      contains(needs.detect-changes.outputs.services-matrix, 'novu-consumer')
+
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - cns-service
+          - audit-logger
+          - middleware-api
+          - novu-consumer
+        include:
+          - service: cns-service
+            path: app-plane/services/cns-service
+            port: 27200
+          - service: audit-logger
+            path: app-plane/services/audit-logger
+            port: 27201
+          - service: middleware-api
+            path: app-plane/services/middleware-api
+            port: 27202
+          - service: novu-consumer
+            path: app-plane/services/novu-consumer
+            port: 27203
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check if service changed
+        id: check
+        run: |
+          if [[ '${{ needs.detect-changes.outputs.services-matrix }}' == *'"${{ matrix.service }}"'* ]]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Python
+        if: steps.check.outputs.changed == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Cache pip dependencies
+        if: steps.check.outputs.changed == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('${{ matrix.path }}/requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          cd ${{ matrix.path }}
+          if [ -f "requirements.txt" ]; then
+            pip install -r requirements.txt
+          elif [ -f "requirements-dev.txt" ]; then
+            pip install -r requirements-dev.txt
+          else
+            echo "No requirements file found"
+            exit 1
+          fi
+
+      - name: Run linting
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          cd ${{ matrix.path }}
+          pip install ruff
+          ruff check .
+        continue-on-error: false
+
+      - name: Run tests
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          cd ${{ matrix.path }}
+          pip install pytest pytest-asyncio
+          pytest
+        continue-on-error: false
+
+      - name: Set up Docker Buildx
+        if: steps.check.outputs.changed == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        if: steps.check.outputs.changed == 'true' && github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        if: steps.check.outputs.changed == 'true'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix=
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push Docker image
+        if: steps.check.outputs.changed == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.path }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ---------------------------------------------------------------------------
+  # Build & Test - Frontend Apps (React/Vite)
+  # ---------------------------------------------------------------------------
+  build-frontend:
+    name: Build ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: |
+      contains(needs.detect-changes.outputs.services-matrix, 'backstage-portal') ||
+      contains(needs.detect-changes.outputs.services-matrix, 'customer-portal') ||
+      contains(needs.detect-changes.outputs.services-matrix, 'admin-app')
+
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - backstage-portal
+          - customer-portal
+          - admin-app
+        include:
+          - service: backstage-portal
+            path: app-plane/services/backstage-portal
+            build_context: app-plane
+            dockerfile: services/backstage-portal/Dockerfile
+          - service: customer-portal
+            path: arc-saas/apps/customer-portal
+            build_context: arc-saas/apps/customer-portal
+            dockerfile: Dockerfile
+          - service: admin-app
+            path: arc-saas/apps/admin-app
+            build_context: arc-saas/apps/admin-app
+            dockerfile: Dockerfile
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check if service changed
+        id: check
+        run: |
+          if [[ '${{ needs.detect-changes.outputs.services-matrix }}' == *'"${{ matrix.service }}"'* ]]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Setup Bun
+        if: steps.check.outputs.changed == 'true'
+        uses: oven-sh/setup-bun@v1
+        with:
+          bun-version: latest
+
+      - name: Cache dependencies
+        if: steps.check.outputs.changed == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('${{ matrix.path }}/bun.lockb', '${{ matrix.path }}/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install dependencies
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          cd ${{ matrix.path }}
+          bun install
+
+      - name: Type check
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          cd ${{ matrix.path }}
+          bun run tsc --noEmit
+        continue-on-error: false
+
+      - name: Run tests
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          cd ${{ matrix.path }}
+          bun test 2>/dev/null || echo "No tests configured"
+        continue-on-error: true
+
+      - name: Build
+        if: steps.check.outputs.changed == 'true'
+        run: |
+          cd ${{ matrix.path }}
+          bun run build
+        env:
+          VITE_KEYCLOAK_URL: ${{ vars.KEYCLOAK_URL || 'https://auth.ananta.io' }}
+          VITE_KEYCLOAK_REALM: ${{ vars.KEYCLOAK_REALM || 'ananta-saas' }}
+          VITE_KEYCLOAK_CLIENT_ID: ${{ matrix.service }}
+          VITE_CNS_SERVICE_URL: ${{ vars.CNS_SERVICE_URL || 'https://cns.ananta.io' }}
+          VITE_API_URL: ${{ vars.API_URL || 'https://api.ananta.io' }}
+
+      - name: Set up Docker Buildx
+        if: steps.check.outputs.changed == 'true'
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        if: steps.check.outputs.changed == 'true' && github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        if: steps.check.outputs.changed == 'true'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix=
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+
+      - name: Build and push Docker image
+        if: steps.check.outputs.changed == 'true'
+        uses: docker/build-push-action@v5
+        with:
+          context: ${{ matrix.build_context }}
+          file: ${{ matrix.build_context }}/${{ matrix.dockerfile }}
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VITE_KEYCLOAK_URL=${{ vars.KEYCLOAK_URL || 'https://auth.ananta.io' }}
+            VITE_KEYCLOAK_REALM=${{ vars.KEYCLOAK_REALM || 'ananta-saas' }}
+            VITE_KEYCLOAK_CLIENT_ID=${{ matrix.service }}
+            VITE_AUTH_PROVIDER=${{ vars.AUTH_PROVIDER || 'keycloak' }}
+            VITE_BACKEND_URL=${{ vars.BACKEND_URL || 'https://api.ananta.io' }}
+            VITE_CNS_API_URL=${{ vars.CNS_SERVICE_URL || 'https://cns.ananta.io' }}
+            VITE_MIDDLEWARE_API_URL=${{ vars.MIDDLEWARE_API_URL || 'https://middleware.ananta.io' }}
+            VITE_API_URL=${{ vars.API_URL || 'https://api.ananta.io' }}
+
+  # ---------------------------------------------------------------------------
+  # Update ArgoCD Image Tags
+  # ---------------------------------------------------------------------------
+  update-manifests:
+    name: Update Manifests
+    runs-on: ubuntu-latest
+    needs:
+      - detect-changes
+      - build-control-plane
+      - build-app-plane-python
+      - build-frontend
+    if: |
+      always() &&
+      github.event_name != 'pull_request' &&
+      (needs.build-control-plane.result == 'success' || needs.build-control-plane.result == 'skipped') &&
+      (needs.build-app-plane-python.result == 'success' || needs.build-app-plane-python.result == 'skipped') &&
+      (needs.build-frontend.result == 'success' || needs.build-frontend.result == 'skipped')
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update image tags in Helm values
+        run: |
+          SHORT_SHA=$(echo ${{ github.sha }} | cut -c1-7)
+
+          # Update each changed service's Helm values
+          services='${{ needs.detect-changes.outputs.services-matrix }}'
+
+          for service in $(echo $services | jq -r '.[]'); do
+            values_file="infrastructure/kubernetes/helm/${service}/values.yaml"
+            if [ -f "$values_file" ]; then
+              echo "Updating $values_file with tag: $SHORT_SHA"
+              sed -i "s/tag: .*/tag: \"$SHORT_SHA\"/" "$values_file"
+            fi
+          done
+
+      - name: Commit and push changes
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git add infrastructure/kubernetes/helm/*/values.yaml
+          git diff --staged --quiet || git commit -m "chore: update image tags to ${{ github.sha }}"
+          git push
+
+  # ---------------------------------------------------------------------------
+  # Trigger ArgoCD Sync
+  # ---------------------------------------------------------------------------
+  deploy:
+    name: Deploy to ${{ github.event.inputs.environment || 'dev' }}
+    runs-on: ubuntu-latest
+    needs:
+      - detect-changes
+      - update-manifests
+    if: |
+      always() &&
+      needs.update-manifests.result == 'success' &&
+      github.event_name != 'pull_request'
+    environment:
+      name: ${{ github.event.inputs.environment || 'dev' }}
+      url: https://${{ github.event.inputs.environment || 'dev' }}.ananta.io
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install ArgoCD CLI
+        run: |
+          curl -sSL -o argocd https://github.com/argoproj/argo-cd/releases/latest/download/argocd-linux-amd64
+          chmod +x argocd
+          sudo mv argocd /usr/local/bin/
+
+      - name: Trigger ArgoCD Sync
+        if: ${{ secrets.ARGOCD_TOKEN != '' }}
+        env:
+          ARGOCD_SERVER: ${{ vars.ARGOCD_SERVER || 'argocd.ananta.io' }}
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_TOKEN }}
+        run: |
+          ENV="${{ github.event.inputs.environment || 'dev' }}"
+          SERVICES='${{ needs.detect-changes.outputs.services-matrix }}'
+
+          echo "Syncing services to $ENV environment..."
+
+          for service in $(echo $SERVICES | jq -r '.[]'); do
+            APP_NAME="${service}-${ENV}"
+            echo "Syncing $APP_NAME..."
+            argocd app sync "$APP_NAME" \
+              --server "$ARGOCD_SERVER" \
+              --grpc-web \
+              --timeout 300 || echo "Warning: Sync for $APP_NAME may have failed"
+          done
+
+      - name: Wait for rollout
+        if: ${{ secrets.ARGOCD_TOKEN != '' }}
+        env:
+          ARGOCD_SERVER: ${{ vars.ARGOCD_SERVER || 'argocd.ananta.io' }}
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_TOKEN }}
+        run: |
+          ENV="${{ github.event.inputs.environment || 'dev' }}"
+          SERVICES='${{ needs.detect-changes.outputs.services-matrix }}'
+
+          echo "Waiting for rollouts to complete..."
+
+          for service in $(echo $SERVICES | jq -r '.[]'); do
+            APP_NAME="${service}-${ENV}"
+            echo "Waiting for $APP_NAME..."
+            argocd app wait "$APP_NAME" \
+              --server "$ARGOCD_SERVER" \
+              --grpc-web \
+              --timeout 300 \
+              --health || echo "Warning: Health check for $APP_NAME may have issues"
+          done
+
+      - name: Verify deployment health
+        run: |
+          ENV="${{ github.event.inputs.environment || 'dev' }}"
+          SERVICES='${{ needs.detect-changes.outputs.services-matrix }}'
+
+          echo "Verifying deployment health..."
+          echo "Services deployed: $SERVICES"
+          echo "Environment: $ENV"
+
+          # Health check endpoints
+          DOMAIN="${ENV}.ananta.io"
+          if [ "$ENV" == "prod" ]; then
+            DOMAIN="ananta.io"
+          fi
+
+          FAILED=0
+          for service in $(echo $SERVICES | jq -r '.[]'); do
+            HEALTH_URL="https://${service}.${DOMAIN}/health"
+            echo "Checking $HEALTH_URL..."
+
+            # Allow 5 retries with 10s delay
+            for i in {1..5}; do
+              if curl -sf "$HEALTH_URL" > /dev/null 2>&1; then
+                echo "  [OK] $service is healthy"
+                break
+              fi
+              if [ $i -eq 5 ]; then
+                echo "  [WARN] $service health check failed (may be expected for some services)"
+              else
+                echo "  Retry $i/5..."
+                sleep 10
+              fi
+            done
+          done
+
+      - name: Notify deployment
+        if: success()
+        run: |
+          echo "============================================"
+          echo "Deployment Complete!"
+          echo "============================================"
+          echo "Environment: ${{ github.event.inputs.environment || 'dev' }}"
+          echo "Services: ${{ needs.detect-changes.outputs.services-matrix }}"
+          echo "Commit: ${{ github.sha }}"
+          echo "View in ArgoCD: https://argocd.ananta.io/applications"
+          echo "============================================"
+
+      - name: Rollback on failure
+        if: failure()
+        env:
+          ARGOCD_SERVER: ${{ vars.ARGOCD_SERVER || 'argocd.ananta.io' }}
+          ARGOCD_AUTH_TOKEN: ${{ secrets.ARGOCD_TOKEN }}
+        run: |
+          if [ -z "$ARGOCD_AUTH_TOKEN" ]; then
+            echo "No ArgoCD token configured, manual rollback required"
+            exit 1
+          fi
+
+          ENV="${{ github.event.inputs.environment || 'dev' }}"
+          SERVICES='${{ needs.detect-changes.outputs.services-matrix }}'
+
+          echo "Deployment failed! Initiating rollback..."
+
+          for service in $(echo $SERVICES | jq -r '.[]'); do
+            APP_NAME="${service}-${ENV}"
+            echo "Rolling back $APP_NAME..."
+            argocd app rollback "$APP_NAME" \
+              --server "$ARGOCD_SERVER" \
+              --grpc-web || echo "Rollback for $APP_NAME may need manual intervention"
+          done

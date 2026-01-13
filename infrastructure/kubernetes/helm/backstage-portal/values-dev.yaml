@@ -1,0 +1,40 @@
+# =============================================================================
+# Backstage Portal - Development Environment Values
+# =============================================================================
+
+replicaCount: 1
+
+image:
+  repository: ghcr.io/siddh7007/ananta/backstage-portal
+  tag: "develop"
+  pullPolicy: Always
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-staging
+  hosts:
+    - host: backstage.dev.ananta.io
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: backstage-portal-tls
+      hosts:
+        - backstage.dev.ananta.io
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 200m
+    memory: 256Mi
+
+config:
+  keycloak:
+    url: "https://auth.dev.ananta.io"
+    realm: "ananta-saas"
+    clientId: "backstage-portal"
+  cnsServiceUrl: "https://cns.dev.ananta.io"

@@ -19,8 +19,8 @@ spec:
 
   # Source repositories
   sourceRepos:
-    - 'https://github.com/ananta-platform/*'
-    - 'https://github.com/ananta-platform/ananta-platform-saas.git'
+    - 'https://github.com/siddh7007/Ananta-Platform-Saas.git'
+    - 'ghcr.io/siddh7007/ananta/*'
     - 'https://charts.bitnami.com/bitnami'
     - 'https://helm.releases.hashicorp.com'
     - 'https://charts.jetstack.io'
@@ -31,22 +31,16 @@ spec:
 
   # Destination clusters and namespaces
   destinations:
-    # Development
-    - namespace: ananta-dev
-      server: https://kubernetes.default.svc
-    - namespace: ananta-dev-*
+    # Control Plane
+    - namespace: control-plane
       server: https://kubernetes.default.svc
 
-    # Staging
-    - namespace: ananta-staging
-      server: https://kubernetes.default.svc
-    - namespace: ananta-staging-*
+    # App Plane
+    - namespace: app-plane
       server: https://kubernetes.default.svc
 
-    # Production
-    - namespace: ananta-prod
-      server: https://kubernetes.default.svc
-    - namespace: ananta-prod-*
+    # ArgoCD namespace (for self-management)
+    - namespace: argocd
       server: https://kubernetes.default.svc
 
     # Shared services

@@ -1,0 +1,85 @@
+# =============================================================================
+# ArgoCD Application - Backstage Portal
+# =============================================================================
+# Internal staff administration portal for platform operations
+# =============================================================================
+
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: backstage-portal
+  namespace: argocd
+  labels:
+    app.kubernetes.io/name: backstage-portal
+    app.kubernetes.io/component: frontend
+    app.kubernetes.io/part-of: app-plane
+    environment: local
+  annotations:
+    argocd.argoproj.io/sync-wave: "15"
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: default
+
+  source:
+    repoURL: https://github.com/siddh7007/Ananta-Platform-Saas.git
+    targetRevision: main
+    path: infrastructure/kubernetes/helm/backstage-portal
+
+    helm:
+      releaseName: backstage-portal
+      values: |
+        replicaCount: 1
+
+        image:
+          repository: ananta/backstage-portal
+          tag: "local"
+          pullPolicy: Never
+
+        service:
+          type: ClusterIP
+          port: 27300
+          targetPort: 80
+
+        ingress:
+          enabled: true
+          className: "traefik"
+          hosts:
+            - host: backstage.localhost
+              paths:
+                - path: /
+                  pathType: Prefix
+
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 200m
+            memory: 256Mi
+
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: app-plane
+
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+  revisionHistoryLimit: 5
+
+  info:
+    - name: Description
+      value: Internal staff administration portal
+    - name: Team
+      value: platform-team
