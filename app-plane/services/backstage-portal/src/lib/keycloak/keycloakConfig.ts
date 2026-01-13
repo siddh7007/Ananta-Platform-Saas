@@ -1,21 +1,25 @@
 /**
- * Keycloak Configuration - Components Platform SSO
+ * Keycloak Configuration - Staff Tenant SSO (ananta-saas realm)
  *
- * Single Sign-On across all portals:
- * - backstage-portal (Admin/Staff)
- * - customer-portal (Customers)
- * - dashboard (Unified)
- * - cns-dashboard (CNS Admin)
+ * This portal is ONLY accessible by users of the default staff tenant.
+ * Uses Keycloak ananta-saas realm for authentication.
+ *
+ * Required roles: super_admin, admin, or engineer
  */
 
 import Keycloak from 'keycloak-js';
 
 // Keycloak configuration from environment
+// Default to ananta-saas realm (staff tenant)
 export const keycloakConfig = {
   url: import.meta.env.VITE_KEYCLOAK_URL || 'http://localhost:8180',
-  realm: import.meta.env.VITE_KEYCLOAK_REALM || 'components-platform',
+  realm: import.meta.env.VITE_KEYCLOAK_REALM || 'ananta-saas',
   clientId: import.meta.env.VITE_KEYCLOAK_CLIENT_ID || 'backstage-portal',
 };
+
+// Required roles for access (from environment or defaults)
+const requiredRolesEnv = import.meta.env.VITE_REQUIRED_ROLES || 'super_admin,admin,engineer';
+export const REQUIRED_ROLES: string[] = requiredRolesEnv.split(',').map((r: string) => r.trim());
 
 // Create Keycloak instance (singleton)
 let keycloakInstance: Keycloak | null = null;
@@ -40,6 +44,7 @@ export const initKeycloak = async (): Promise<boolean> => {
     });
 
     console.log('[Keycloak] Initialized, authenticated:', authenticated);
+    console.log('[Keycloak] Realm:', keycloakConfig.realm);
 
     // Setup token refresh
     if (authenticated) {
@@ -88,20 +93,26 @@ export const getUserRoles = (): string[] => {
   return [...realmRoles, ...clientRoles];
 };
 
+// Check if user has ANY of the required roles
+export const hasRequiredRole = (): boolean => {
+  const userRoles = getUserRoles();
+  return REQUIRED_ROLES.some(role => userRoles.includes(role));
+};
+
 // Check if user has specific role
 export const hasRole = (role: string): boolean => {
   return getUserRoles().includes(role);
 };
 
-// Check if user is admin (has admin or super-admin role)
+// Check if user is admin (has admin or super_admin role)
 export const isAdmin = (): boolean => {
   const roles = getUserRoles();
-  return roles.includes('admin') || roles.includes('super-admin');
+  return roles.includes('admin') || roles.includes('super_admin') || roles.includes('super-admin');
 };
 
 // Check if user is super admin
 export const isSuperAdmin = (): boolean => {
-  return hasRole('super-admin');
+  return hasRole('super_admin') || hasRole('super-admin');
 };
 
 // Get user info from token
@@ -111,13 +122,17 @@ export const getUserInfo = () => {
 
   if (!token) return null;
 
+  const givenName = token.given_name || '';
+  const familyName = token.family_name || '';
+  const fullNameFromParts = (givenName + ' ' + familyName).trim();
+
   return {
     id: token.sub,
     username: token.preferred_username,
     email: token.email,
-    firstName: token.given_name,
-    lastName: token.family_name,
-    fullName: token.name || `${token.given_name || ''} ${token.family_name || ''}`.trim(),
+    firstName: givenName,
+    lastName: familyName,
+    fullName: token.name || fullNameFromParts,
     roles: getUserRoles(),
   };
 };

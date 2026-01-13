@@ -1,11 +1,12 @@
 /**
- * Keycloak Auth Provider for React Admin
+ * Keycloak Auth Provider for React Admin - Staff Tenant Only
  *
- * Alternative to Auth0 - configured via VITE_AUTH_PROVIDER=keycloak
+ * RESTRICTED ACCESS: Only users from the ananta-saas realm (staff tenant)
+ * with required roles (super_admin, admin, engineer) can access this portal.
  *
  * Features:
- * - SSO across all portals (same credentials)
- * - Role-based access control (super-admin, admin, staff)
+ * - SSO with ananta-saas realm (staff tenant)
+ * - Role-based access control
  * - Automatic token refresh
  * - Silent SSO check
  */
@@ -16,9 +17,12 @@ import {
   initKeycloak,
   getUserInfo,
   getUserRoles,
+  hasRequiredRole,
   login,
   logout,
   getAccessToken,
+  REQUIRED_ROLES,
+  keycloakConfig,
 } from './keycloakConfig';
 
 // Track initialization state
@@ -34,6 +38,7 @@ const ensureInitialized = async (): Promise<boolean> => {
 
 /**
  * Keycloak Auth Provider for React Admin
+ * Restricted to staff tenant users only
  */
 export const keycloakAuthProvider: AuthProvider = {
   /**
@@ -47,6 +52,15 @@ export const keycloakAuthProvider: AuthProvider = {
       login();
       // This will redirect, so we return a never-resolving promise
       return new Promise(() => {});
+    }
+
+    // Check if user has required role after login
+    if (!hasRequiredRole()) {
+      console.error('[Auth] Access denied - user lacks required roles:', REQUIRED_ROLES);
+      logout();
+      return Promise.reject({ 
+        message: 'Access denied. This portal is restricted to staff users with roles: ' + REQUIRED_ROLES.join(', ')
+      });
     }
 
     return Promise.resolve();
@@ -69,13 +83,23 @@ export const keycloakAuthProvider: AuthProvider = {
   },
 
   /**
-   * Check if user is authenticated
+   * Check if user is authenticated AND has required role
    */
   checkAuth: async () => {
     const authenticated = await ensureInitialized();
     const keycloak = getKeycloak();
 
     if (authenticated && keycloak.authenticated) {
+      // Also check required roles
+      if (!hasRequiredRole()) {
+        console.error('[Auth] User authenticated but lacks required roles');
+        console.error('[Auth] User roles:', getUserRoles());
+        console.error('[Auth] Required roles:', REQUIRED_ROLES);
+        console.error('[Auth] Realm:', keycloakConfig.realm);
+        return Promise.reject({ 
+          message: 'Access denied. This portal requires one of: ' + REQUIRED_ROLES.join(', ')
+        });
+      }
       return Promise.resolve();
     }
 
@@ -167,14 +191,15 @@ export const hasRole = async (role: string): Promise<boolean> => {
  */
 export const isAdmin = async (): Promise<boolean> => {
   const roles = getUserRoles();
-  return roles.includes('admin') || roles.includes('super-admin');
+  return roles.includes('admin') || roles.includes('super_admin') || roles.includes('super-admin');
 };
 
 /**
  * Check if current user is super admin
  */
 export const isSuperAdmin = async (): Promise<boolean> => {
-  return getUserRoles().includes('super-admin');
+  const roles = getUserRoles();
+  return roles.includes('super_admin') || roles.includes('super-admin');
 };
 
 export default keycloakAuthProvider;

@@ -1,5 +1,4 @@
 import { Admin, Resource } from 'react-admin';
-import { Route } from 'react-router-dom';
 import { Auth0Provider } from '@auth0/auth0-react';
 import { Auth0Login } from './lib/auth';
 
@@ -41,11 +40,12 @@ import { cyberpunkTheme } from './theme';
 /**
  * Backstage Admin Portal - React Admin App
  *
- * Platform management and monitoring interface for PLATFORM ADMINS ONLY:
+ * RESTRICTED ACCESS: Only users from the default staff tenant (ananta-saas realm)
+ * with required roles (super_admin, admin, engineer) can access this portal.
  *
  * AUTH PROVIDERS (configured via VITE_AUTH_PROVIDER):
- * - auth0: Auth0 with organization enforcement (default)
- * - keycloak: Keycloak SSO (Components Platform realm)
+ * - keycloak: Keycloak SSO with ananta-saas realm (DEFAULT - staff tenant only)
+ * - auth0: Auth0 with organization enforcement (legacy)
  *
  * Features:
  * - Docker Container Management: Control panel with start/stop/restart/logs
@@ -56,11 +56,11 @@ import { cyberpunkTheme } from './theme';
  * - Alert Monitoring: Track component alerts
  * - Material-UI theming matching V1 colors
  *
- * Port: 27530 (Backstage Admin Portal)
+ * Port: 27510 (Backstage Admin Portal)
  */
 
-// Get auth provider from environment (default to auth0 for backward compatibility)
-const AUTH_PROVIDER = import.meta.env.VITE_AUTH_PROVIDER || 'auth0';
+// Get auth provider from environment (default to keycloak for staff tenant)
+const AUTH_PROVIDER = import.meta.env.VITE_AUTH_PROVIDER || 'keycloak';
 
 /**
  * Admin Resources (shared between auth providers)
@@ -101,7 +101,7 @@ const AdminResources = () => (
 );
 
 /**
- * Auth0 App Wrapper
+ * Auth0 App Wrapper (Legacy)
  */
 const Auth0App = () => {
   const auth0Domain = import.meta.env.VITE_AUTH0_DOMAIN;
@@ -112,7 +112,7 @@ const Auth0App = () => {
       <div style={{ padding: '20px', color: 'red' }}>
         <h1>Configuration Error</h1>
         <p>Missing Auth0 configuration. Please set VITE_AUTH0_DOMAIN and VITE_AUTH0_CLIENT_ID.</p>
-        <p>Or switch to Keycloak by setting VITE_AUTH_PROVIDER=keycloak</p>
+        <p>Or switch to Keycloak by setting VITE_AUTH_PROVIDER=keycloak (recommended)</p>
       </div>
     );
   }
@@ -123,7 +123,7 @@ const Auth0App = () => {
       clientId={auth0ClientId}
       authorizationParams={{
         redirect_uri: window.location.origin,
-        organization: 'org_oNtVXvVrzXz1ubua', // Platform admin organization
+        organization: import.meta.env.VITE_AUTH0_ORGANIZATION,
       }}
     >
       <Auth0StateSync>
@@ -144,15 +144,22 @@ const Auth0App = () => {
 };
 
 /**
- * Keycloak App Wrapper
- * Uses SSO with components-platform realm for unified authentication
+ * Keycloak App Wrapper (Default)
+ * Uses SSO with ananta-saas realm for staff tenant authentication
+ * Only users with super_admin, admin, or engineer roles can access
  */
 const KeycloakApp = () => {
-  // Log Keycloak config for debugging (defaults are fine)
-  console.log('[KeycloakApp] Keycloak SSO enabled with config:', {
-    url: import.meta.env.VITE_KEYCLOAK_URL || 'http://localhost:8180',
-    realm: import.meta.env.VITE_KEYCLOAK_REALM || 'components-platform',
-    clientId: import.meta.env.VITE_KEYCLOAK_CLIENT_ID || 'backstage-portal',
+  const keycloakUrl = import.meta.env.VITE_KEYCLOAK_URL || 'http://localhost:8180';
+  const keycloakRealm = import.meta.env.VITE_KEYCLOAK_REALM || 'ananta-saas';
+  const keycloakClientId = import.meta.env.VITE_KEYCLOAK_CLIENT_ID || 'backstage-portal';
+  const requiredRoles = import.meta.env.VITE_REQUIRED_ROLES || 'super_admin,admin,engineer';
+
+  // Log Keycloak config for debugging
+  console.log('[KeycloakApp] Staff Tenant SSO enabled:', {
+    url: keycloakUrl,
+    realm: keycloakRealm,
+    clientId: keycloakClientId,
+    requiredRoles: requiredRoles,
   });
 
   return (
@@ -162,7 +169,7 @@ const KeycloakApp = () => {
       theme={cyberpunkTheme}
       dashboard={AdminDashboard}
       loginPage={KeycloakLogin}
-      title="Backstage Admin Portal"
+      title="Backstage Admin Portal - Staff Only"
       disableTelemetry
     >
       <AdminResources />
@@ -172,17 +179,18 @@ const KeycloakApp = () => {
 
 /**
  * Main App Component
- * Selects auth provider based on VITE_AUTH_PROVIDER environment variable
+ * Defaults to Keycloak (staff tenant) - Auth0 available as legacy option
  */
 function App() {
-  console.log(`[App] Auth provider: ${AUTH_PROVIDER}`);
+  console.log('[App] Auth provider:', AUTH_PROVIDER);
+  console.log('[App] This portal is restricted to staff tenant users only');
 
-  if (AUTH_PROVIDER === 'keycloak') {
-    return <KeycloakApp />;
+  if (AUTH_PROVIDER === 'auth0') {
+    return <Auth0App />;
   }
 
-  // Default to Auth0
-  return <Auth0App />;
+  // Default to Keycloak (staff tenant)
+  return <KeycloakApp />;
 }
 
 export default App;
