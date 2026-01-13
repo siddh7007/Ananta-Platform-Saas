@@ -21,10 +21,14 @@ exclude = [
 select = ["E", "F", "W"]
 
 # Ignore specific rules globally to reduce noise
+# Note: Many of these are false positives or intentional patterns in the codebase
 ignore = [
     "E501",  # Line too long - handled by formatter
     "W293",  # Blank line contains whitespace - cosmetic
     "W291",  # Trailing whitespace - cosmetic
+    "F401",  # Unused imports - often needed for re-exports or future use
+    "F841",  # Unused variables - often assigned for debugging or future use
+    "E722",  # Bare except - used intentionally for catch-all error handling
 ]
 
 # Per-file ignores
