@@ -48,9 +48,9 @@ env:
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ${{ github.repository_owner }}/ananta
 
-# GitHub token permissions for GHCR push
+# GitHub token permissions for GHCR push and manifest updates
 permissions:
-  contents: read
+  contents: write
   packages: write
 
 # =============================================================================
