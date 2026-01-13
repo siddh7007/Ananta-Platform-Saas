@@ -400,12 +400,34 @@ class Settings(BaseSettings):
     # ===================================
     # CORS Configuration
     # ===================================
-    # NOTE: CORS_ORIGINS environment variable is causing Pydantic parsing issues
-    # Using defaults instead
+    # TRAEFIK_PORT: Single port variable for all Traefik routing (default: 8889)
+    # Change this ONE value to switch Traefik port everywhere
+    traefik_port: int = Field(default=8889, alias="TRAEFIK_PORT")
+
+    # CORS_ORIGINS: Comma-separated list of allowed origins (env var or default)
+    # Example: CORS_ORIGINS=http://cbp.localhost:8888,http://localhost:27100
+    # If not set, uses comprehensive defaults for local development
+    # NOTE: Cannot use underscore prefix (_field) - Pydantic BaseSettings ignores private fields for env var mapping
+    cors_origins_raw: str = Field(default="", alias="CORS_ORIGINS")
+
     @property
     def cors_origins(self) -> List[str]:
-        """Get CORS origins list"""
-        return [
+        """Get CORS origins list from env var or use defaults"""
+        # If env var is set, parse it (comma-separated)
+        if self.cors_origins_raw:
+            return [origin.strip() for origin in self.cors_origins_raw.split(",") if origin.strip()]
+
+        # Traefik hostnames
+        traefik_hosts = ["cbp", "cns", "dashboard", "studio", "novu", "novu-api"]
+        port = self.traefik_port
+
+        # Generate Traefik origins dynamically from TRAEFIK_PORT
+        traefik_origins = [f"http://{host}.localhost:{port}" for host in traefik_hosts]
+        # Also include port 80 (no port in URL)
+        traefik_origins_noport = [f"http://{host}.localhost" for host in traefik_hosts[:2]]  # cbp, cns only
+
+        # Direct localhost origins (port-forwarded) - these are fixed
+        direct_origins = [
             "http://localhost:27500",  # Main dashboard via Traefik
             "http://localhost:27510",  # Customer Portal (direct Vite dev)
             "http://localhost:27100",  # Customer Portal (Docker)
@@ -416,6 +438,8 @@ class Settings(BaseSettings):
             "http://localhost:27400",  # Dashboard (Next.js)
             "http://localhost:3000",   # Grafana
         ]
+
+        return traefik_origins + traefik_origins_noport + direct_origins
 
     cors_allow_credentials: bool = True
 
