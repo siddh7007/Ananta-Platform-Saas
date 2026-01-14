@@ -226,6 +226,9 @@ jobs:
         run: |
           cd ${{ matrix.path }}
           bun install --frozen-lockfile
+        env:
+          # Skip husky install in CI - .git is at repo root, not in subdirectory
+          HUSKY: 0
 
       - name: Type check
         if: steps.check.outputs.changed == 'true'
@@ -246,6 +249,9 @@ jobs:
         run: |
           cd ${{ matrix.path }}
           bun run build
+        env:
+          # Skip husky install in CI
+          HUSKY: 0
 
       - name: Set up Docker Buildx
         if: steps.check.outputs.changed == 'true'
@@ -476,6 +482,9 @@ jobs:
         run: |
           cd ${{ matrix.path }}
           bun install
+        env:
+          # Skip husky install in CI - .git is at repo root, not in subdirectory
+          HUSKY: 0
 
       - name: Type check
         if: steps.check.outputs.changed == 'true'
@@ -497,6 +506,8 @@ jobs:
           cd ${{ matrix.path }}
           bun run build
         env:
+          # Skip husky install in CI
+          HUSKY: 0
           VITE_KEYCLOAK_URL: ${{ vars.KEYCLOAK_URL || 'https://auth.ananta.io' }}
           VITE_KEYCLOAK_REALM: ${{ vars.KEYCLOAK_REALM || 'ananta-saas' }}
           VITE_KEYCLOAK_CLIENT_ID: ${{ matrix.service }}
