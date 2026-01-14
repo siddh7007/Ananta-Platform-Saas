@@ -84,7 +84,7 @@ export function SystemHealthDashboard() {
 
   // Fetch health data from API
   const { data: healthData, refetch: refetchHealth, isLoading } = useCustom({
-    url: "health",
+    url: "/health",
     method: "get",
   });
 
